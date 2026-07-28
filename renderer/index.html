@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- The renderer loads only local files and never touches the network:
+         all Jira traffic goes through IPC to the main process. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none';"
+    />
+    <title>Joggl</title>
+    <link rel="stylesheet" href="css/tokens.css" />
+    <link rel="stylesheet" href="css/app.css" />
+  </head>
+  <body>
+    <div class="app-layout">
+      <!-- ── LEFT PANEL ── -->
+      <div class="left-panel">
+        <div class="omnibar">
+          <div class="omnibar-row">
+            <div class="task-search-wrap">
+              <input
+                id="task-input"
+                type="text"
+                placeholder="Search an issue, or type a name for a local entry…"
+                autocomplete="off"
+              />
+              <div id="task-dropdown" class="task-dropdown hidden"></div>
+            </div>
+            <input
+              id="start-time-input"
+              class="start-time-input"
+              type="text"
+              placeholder="--:--"
+              maxlength="5"
+              title="Start time — set before pressing Start to backdate the entry"
+            />
+            <div id="timer-display">00:00:00</div>
+            <button id="start-stop-btn" class="btn-primary">▶ Start</button>
+          </div>
+        </div>
+
+        <div class="day-header">
+          <div class="day-picker">
+            <button id="prev-day" class="nav-btn" title="Previous day">‹</button>
+            <span id="current-date-label">—</span>
+            <button id="next-day" class="nav-btn" title="Next day">›</button>
+            <button id="today-btn" class="btn-outline">Today</button>
+          </div>
+          <div class="day-header-right">
+            <span id="total-display" class="total-display">Total: 0m</span>
+            <button id="finish-day-btn" class="btn-primary">Finish Day</button>
+            <button id="settings-btn" class="icon-square" title="Settings">⚙</button>
+          </div>
+        </div>
+
+        <div class="pins-bar">
+          <span class="pins-label">Pins</span>
+          <div id="pin-chips" class="pin-chips"></div>
+          <button id="add-pin-btn" class="add-pin-btn">+ Pin issue</button>
+        </div>
+
+        <div id="entry-list"></div>
+
+        <div class="task-panel">
+          <div class="task-panel-hdr">
+            <span>Issues</span>
+            <button id="refresh-tasks-btn" class="add-pin-btn" title="Reload from Jira">↻ Refresh</button>
+            <span class="tt-count" id="task-count">—</span>
+          </div>
+          <div class="task-list" id="task-list">
+            <div class="list-note">Loading…</div>
+          </div>
+        </div>
+
+        <div class="app-footer">
+          <span id="version-label"></span>
+          <span id="conn-label"></span>
+        </div>
+      </div>
+
+      <!-- ── RIGHT PANEL: day view ── -->
+      <div class="right-panel" id="right-panel">
+        <div class="sched-resize-handle" id="sched-resize-handle"></div>
+        <div class="sched-hdr">
+          <span>Day View</span>
+          <div class="sched-zoom">
+            <button class="sched-zoom-btn" id="zoom-out" title="Zoom out">−</button>
+            <span class="sched-zoom-lbl" id="zoom-lbl">1×</span>
+            <button class="sched-zoom-btn" id="zoom-in" title="Zoom in">+</button>
+          </div>
+        </div>
+        <div class="schedule-grid" id="schedule-grid"></div>
+      </div>
+    </div>
+
+    <div id="ctx-menu" class="ctx-menu hidden"></div>
+    <div id="toast-stack" class="toast-stack"></div>
+
+    <!-- Generic decision modal: merge prompt, retry summary. Never for information. -->
+    <div id="modal-overlay" class="overlay hidden">
+      <div class="panel">
+        <div class="panel-head">
+          <h2 id="modal-title">—</h2>
+        </div>
+        <div id="modal-body"></div>
+        <div id="modal-buttons" class="row-btns right"></div>
+      </div>
+    </div>
+
+    <!-- First-run setup wizard -->
+    <div id="setup-overlay" class="overlay hidden">
+      <div class="panel">
+        <div class="panel-head"><h2>Connect Joggl to Jira</h2></div>
+        <p class="panel-lede">
+          Joggl logs your time straight onto Jira Cloud issues. It needs your Jira site, the
+          email address on your Atlassian account, and an API token. Nothing is sent anywhere
+          else, and the token is encrypted by Windows before it is stored.
+        </p>
+
+        <div class="form-row">
+          <label for="setup-url">Jira base URL</label>
+          <input id="setup-url" type="text" placeholder="https://yourcompany.atlassian.net" />
+          <div class="form-hint">The address you use to open Jira in your browser.</div>
+        </div>
+
+        <div class="form-row">
+          <label for="setup-email">Account email</label>
+          <input id="setup-email" type="email" placeholder="you@company.com" />
+        </div>
+
+        <div class="form-row">
+          <label for="setup-token">API token</label>
+          <input id="setup-token" type="password" placeholder="Paste your Atlassian API token" />
+          <div class="form-hint">
+            Create one at
+            <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank"
+              >id.atlassian.com/manage-profile/security/api-tokens</a
+            >
+            — click <em>Create API token</em>, give it any label, then copy the value. It is
+            shown only once.
+          </div>
+        </div>
+
+        <div id="setup-status" class="inline-status"></div>
+
+        <div class="row-btns">
+          <button id="setup-test-btn" class="btn-outline">Test connection</button>
+          <button id="setup-save-btn" class="btn-primary">Save and start</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div id="settings-overlay" class="overlay hidden">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Settings</h2>
+          <button id="close-settings" class="btn-outline">Close</button>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Jira connection</div>
+          <div class="form-row">
+            <label for="cfg-url">Base URL</label>
+            <input id="cfg-url" type="text" placeholder="https://yourcompany.atlassian.net" />
+          </div>
+          <div class="form-row">
+            <label for="cfg-email">Account email</label>
+            <input id="cfg-email" type="email" placeholder="you@company.com" />
+          </div>
+          <div class="form-row">
+            <label for="cfg-token">API token</label>
+            <input id="cfg-token" type="password" placeholder="Leave blank to keep the stored token" />
+            <div class="form-hint" id="cfg-token-hint"></div>
+          </div>
+          <div id="cfg-status" class="inline-status"></div>
+          <div class="row-btns">
+            <button id="cfg-test-btn" class="btn-outline">Test connection</button>
+            <button id="cfg-save-btn" class="btn-primary">Save</button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Task sources (JQL)</div>
+          <div id="source-list"></div>
+          <div class="row-btns">
+            <button id="add-source-btn" class="btn-outline">+ Add source</button>
+            <button id="reset-sources-btn" class="btn-outline">Reset to defaults</button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Appearance</div>
+          <div class="settings-row">
+            <label for="cfg-theme">Theme</label>
+            <select id="cfg-theme">
+              <option value="system">Follow system</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <label for="cfg-fontsize">Day view text</label>
+            <select id="cfg-fontsize">
+              <option value="8">8 px</option>
+              <option value="9">9 px</option>
+              <option value="10">10 px</option>
+              <option value="11">11 px</option>
+              <option value="12">12 px</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pin picker -->
+    <div id="pin-overlay" class="overlay hidden">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Pin an issue</h2>
+          <button id="close-pin" class="btn-outline">Close</button>
+        </div>
+        <div class="form-row">
+          <input id="pin-search-input" type="text" placeholder="Search loaded issues…" autocomplete="off" />
+        </div>
+        <div id="pin-results" class="pin-results"></div>
+      </div>
+    </div>
+
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>

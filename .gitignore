@@ -1,0 +1,30 @@
+# Legacy Super Productivity plugin — local read-only reference, never shipped.
+# Stays untracked until the useful parts are extracted into docs/.
+legacy/
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+release/
+*.zip
+
+# Local runtime data (never commit — may contain Jira credentials)
+userData/
+*.log
+
+# Env / secrets
+.env
+.env.*
+
+# OS & editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Claude Code local overrides
+.claude/settings.local.json

@@ -1,0 +1,145 @@
+/* Joggl's own design tokens — replaces the Super Productivity theme variables
+   the plugin used to inherit. Light is the default; dark follows the OS unless
+   the user pins a theme, in which case [data-theme] on <html> wins. */
+
+:root {
+  --bg: #f6f7f9;
+  --bg-sunken: #eceef2;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+
+  --text: #1a1d21;
+  --text-muted: #666e79;
+  --text-faint: #98a1ac;
+
+  --border: #dfe3e8;
+  --border-strong: #c3cad3;
+
+  --accent: #4f46e5;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(79, 70, 229, 0.12);
+  --accent-softer: rgba(79, 70, 229, 0.06);
+
+  --ok: #15803d;
+  --ok-soft: rgba(22, 163, 74, 0.13);
+  --ok-line: #16a34a;
+
+  --warn: #b45309;
+  --warn-soft: rgba(217, 119, 6, 0.15);
+
+  --danger: #b91c1c;
+  --danger-soft: rgba(220, 38, 38, 0.12);
+  --danger-line: #dc2626;
+
+  --now: #dc2626;
+
+  --shadow-sm: 0 1px 3px rgba(16, 22, 30, 0.1);
+  --shadow-md: 0 3px 10px rgba(16, 22, 30, 0.14);
+  --shadow-lg: 0 10px 30px rgba(16, 22, 30, 0.22);
+
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-pill: 999px;
+
+  --font: system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+
+  --sched-font-size: 9px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a;
+    --bg-sunken: #0f1114;
+    --surface: #1c1f25;
+    --surface-raised: #232730;
+
+    --text: #e4e7ec;
+    --text-muted: #98a1ae;
+    --text-faint: #6b7482;
+
+    --border: #2b3038;
+    --border-strong: #3c434e;
+
+    --accent: #a5b4fc;
+    --accent-contrast: #14161a;
+    --accent-soft: rgba(165, 180, 252, 0.16);
+    --accent-softer: rgba(165, 180, 252, 0.07);
+
+    --ok: #86efac;
+    --ok-soft: rgba(134, 239, 172, 0.14);
+    --ok-line: #4ade80;
+
+    --warn: #fcd34d;
+    --warn-soft: rgba(252, 211, 77, 0.15);
+
+    --danger: #fca5a5;
+    --danger-soft: rgba(252, 165, 165, 0.14);
+    --danger-line: #f87171;
+
+    --now: #f87171;
+
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 3px 10px rgba(0, 0, 0, 0.55);
+    --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* Explicit user choice beats the OS, in both directions. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --bg-sunken: #eceef2;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --text: #1a1d21;
+  --text-muted: #666e79;
+  --text-faint: #98a1ac;
+  --border: #dfe3e8;
+  --border-strong: #c3cad3;
+  --accent: #4f46e5;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(79, 70, 229, 0.12);
+  --accent-softer: rgba(79, 70, 229, 0.06);
+  --ok: #15803d;
+  --ok-soft: rgba(22, 163, 74, 0.13);
+  --ok-line: #16a34a;
+  --warn: #b45309;
+  --warn-soft: rgba(217, 119, 6, 0.15);
+  --danger: #b91c1c;
+  --danger-soft: rgba(220, 38, 38, 0.12);
+  --danger-line: #dc2626;
+  --now: #dc2626;
+  --shadow-sm: 0 1px 3px rgba(16, 22, 30, 0.1);
+  --shadow-md: 0 3px 10px rgba(16, 22, 30, 0.14);
+  --shadow-lg: 0 10px 30px rgba(16, 22, 30, 0.22);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #14161a;
+  --bg-sunken: #0f1114;
+  --surface: #1c1f25;
+  --surface-raised: #232730;
+  --text: #e4e7ec;
+  --text-muted: #98a1ae;
+  --text-faint: #6b7482;
+  --border: #2b3038;
+  --border-strong: #3c434e;
+  --accent: #a5b4fc;
+  --accent-contrast: #14161a;
+  --accent-soft: rgba(165, 180, 252, 0.16);
+  --accent-softer: rgba(165, 180, 252, 0.07);
+  --ok: #86efac;
+  --ok-soft: rgba(134, 239, 172, 0.14);
+  --ok-line: #4ade80;
+  --warn: #fcd34d;
+  --warn-soft: rgba(252, 211, 77, 0.15);
+  --danger: #fca5a5;
+  --danger-soft: rgba(252, 165, 165, 0.14);
+  --danger-line: #f87171;
+  --now: #f87171;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 3px 10px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.6);
+}

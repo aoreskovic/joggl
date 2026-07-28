@@ -1,0 +1,61 @@
+// Pinned issues — a local list of issue keys in the store, not a Jira filter.
+
+import { isToday, savePins, state } from './state.js';
+import { startTimer } from './timer.js';
+import { toastWarn } from './toast.js';
+import { esc } from './util.js';
+
+const MAX_PINS = 12;
+
+export function isPinned(issueKey) {
+  return state.pins.some((p) => p.issueKey === issueKey);
+}
+
+export async function togglePin(issue) {
+  if (isPinned(issue.issueKey)) {
+    await savePins(state.pins.filter((p) => p.issueKey !== issue.issueKey));
+    return;
+  }
+  if (state.pins.length >= MAX_PINS) {
+    toastWarn(`Maximum ${MAX_PINS} pinned issues. Unpin one first.`);
+    return;
+  }
+  await savePins([...state.pins, { issueKey: issue.issueKey, title: issue.title }]);
+}
+
+export function renderPins() {
+  const container = document.getElementById('pin-chips');
+  if (!container) return;
+
+  container.replaceChildren(
+    ...state.pins.map((pin) => {
+      const active = state.timer?.issueKey === pin.issueKey;
+      const chip = document.createElement('div');
+      chip.className = `pin-chip${active ? ' active' : ''}`;
+      chip.title = `${pin.issueKey} — ${pin.title}`;
+      chip.innerHTML = `<span>${esc(pin.issueKey)}</span>`;
+
+      const remove = document.createElement('button');
+      remove.className = 'pin-remove';
+      remove.textContent = '×';
+      remove.title = 'Unpin';
+      remove.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        await savePins(state.pins.filter((p) => p.issueKey !== pin.issueKey));
+        renderPins();
+      });
+      chip.appendChild(remove);
+
+      chip.addEventListener('click', async () => {
+        if (!isToday()) {
+          toastWarn('The timer only runs on today.');
+          return;
+        }
+        // issueId is not stored with the pin; the worklog POST accepts the key.
+        await startTimer({ issueKey: pin.issueKey, issueId: null, title: pin.title });
+      });
+
+      return chip;
+    }),
+  );
+}

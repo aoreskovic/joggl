@@ -276,6 +276,14 @@ become `Meeting Protostar*`. See `toSummaryTerm` and its tests.
 An exact key still gets its own `GET /issue/{key}` on top, which is definitive where a
 title search is not, and that hit is listed first.
 
+**A word that is a project key becomes a filter, not title text.** `meeting gen` and
+`gen meeting` both mean *issues in GEN whose title mentions meeting* — something a
+title search cannot express, since the key never appears in the title. Applied from two
+words up only: plenty of keys here are short, common English words (`IN`, `ON`, `IP`,
+`EC`, `AL`), so a single word has to keep meaning "search the titles". The project list
+comes from `GET /rest/api/3/project/search`, cached per base URL for the session; if
+that call fails, the title search still runs.
+
 **Reading back a day's worklogs takes two steps.** There is no "my worklogs on date X"
 endpoint. JQL (`worklogAuthor = currentUser() AND worklogDate = "…"`) narrows the whole
 instance to the issues carrying such a worklog; each of those is then asked for its

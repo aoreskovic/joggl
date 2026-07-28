@@ -198,6 +198,42 @@ async function findIssueByKey(creds, key) {
 
 const ONLY_KEY = /^[A-Za-z][A-Za-z0-9_]*-\d+$/;
 
+// Project keys change about as often as the Jira site does, so one fetch per
+// session is plenty. Keyed by base URL so switching sites cannot use stale keys.
+let projectCache = { baseUrl: null, keys: [] };
+
+/**
+ * Every project key the account can see.
+ *
+ * Only used to make queries like "meeting gen" work, so a failure here costs the
+ * project-scoping and nothing else — the title search still runs.
+ */
+async function projectKeys(creds) {
+  const baseUrl = normaliseBaseUrl(creds.baseUrl);
+  if (projectCache.baseUrl === baseUrl) return projectCache.keys;
+
+  const keys = [];
+  try {
+    for (let startAt = 0; ; ) {
+      const data = await request(
+        creds,
+        'GET',
+        `${API}/project/search?maxResults=50&startAt=${startAt}&orderBy=key`,
+        { context: 'project list' },
+      );
+      const page = data?.values ?? [];
+      for (const project of page) if (project.key) keys.push(project.key);
+      if (data?.isLast !== false || page.length === 0) break;
+      startAt += page.length;
+    }
+  } catch {
+    return projectCache.baseUrl === baseUrl ? projectCache.keys : [];
+  }
+
+  projectCache = { baseUrl, keys };
+  return keys;
+}
+
 /**
  * Turn what someone typed into the right-hand side of a JQL `~` match.
  *
@@ -206,15 +242,69 @@ const ONLY_KEY = /^[A-Za-z][A-Za-z0-9_]*-\d+$/;
  * useful while still being typed — "meet" finds "Meetings".
  */
 export function toSummaryTerm(raw) {
-  const cleaned = String(raw)
-    .replace(/[+\-&|!(){}\[\]^"~*?:\\/]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!cleaned) return null;
+  const words = sanitiseWords(raw);
+  if (words.length === 0) return null;
 
-  const words = cleaned.split(' ');
   words[words.length - 1] += '*';
   return words.join(' ');
+}
+
+function sanitiseWords(raw) {
+  return String(raw ?? '')
+    .replace(/[+\-&|!(){}\[\]^"~*?:\\/]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/**
+ * Turn a typed query into the JQL that finds it.
+ *
+ * A word that *is* a project key is treated as a filter rather than as title
+ * text, so "meeting gen" and "gen meeting" both mean "issues in GEN whose title
+ * mentions meeting" — which is what someone typing a keyword next to part of a
+ * key means, and which a plain title search cannot express because the key does
+ * not appear in the title at all.
+ *
+ * Only applied from two words up. Plenty of project keys here are short, common
+ * English words — IN, ON, IP, EC, AL — and a single-word query has to keep
+ * meaning "search the titles for this".
+ *
+ * @param {string} query
+ * @param {string[]} keys every project key the account can see
+ * @returns {string|null} JQL, or null when there is nothing to search for
+ */
+export function buildLookupJql(query, keys = []) {
+  const words = sanitiseWords(query);
+  if (words.length === 0) return null;
+
+  const byLower = new Map(keys.map((k) => [k.toLowerCase(), k]));
+  let projects = [];
+  let text = words;
+
+  if (words.length >= 2) {
+    projects = [];
+    text = [];
+    for (const word of words) {
+      const key = byLower.get(word.toLowerCase());
+      if (key) projects.push(key);
+      else text.push(word);
+    }
+    // Every word named a project — read that as "show me these projects".
+    if (text.length === 0) projects = [...new Set(projects)];
+  }
+
+  const clauses = [];
+  if (projects.length > 0) {
+    clauses.push(`project IN (${[...new Set(projects)].map((k) => `"${k}"`).join(', ')})`);
+  }
+  if (text.length > 0) {
+    const term = [...text];
+    term[term.length - 1] += '*';
+    clauses.push(`summary ~ "${term.join(' ')}"`);
+  }
+  if (clauses.length === 0) return null;
+
+  return `${clauses.join(' AND ')} ORDER BY updated DESC`;
 }
 
 /**
@@ -248,14 +338,11 @@ export async function lookupIssues(creds, query, { limit = 8 } = {}) {
   // its digits would only add noise.
   if (ONLY_KEY.test(trimmed)) return [...found.values()];
 
-  const term = toSummaryTerm(trimmed);
-  if (!term) return [...found.values()];
+  const jql = buildLookupJql(trimmed, await projectKeys(creds));
+  if (!jql) return [...found.values()];
 
   try {
-    const issues = await searchIssues(creds, `summary ~ "${term}" ORDER BY updated DESC`, {
-      maxResults: limit,
-      pageLimit: 1,
-    });
+    const issues = await searchIssues(creds, jql, { maxResults: limit, pageLimit: 1 });
     for (const issue of issues) {
       if (found.size >= limit) break;
       if (!found.has(issue.issueKey)) found.set(issue.issueKey, issue);

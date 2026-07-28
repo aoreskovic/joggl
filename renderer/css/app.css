@@ -1067,6 +1067,18 @@ button {
   background: var(--accent-softer);
 }
 
+.ctx-icon {
+  width: 16px;
+  text-align: center;
+  font-size: 12px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.ctx-item.danger .ctx-icon {
+  color: inherit;
+}
+
 .ctx-item.danger {
   color: var(--danger);
 }

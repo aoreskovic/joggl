@@ -27,7 +27,8 @@ Pure frontend logic, no SP coupling. Port as-is; refactor into modules only wher
 - Drag-to-move entry blocks (15-minute snap)
 - Drag top/bottom handles to resize, snapping to adjacent entry boundaries
 - Live in-progress block that grows in real time and participates in overlap layout
-- Entry split-at-midpoint, restart, delete
+- Entry split-at-midpoint, restart, duplicate, delete — from a right-click menu shared
+  by the entry list and the day view
 - Inline editing of start / end / duration / title with bidirectional recalculation
 - Merge prompt logic
 - Zoom controls, resizable panel width, configurable font size

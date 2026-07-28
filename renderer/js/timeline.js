@@ -5,11 +5,11 @@
 // settled by use, not by design — treat behaviour changes as regressions unless
 // they are deliberate.
 
-import { deleteEntry, markDirty, splitEntry } from './entries.js';
+import { showContextMenu } from './context-menu.js';
+import { markDirty } from './entries.js';
 import { renderAll } from './render.js';
 import { isToday, persistDayNow, pxPerMin, state, visibleEntries } from './state.js';
 import { searchIssues } from './tasks.js';
-import { startTimer } from './timer.js';
 import { toastWarn } from './toast.js';
 import {
   dateKey,
@@ -352,45 +352,6 @@ async function commitDrag(entry) {
   markDirty(entry);
   await persistDayNow();
   renderAll();
-}
-
-// ── Context menu ───────────────────────────────────────────────────────────
-
-export function hideContextMenu() {
-  const menu = document.getElementById('ctx-menu');
-  if (!menu) return;
-  menu.classList.add('hidden');
-  menu.replaceChildren();
-}
-
-function showContextMenu(event, entry) {
-  hideContextMenu();
-  const menu = document.getElementById('ctx-menu');
-  if (!menu) return;
-
-  const items = [
-    { icon: '⏵', label: 'Restart timer', run: () => startTimer({ issueKey: entry.issueKey, issueId: entry.issueId, title: entry.title }) },
-    { icon: '✂', label: 'Split at midpoint', run: () => splitEntry(entry.id) },
-    { icon: '🗑', label: 'Delete', danger: true, run: () => deleteEntry(entry.id) },
-  ];
-
-  for (const item of items) {
-    const el = document.createElement('div');
-    el.className = `ctx-item${item.danger ? ' danger' : ''}`;
-    el.textContent = `${item.icon}  ${item.label}`;
-    el.addEventListener('click', () => {
-      hideContextMenu();
-      Promise.resolve(item.run()).catch((err) => console.error(err));
-    });
-    menu.appendChild(el);
-  }
-
-  menu.classList.remove('hidden');
-  const rect = menu.getBoundingClientRect();
-  const x = Math.min(event.clientX, window.innerWidth - rect.width - 4);
-  const y = Math.min(event.clientY, window.innerHeight - rect.height - 4);
-  menu.style.left = `${x}px`;
-  menu.style.top = `${y}px`;
 }
 
 // ── Quick entry on an empty part of the grid ───────────────────────────────

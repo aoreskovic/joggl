@@ -1,6 +1,8 @@
 // The entry list: cards, inline editing with bidirectional recalculation, and
 // the day total.
 
+import { showContextMenu } from './context-menu.js';
+import { duplicateOf, overlappingIds } from './entry-ops.js';
 import { PLAY_ICON } from './icons.js';
 import { sortEntries } from './merge.js';
 import { askModal } from './modal.js';
@@ -14,8 +16,8 @@ import {
   visibleEntries,
 } from './state.js';
 import { startTimer, stopTimer } from './timer.js';
-import { toastErr, toastOk, toastWarn } from './toast.js';
-import { esc, hhmmToTs, msToDur, parseDur, snapToQuarter, tsToHHMM } from './util.js';
+import { toast, toastErr, toastOk, toastWarn } from './toast.js';
+import { esc, hhmmToTs, msToDur, parseDur, snapToQuarter, tsToHHMM, uuid } from './util.js';
 
 const STATUS_LABEL = {
   pending: '● pending',
@@ -26,23 +28,6 @@ const STATUS_LABEL = {
 
 /** True for worklogs that came from Jira and that Joggl has no business rewriting. */
 const isExternal = (entry) => entry.external === true;
-
-/** Ids of entries whose time ranges overlap. Allowed, but usually a mistake. */
-export function overlappingIds(entries) {
-  const ids = new Set();
-  const done = entries.filter((e) => e.endTs !== null);
-  for (let i = 0; i < done.length; i++) {
-    for (let j = i + 1; j < done.length; j++) {
-      const a = done[i];
-      const b = done[j];
-      if (a.startTs < b.endTs && b.startTs < a.endTs) {
-        ids.add(a.id);
-        ids.add(b.id);
-      }
-    }
-  }
-  return ids;
-}
 
 export function calcTotalMs() {
   // Includes Jira-side worklogs: a total that ignores time booked in the web UI
@@ -160,6 +145,15 @@ function buildEntryCard(entry, isOverlapping) {
   for (const button of card.querySelectorAll('[data-a]')) {
     button.addEventListener('click', handleEntryAction);
   }
+
+  // The same menu the day-view blocks get — right-clicking the row is where most
+  // people will try first.
+  card.addEventListener('contextmenu', (event) => {
+    if (event.target.closest('.ie')) return; // leave the text fields their own menu
+    event.preventDefault();
+    showContextMenu(event, entry);
+  });
+
   return card;
 }
 
@@ -308,6 +302,26 @@ export async function deleteEntry(id) {
   renderAll();
 }
 
+/**
+ * Copy an entry onto the same stretch of time. The two land side by side in the
+ * day view's overlap columns, which is the handle for dragging the copy where it
+ * belongs — moving it is the expected next step, not a correction.
+ */
+export async function duplicateEntry(id) {
+  const entry = currentEntry(id);
+  if (!entry || entry.endTs === null) return;
+
+  const copy = duplicateOf(entry, uuid());
+  state.entries = sortEntries([...state.entries, copy]);
+  await persistDayNow();
+  renderAll();
+
+  toast(
+    `Copied ${copy.issueKey ?? copy.title} onto ${tsToHHMM(copy.startTs)}–${tsToHHMM(copy.endTs)}. ` +
+      'Drag it where it belongs.',
+  );
+}
+
 export async function splitEntry(id) {
   const entry = currentEntry(id);
   if (!entry || entry.endTs === null) return;
@@ -331,7 +345,7 @@ export async function splitEntry(id) {
     return;
   }
 
-  const second = { ...entry, id: crypto.randomUUID(), startTs: midpoint, worklogId: null };
+  const second = { ...entry, id: uuid(), startTs: midpoint, worklogId: null };
   entry.endTs = midpoint;
   state.entries = sortEntries([...state.entries, second]);
   await persistDayNow();

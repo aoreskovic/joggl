@@ -1,7 +1,14 @@
 // Boot and wiring. Everything stateful lives in its own module; this file only
 // connects the DOM to it.
 
-import { renderEntryList, updateTotal } from './entries.js';
+import { hideContextMenu, setContextActions } from './context-menu.js';
+import {
+  deleteEntry,
+  duplicateEntry,
+  renderEntryList,
+  splitEntry,
+  updateTotal,
+} from './entries.js';
 import { PLAY_ICON, STOP_ICON } from './icons.js';
 import { isPinned, renderPins, togglePin } from './pins.js';
 import { registerRenderer, renderAll } from './render.js';
@@ -30,7 +37,6 @@ import {
 import { finishDay, updateFinishButton } from './sync.js';
 import { loadIssues, renderTaskList, searchIssues } from './tasks.js';
 import {
-  hideContextMenu,
   hideQuickEntry,
   onGridClick,
   renderTimeline,
@@ -81,6 +87,14 @@ async function boot() {
   registerRenderer(updateTotal);
   registerRenderer(updateTimerUi);
   registerRenderer(updateFinishButton);
+
+  setContextActions({
+    restart: (entry) =>
+      startTimer({ issueKey: entry.issueKey, issueId: entry.issueId, title: entry.title }),
+    duplicate: (entry) => duplicateEntry(entry.id),
+    split: (entry) => splitEntry(entry.id),
+    remove: (entry) => deleteEntry(entry.id),
+  });
 
   wireSetup();
   wireSettings();

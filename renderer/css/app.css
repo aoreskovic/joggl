@@ -74,6 +74,24 @@ button {
   color: #fff !important;
 }
 
+/* Drawn rather than typed, so play and stop share one optical size and baseline
+   instead of inheriting two different fallback fonts. */
+.glyph {
+  width: 0.8em;
+  height: 0.8em;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
+#start-stop-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  /* Fixed width so the omnibar does not shift when Start becomes Stop. */
+  min-width: 92px;
+}
+
 /* ── Two-panel layout ── */
 
 .app-layout {
@@ -233,6 +251,42 @@ button {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Few enough results that the summaries fit — stop clipping them. */
+.expanded .task-dd-item {
+  align-items: flex-start;
+  padding: 10px;
+}
+
+.expanded .jira-chip {
+  padding-top: 1px;
+}
+
+.expanded .task-dd-title {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.task-dd-meta {
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.task-dd-empty {
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 /* ── Day header ── */
@@ -533,6 +587,8 @@ button {
   color: var(--text-muted);
   font-size: 13px;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
 }
 
 .icon-btn:hover {
@@ -653,10 +709,11 @@ button {
 }
 
 .tt-play {
-  font-size: 9px;
+  display: inline-flex;
+  font-size: 10px;
   color: var(--accent);
   flex-shrink: 0;
-  opacity: 0.5;
+  opacity: 0.45;
 }
 
 .task-item:hover .tt-play {

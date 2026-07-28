@@ -2,6 +2,7 @@
 // connects the DOM to it.
 
 import { renderEntryList, updateTotal } from './entries.js';
+import { PLAY_ICON, STOP_ICON } from './icons.js';
 import { isPinned, renderPins, togglePin } from './pins.js';
 import { registerRenderer, renderAll } from './render.js';
 import {
@@ -57,6 +58,9 @@ import {
 } from './util.js';
 
 const $ = (id) => document.getElementById(id);
+
+/** At or below this many results, summaries are shown in full instead of clipped. */
+const EXPAND_TITLES_AT = 2;
 
 // A picked issue survives further typing in the box; typing again clears it.
 let pickedIssue = null;
@@ -145,7 +149,7 @@ function updateTimerUi() {
   const display = $('timer-display');
   const running = Boolean(state.timer);
 
-  button.textContent = running ? '■ Stop' : '▶ Start';
+  button.innerHTML = running ? `${STOP_ICON}Stop` : `${PLAY_ICON}Start`;
   button.classList.toggle('btn-stop', running);
   button.classList.toggle('btn-primary', !running);
   display.classList.toggle('running', running);
@@ -168,18 +172,42 @@ function wireOmnibar() {
   const dropdown = $('task-dropdown');
 
   const showDropdown = () => {
+    const query = input.value.trim();
     const matches = searchIssues(input.value);
+
+    // Once the list is down to a couple of candidates there is room to show the
+    // whole summary. Truncating "Axiom Water Bottle Mechanical De…" is only
+    // tolerable while it is one of fifteen rows being scanned at a glance.
+    dropdown.classList.toggle('expanded', matches.length <= EXPAND_TITLES_AT);
+
     if (matches.length === 0) {
-      dropdown.classList.add('hidden');
+      // Say what Enter will do rather than just vanishing.
+      if (!query) {
+        dropdown.classList.add('hidden');
+        return;
+      }
+      const key = extractIssueKey(query);
+      const hint = document.createElement('div');
+      hint.className = 'task-dd-empty';
+      hint.textContent = key
+        ? `No loaded issue matches. Enter starts a timer on ${key} anyway.`
+        : `Nothing matches “${query}”. Enter tracks it as a local entry, which counts ` +
+          'towards the day but never syncs to Jira.';
+      dropdown.replaceChildren(hint);
+      dropdown.classList.remove('hidden');
       return;
     }
+
     dropdown.replaceChildren(
       ...matches.map((issue) => {
         const item = document.createElement('div');
         item.className = 'task-dd-item';
         item.innerHTML =
           `<span class="jira-chip">${esc(issue.issueKey)}</span>` +
-          `<span class="task-dd-title">${esc(issue.title)}</span>`;
+          `<span class="task-dd-title">${esc(issue.title)}</span>` +
+          (dropdown.classList.contains('expanded') && issue.status
+            ? `<span class="task-dd-meta">${esc(issue.status)}</span>`
+            : '');
         item.addEventListener('mousedown', (event) => {
           event.preventDefault();
           pickedIssue = issue;

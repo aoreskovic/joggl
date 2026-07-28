@@ -4,6 +4,7 @@
 export const MINUTE = 60_000;
 export const HOUR = 3_600_000;
 export const DAY = 86_400_000;
+export const QUARTER = 15 * MINUTE;
 
 export function uuid() {
   return crypto.randomUUID();
@@ -41,6 +42,19 @@ export function startOfDay(key) {
 
 export function startOfDayMs(key) {
   return startOfDay(key).getTime();
+}
+
+/**
+ * Snap a timestamp to the nearest quarter hour on the clock — :00, :15, :30, :45.
+ *
+ * Measured from local midnight rather than from the epoch, and never from where a
+ * drag happened to begin: snapping a drag *offset* instead would leave an entry
+ * that started at 09:07 forever landing on :07, :22, :37, and make its minimum
+ * length depend on the minute the timer was stopped.
+ */
+export function snapToQuarter(ts, dayKey) {
+  const midnight = startOfDayMs(dayKey);
+  return midnight + Math.round((ts - midnight) / QUARTER) * QUARTER;
 }
 
 export function formatDateLabel(key) {

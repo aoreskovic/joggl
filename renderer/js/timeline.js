@@ -16,13 +16,17 @@ import {
   esc,
   extractIssueKey,
   msToDur,
+  QUARTER,
+  snapToQuarter,
   startOfDayMs,
   stripTrailingKey,
   tsToHHMM,
   uuid,
 } from './util.js';
 
-const SNAP_MS = 15 * 60_000;
+// Nothing shorter than one grid step, so a block can never be dragged into a
+// sliver that is impossible to grab again.
+const MIN_DURATION_MS = QUARTER;
 const EDGE_SNAP_MS = 8 * 60_000;
 const GUTTER_PX = 40;
 
@@ -229,26 +233,28 @@ function onResize(event, entry, edge) {
 
   const onMouseMove = (move) => {
     // Scaled by the current zoom, not the base — otherwise the block runs away
-    // from the cursor at anything other than 1x.
-    const deltaMs =
-      Math.round((move.clientY - startY) / view.pxPerMin / 15) * 15 * 60_000;
+    // from the cursor at anything other than 1x. Left unrounded: the snap happens
+    // on the resulting clock time, not on the drag distance.
+    const deltaMs = ((move.clientY - startY) / view.pxPerMin) * 60_000;
 
     if (edge === 'top') {
-      let next = origStart + deltaMs;
+      let next = snapToQuarter(origStart + deltaMs, state.selectedDate);
+      // Butting up against a neighbour beats the quarter-hour grid: closing a gap
+      // exactly is the thing the grid alone cannot express.
       for (const other of state.entries) {
         if (other.id !== entry.id && other.endTs !== null && Math.abs(other.endTs - next) < EDGE_SNAP_MS) {
           next = other.endTs;
         }
       }
-      if (next < origEnd - SNAP_MS) entry.startTs = next;
+      if (next <= origEnd - MIN_DURATION_MS) entry.startTs = next;
     } else {
-      let next = origEnd + deltaMs;
+      let next = snapToQuarter(origEnd + deltaMs, state.selectedDate);
       for (const other of state.entries) {
         if (other.id !== entry.id && Math.abs(other.startTs - next) < EDGE_SNAP_MS) {
           next = other.startTs;
         }
       }
-      if (next > origStart + SNAP_MS) entry.endTs = next;
+      if (next >= origStart + MIN_DURATION_MS) entry.endTs = next;
     }
 
     liveUpdate(block, entry);
@@ -278,9 +284,10 @@ function onMoveBlock(event, entry) {
   block?.classList.add('dragging', 'moving');
 
   const onMouseMove = (move) => {
-    const deltaMs =
-      Math.round((move.clientY - startY) / view.pxPerMin / 15) * 15 * 60_000;
-    let start = origStart + deltaMs;
+    const deltaMs = ((move.clientY - startY) / view.pxPerMin) * 60_000;
+    // Moving keeps the length and snaps the start to the clock grid, so a 47-minute
+    // entry stays 47 minutes but always begins on a quarter hour.
+    let start = snapToQuarter(origStart + deltaMs, state.selectedDate);
     let end = start + duration;
 
     if (start < dayStart) {
@@ -360,7 +367,7 @@ function showContextMenu(event, entry) {
   if (!menu) return;
 
   const items = [
-    { icon: '▶', label: 'Restart timer', run: () => startTimer({ issueKey: entry.issueKey, issueId: entry.issueId, title: entry.title }) },
+    { icon: '⏵', label: 'Restart timer', run: () => startTimer({ issueKey: entry.issueKey, issueId: entry.issueId, title: entry.title }) },
     { icon: '✂', label: 'Split at midpoint', run: () => splitEntry(entry.id) },
     { icon: '🗑', label: 'Delete', danger: true, run: () => deleteEntry(entry.id) },
   ];
@@ -406,7 +413,7 @@ export function onGridClick(event) {
   const y = event.clientY - grid.getBoundingClientRect().top + panel.scrollTop;
   const clicked = view.rangeStartMs + (y / view.pxPerMin) * 60_000;
 
-  const startTs = Math.round(clicked / SNAP_MS) * SNAP_MS;
+  const startTs = snapToQuarter(clicked, state.selectedDate);
   showQuickEntry(event.clientX, event.clientY, startTs, startTs + 30 * 60_000);
 }
 
@@ -453,7 +460,21 @@ function showQuickEntry(cx, cy, startTs, endTs) {
 
   const renderResults = (query) => {
     results.replaceChildren();
-    for (const issue of searchIssues(query).slice(0, 8)) {
+    const matches = searchIssues(query).slice(0, 8);
+    // Same rule as the omnibar: few enough candidates, show the whole summary.
+    results.classList.toggle('expanded', matches.length <= 2);
+
+    if (matches.length === 0) {
+      const hint = document.createElement('div');
+      hint.className = 'task-dd-empty';
+      hint.textContent = query.trim()
+        ? 'No match — Enter adds it as a local entry.'
+        : 'No issues loaded.';
+      results.appendChild(hint);
+      return;
+    }
+
+    for (const issue of matches) {
       const item = document.createElement('div');
       item.className = 'task-dd-item';
       item.innerHTML =

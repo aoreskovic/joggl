@@ -2,6 +2,7 @@
 // Replaces the plugin's Super Productivity task sections; there is no hardcoded
 // project, filter or query anywhere.
 
+import { PLAY_ICON } from './icons.js';
 import { isPinned, togglePin } from './pins.js';
 import { renderAll } from './render.js';
 import { isToday, searchJira, state } from './state.js';
@@ -134,7 +135,7 @@ function issueRow(issue) {
   row.className = `task-item${active ? ' is-active' : ''}`;
   row.title = `${issue.issueKey} — ${issue.title}${issue.status ? ` (${issue.status})` : ''}`;
   row.innerHTML =
-    '<span class="tt-play">▶</span>' +
+    `<span class="tt-play">${PLAY_ICON}</span>` +
     `<span class="jira-chip">${esc(issue.issueKey)}</span>` +
     `<span class="task-dd-title">${esc(issue.title)}</span>`;
 

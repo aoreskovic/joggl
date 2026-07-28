@@ -1,12 +1,13 @@
 // The entry list: cards, inline editing with bidirectional recalculation, and
 // the day total.
 
+import { PLAY_ICON } from './icons.js';
 import { sortEntries } from './merge.js';
 import { renderAll } from './render.js';
 import { isToday, persistDay, persistDayNow, state } from './state.js';
 import { startTimer, stopTimer } from './timer.js';
 import { toastWarn } from './toast.js';
-import { esc, hhmmToTs, msToDur, parseDur, tsToHHMM } from './util.js';
+import { esc, hhmmToTs, msToDur, parseDur, snapToQuarter, tsToHHMM } from './util.js';
 
 const STATUS_LABEL = {
   pending: '● pending',
@@ -87,7 +88,7 @@ function buildEntryCard(entry, isOverlapping) {
     `<input class="ie dur-ie" data-f="dur" data-id="${esc(entry.id)}" value="${msToDur(duration)}" title="Duration, e.g. 1h 30m">` +
     `<span class="status-badge st-${esc(entry.status)}" title="${esc(entry.errorMsg ?? '')}">${STATUS_LABEL[entry.status] ?? entry.status}</span>` +
     '<div class="entry-actions">' +
-    `<button class="icon-btn" data-a="restart" data-id="${esc(entry.id)}" title="Restart timer on this issue">▶</button>` +
+    `<button class="icon-btn" data-a="restart" data-id="${esc(entry.id)}" title="Restart timer on this issue">${PLAY_ICON}</button>` +
     `<button class="icon-btn del" data-a="delete" data-id="${esc(entry.id)}" title="Delete">🗑</button>` +
     '</div>' +
     (isOverlapping
@@ -243,8 +244,7 @@ export async function splitEntry(id) {
     return;
   }
 
-  const quarter = 15 * 60_000;
-  const midpoint = Math.round((entry.startTs + entry.endTs) / 2 / quarter) * quarter;
+  const midpoint = snapToQuarter((entry.startTs + entry.endTs) / 2, state.selectedDate);
   if (midpoint <= entry.startTs || midpoint >= entry.endTs) {
     toastWarn('Entry is too short to split.');
     return;

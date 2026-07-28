@@ -202,3 +202,103 @@ export async function submitWorklog(creds, { issueIdOrKey, startTs, endTs }) {
   }
   return { worklogId: String(data.id), timeSpentSeconds: data.timeSpentSeconds ?? null };
 }
+
+/**
+ * PUT /rest/api/3/issue/{issueIdOrKey}/worklog/{id}
+ *
+ * Editing an entry Joggl already synced rewrites its worklog in place. Posting a
+ * second one and hoping nobody notices is how a day ends up double-booked.
+ */
+export async function updateWorklog(creds, { issueIdOrKey, worklogId, startTs, endTs }) {
+  if (!worklogId) throw new JiraError('Cannot update a worklog without its id.');
+  const durationMs = endTs - startTs;
+  if (!(durationMs > 0)) {
+    throw new JiraError(`Entry has no positive duration (${durationMs} ms) — fix it before syncing.`);
+  }
+
+  const data = await request(
+    creds,
+    'PUT',
+    `${API}/issue/${encodeURIComponent(issueIdOrKey)}/worklog/${encodeURIComponent(worklogId)}`,
+    {
+      body: {
+        started: formatWorklogStarted(startTs),
+        timeSpentSeconds: worklogSeconds(durationMs),
+      },
+      context: `worklog ${worklogId} on ${issueIdOrKey}`,
+    },
+  );
+
+  return { worklogId: String(data?.id ?? worklogId), timeSpentSeconds: data?.timeSpentSeconds ?? null };
+}
+
+/** DELETE /rest/api/3/issue/{issueIdOrKey}/worklog/{id} */
+export async function deleteWorklog(creds, { issueIdOrKey, worklogId }) {
+  if (!worklogId) throw new JiraError('Cannot delete a worklog without its id.');
+  await request(
+    creds,
+    'DELETE',
+    `${API}/issue/${encodeURIComponent(issueIdOrKey)}/worklog/${encodeURIComponent(worklogId)}`,
+    { context: `worklog ${worklogId} on ${issueIdOrKey}` },
+  );
+  return { worklogId: String(worklogId) };
+}
+
+/**
+ * Every worklog the current user has on a given local day, wherever it was
+ * entered — including straight into the Jira web UI, which Joggl knows nothing
+ * about but which still counts towards the day.
+ *
+ * Two steps, because Jira has no "my worklogs on date X" endpoint:
+ *   1. JQL narrows the whole instance down to the issues carrying such a worklog;
+ *   2. each of those issues is asked for its worklogs, bounded server-side by
+ *      startedAfter/startedBefore — a shared issue can hold hundreds of other
+ *      people's entries and pulling them all back to find one is wasteful.
+ *
+ * @param {{date: string, dayStartTs: number, dayEndTs: number}} range
+ * @returns {Promise<object[]>} one entry per worklog, already filtered to this account
+ */
+export async function fetchDayWorklogs(creds, { date, dayStartTs, dayEndTs }) {
+  const me = await testConnection(creds);
+  if (!me.accountId) {
+    throw new JiraError('Jira did not return an account id, so worklogs cannot be matched to you.');
+  }
+
+  const issues = await searchIssues(
+    creds,
+    `worklogAuthor = currentUser() AND worklogDate = "${date}"`,
+    { maxResults: 100 },
+  );
+
+  const found = [];
+  for (const issue of issues) {
+    const query = new URLSearchParams({
+      startedAfter: String(dayStartTs),
+      startedBefore: String(dayEndTs),
+      maxResults: '200',
+    });
+    const data = await request(
+      creds,
+      'GET',
+      `${API}/issue/${encodeURIComponent(issue.issueKey)}/worklog?${query}`,
+      { context: `worklogs on ${issue.issueKey}` },
+    );
+
+    for (const worklog of data?.worklogs ?? []) {
+      if (worklog.author?.accountId !== me.accountId) continue;
+      const startTs = Date.parse(worklog.started);
+      if (!Number.isFinite(startTs) || startTs < dayStartTs || startTs >= dayEndTs) continue;
+
+      found.push({
+        worklogId: String(worklog.id),
+        issueKey: issue.issueKey,
+        issueId: issue.issueId,
+        title: issue.title,
+        startTs,
+        endTs: startTs + (worklog.timeSpentSeconds ?? 0) * 1000,
+      });
+    }
+  }
+
+  return found.sort((a, b) => a.startTs - b.startTs);
+}

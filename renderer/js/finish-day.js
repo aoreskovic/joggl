@@ -20,14 +20,21 @@ export function planFinishDay(entries) {
       running.push(entry);
       continue;
     }
-    // The idempotency guard. A worklogId means Jira already has these minutes,
-    // whatever the local status says.
-    if (entry.worklogId) {
+    // A worklogId means Jira already holds these minutes. Still `synced` means
+    // they are also still correct, so there is nothing to do; anything else means
+    // the entry was edited after syncing and its worklog needs rewriting. What
+    // the id guarantees either way is that the entry is never *posted* twice —
+    // `submit` turns it into an update.
+    if (entry.worklogId && entry.status === 'synced') {
       alreadySynced.push(entry);
       continue;
     }
     if (entry.status === 'synced') {
       alreadySynced.push(entry);
+      continue;
+    }
+    if (entry.worklogId) {
+      toSubmit.push(entry);
       continue;
     }
     if (!entry.issueKey) {
@@ -81,7 +88,8 @@ export async function runFinishDay(entries, submit, { onProgress } = {}) {
     } catch (err) {
       next.status = 'error';
       next.errorMsg = err?.message ?? String(err);
-      // Deliberately left without a worklogId so a retry is allowed.
+      // worklogId is left exactly as it was: absent after a failed create, so a
+      // retry posts; present after a failed update, so a retry rewrites.
       failed.push(next);
     }
     onProgress?.(index + 1, plan.toSubmit.length, next);
@@ -96,11 +104,12 @@ export async function runFinishDay(entries, submit, { onProgress } = {}) {
   };
 }
 
-/** Entries a retry would pick up: previously failed, never given a worklogId. */
+/**
+ * Clear the failures so a retry picks them up. The worklogId is kept: a failed
+ * update must retry as an update, not turn into a second worklog.
+ */
 export function resetFailedForRetry(entries) {
   return (entries ?? []).map((entry) =>
-    entry.status === 'error' && !entry.worklogId
-      ? { ...entry, status: 'pending', errorMsg: null }
-      : entry,
+    entry.status === 'error' ? { ...entry, status: 'pending', errorMsg: null } : entry,
   );
 }

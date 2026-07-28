@@ -3,10 +3,18 @@
 
 import { PLAY_ICON } from './icons.js';
 import { sortEntries } from './merge.js';
+import { askModal } from './modal.js';
 import { renderAll } from './render.js';
-import { isToday, persistDay, persistDayNow, state } from './state.js';
+import {
+  deleteWorklog,
+  isToday,
+  persistDay,
+  persistDayNow,
+  state,
+  visibleEntries,
+} from './state.js';
 import { startTimer, stopTimer } from './timer.js';
-import { toastWarn } from './toast.js';
+import { toastErr, toastOk, toastWarn } from './toast.js';
 import { esc, hhmmToTs, msToDur, parseDur, snapToQuarter, tsToHHMM } from './util.js';
 
 const STATUS_LABEL = {
@@ -15,6 +23,9 @@ const STATUS_LABEL = {
   error: '✗ error',
   local: '◇ local',
 };
+
+/** True for worklogs that came from Jira and that Joggl has no business rewriting. */
+const isExternal = (entry) => entry.external === true;
 
 /** Ids of entries whose time ranges overlap. Allowed, but usually a mistake. */
 export function overlappingIds(entries) {
@@ -34,7 +45,9 @@ export function overlappingIds(entries) {
 }
 
 export function calcTotalMs() {
-  let ms = state.entries.reduce(
+  // Includes Jira-side worklogs: a total that ignores time booked in the web UI
+  // is worse than no total at all.
+  let ms = visibleEntries().reduce(
     (sum, e) => sum + Math.max(0, (e.endTs ?? e.startTs) - e.startTs),
     0,
   );
@@ -51,34 +64,50 @@ export function renderEntryList() {
   const list = document.getElementById('entry-list');
   if (!list) return;
 
-  if (state.entries.length === 0) {
-    list.replaceChildren(note('No entries for this day'));
-    return;
+  const entries = visibleEntries();
+  const children = [];
+
+  if (entries.length === 0) {
+    children.push(note(state.externalState === 'loading' ? 'Loading…' : 'No entries for this day'));
+  } else {
+    const overlaps = overlappingIds(entries);
+    children.push(
+      ...sortEntries(entries).map((entry) => buildEntryCard(entry, overlaps.has(entry.id))),
+    );
   }
 
-  const overlaps = overlappingIds(state.entries);
-  list.replaceChildren(
-    ...sortEntries(state.entries).map((entry) => buildEntryCard(entry, overlaps.has(entry.id))),
-  );
+  if (state.externalState === 'error') {
+    children.push(
+      note(`Could not read this day's worklogs from Jira — ${state.externalError}`, 'warn'),
+    );
+  }
+
+  list.replaceChildren(...children);
 }
 
-function note(text) {
+function note(text, kind) {
   const el = document.createElement('div');
-  el.className = 'timeline-empty';
+  el.className = `timeline-empty${kind ? ` ${kind}` : ''}`;
   el.textContent = text;
   return el;
 }
 
 function buildEntryCard(entry, isOverlapping) {
   const duration = Math.max(0, (entry.endTs ?? entry.startTs) - entry.startTs);
+  const external = isExternal(entry);
   const card = document.createElement('div');
-  card.className = `entry-card${isOverlapping ? ' overlapping' : ''}`;
+  card.className =
+    'entry-card' + (isOverlapping ? ' overlapping' : '') + (external ? ' external' : '');
   card.dataset.id = entry.id;
 
   card.innerHTML =
     '<div class="entry-name">' +
     (entry.issueKey ? `<span class="entry-jira">${esc(entry.issueKey)}</span>` : '') +
     `<span class="entry-title" title="${esc(entry.title)}">${esc(entry.title)}</span>` +
+    (external
+      ? '<span class="entry-badge" title="Logged in Jira, not by Joggl. Shown so the ' +
+        'day total is right; edit it in Jira.">in Jira</span>'
+      : '') +
     '</div>' +
     '<div class="time-range">' +
     `<input class="ie time-ie" data-f="start" data-id="${esc(entry.id)}" value="${tsToHHMM(entry.startTs)}" title="Start time">` +
@@ -89,19 +118,23 @@ function buildEntryCard(entry, isOverlapping) {
     `<span class="status-badge st-${esc(entry.status)}" title="${esc(entry.errorMsg ?? '')}">${STATUS_LABEL[entry.status] ?? entry.status}</span>` +
     '<div class="entry-actions">' +
     `<button class="icon-btn" data-a="restart" data-id="${esc(entry.id)}" title="Restart timer on this issue">${PLAY_ICON}</button>` +
-    `<button class="icon-btn del" data-a="delete" data-id="${esc(entry.id)}" title="Delete">🗑</button>` +
+    (external
+      ? ''
+      : `<button class="icon-btn del" data-a="delete" data-id="${esc(entry.id)}" title="Delete">🗑</button>`) +
     '</div>' +
     (isOverlapping
       ? '<div class="entry-err-row">⚠ Overlaps another entry — allowed, but usually a mistake.</div>'
       : '') +
     (entry.errorMsg ? `<div class="entry-err-row">⚠ ${esc(entry.errorMsg)}</div>` : '');
 
-  // A synced entry has already reached Jira. Editing it locally would silently
-  // desync the two, so the fields are frozen.
-  if (entry.worklogId) {
+  // Joggl's own entries stay editable after syncing — the edit rewrites the
+  // worklog on the next Finish Day. Worklogs Joggl did not create are another
+  // matter: it has no record of them beyond what Jira just said, so it does not
+  // get to rewrite them.
+  if (external) {
     for (const input of card.querySelectorAll('.ie')) {
       input.disabled = true;
-      input.title = 'Already logged to Jira — edit the worklog in Jira instead.';
+      input.title = 'Logged directly in Jira — edit it there.';
     }
   }
 
@@ -123,7 +156,7 @@ function buildEntryCard(entry, isOverlapping) {
 }
 
 function currentEntry(id) {
-  return state.entries.find((e) => e.id === id) ?? null;
+  return visibleEntries().find((e) => e.id === id) ?? null;
 }
 
 function resetInput(input) {
@@ -149,7 +182,7 @@ function rejectInput(input, message) {
 function handleInlineEdit(event) {
   const input = event.target;
   const entry = currentEntry(input.dataset.id);
-  if (!entry) return;
+  if (!entry || isExternal(entry)) return;
 
   const field = input.dataset.f;
   const card = input.closest('.entry-card');
@@ -183,14 +216,27 @@ function handleInlineEdit(event) {
     if (durInput) durInput.value = msToDur((entry.endTs ?? entry.startTs) - entry.startTs);
   }
 
-  // An edited entry is worth another attempt at syncing.
-  if (entry.status === 'error') {
-    entry.status = entry.issueKey ? 'pending' : 'local';
-    entry.errorMsg = null;
-  }
-
+  markDirty(entry);
   persistDay();
   renderAll();
+}
+
+/**
+ * An entry that changed needs syncing again. A previously synced one keeps its
+ * worklogId so the next Finish Day rewrites that worklog rather than adding a
+ * second one for the same stretch of time.
+ */
+export function markDirty(entry) {
+  if (isExternal(entry)) return;
+  if (!entry.issueKey) {
+    entry.status = 'local';
+    entry.errorMsg = null;
+    return;
+  }
+  if (entry.status === 'synced' || entry.status === 'error') {
+    entry.status = 'pending';
+    entry.errorMsg = null;
+  }
 }
 
 async function handleEntryAction(event) {
@@ -199,17 +245,7 @@ async function handleEntryAction(event) {
   if (!entry) return;
 
   if (button.dataset.a === 'delete') {
-    if (entry.worklogId) {
-      toastWarn(
-        `${entry.issueKey} is already logged in Jira. Delete the worklog there first, ` +
-          'otherwise the time stays booked.',
-      );
-      return;
-    }
-    if (state.timer?.entryId === entry.id) await stopTimer({ save: false });
-    state.entries = state.entries.filter((e) => e.id !== entry.id);
-    await persistDayNow();
-    renderAll();
+    await deleteEntry(entry.id);
     return;
   }
 
@@ -222,14 +258,42 @@ async function handleEntryAction(event) {
   }
 }
 
-/** Right-click actions on a day-view block, shared with the context menu. */
+/** Shared by the entry list and the day-view context menu. */
 export async function deleteEntry(id) {
   const entry = currentEntry(id);
   if (!entry) return;
-  if (entry.worklogId) {
-    toastWarn(`${entry.issueKey} is already logged in Jira — delete the worklog there first.`);
+
+  if (isExternal(entry)) {
+    toastWarn('This worklog was made in Jira — delete it there.');
     return;
   }
+
+  // Deleting locally would leave the time booked in Jira with nothing on screen
+  // to show for it, so the worklog is the decision, not an afterthought.
+  if (entry.worklogId) {
+    const answer = await askModal({
+      title: 'This entry is already in Jira',
+      body: `${entry.issueKey} has ${msToDur(entry.endTs - entry.startTs)} logged as worklog ${entry.worklogId}. Deleting it here does not remove it from Jira.`,
+      buttons: [
+        { label: 'Cancel', value: 'cancel' },
+        { label: 'Remove here only', value: 'local' },
+        { label: 'Delete in Jira too', value: 'jira', primary: true },
+      ],
+      dismissValue: 'cancel',
+    });
+    if (answer === 'cancel') return;
+
+    if (answer === 'jira') {
+      try {
+        await deleteWorklog(entry);
+        toastOk(`Worklog removed from ${entry.issueKey}.`);
+      } catch (err) {
+        toastErr(`Could not delete the worklog in Jira — ${err.message}`);
+        return;
+      }
+    }
+  }
+
   if (state.timer?.entryId === id) await stopTimer({ save: false });
   state.entries = state.entries.filter((e) => e.id !== id);
   await persistDayNow();
@@ -239,8 +303,17 @@ export async function deleteEntry(id) {
 export async function splitEntry(id) {
   const entry = currentEntry(id);
   if (!entry || entry.endTs === null) return;
+  if (isExternal(entry)) {
+    toastWarn('This worklog was made in Jira — split it there.');
+    return;
+  }
   if (entry.worklogId) {
-    toastWarn('Already logged to Jira — split it in Jira instead.');
+    // Splitting would need one worklog updated and a second one created. Doable,
+    // but not worth the failure modes until someone actually wants it.
+    toastWarn(
+      `${entry.issueKey} is already synced. Delete it first if you need to split it, ` +
+        'or split the worklog in Jira.',
+    );
     return;
   }
 

@@ -5,9 +5,9 @@
 // settled by use, not by design — treat behaviour changes as regressions unless
 // they are deliberate.
 
-import { deleteEntry, splitEntry } from './entries.js';
+import { deleteEntry, markDirty, splitEntry } from './entries.js';
 import { renderAll } from './render.js';
-import { isToday, persistDayNow, pxPerMin, state } from './state.js';
+import { isToday, persistDayNow, pxPerMin, state, visibleEntries } from './state.js';
 import { searchIssues } from './tasks.js';
 import { startTimer } from './timer.js';
 import { toastWarn } from './toast.js';
@@ -69,7 +69,7 @@ export function renderTimeline() {
   if (!grid) return;
 
   const dayStart = startOfDayMs(state.selectedDate);
-  const entries = state.entries.filter((e) => e.endTs !== null);
+  const entries = visibleEntries().filter((e) => e.endTs !== null);
 
   // A full work day at minimum, auto-expanded to cover everything logged and,
   // on today, the current hour.
@@ -181,6 +181,7 @@ function buildBlock(entry, slot) {
   block.className = 'sched-entry-block';
   if (entry.status === 'synced') block.classList.add('st-synced');
   if (entry.status === 'error') block.classList.add('st-error');
+  if (entry.external) block.classList.add('external');
   block.dataset.id = entry.id;
   placeBlock(block, entry.startTs, entry.endTs, slot);
 
@@ -189,11 +190,13 @@ function buildBlock(entry, slot) {
   label.textContent = (entry.issueKey ? `${entry.issueKey} ` : '') + entry.title;
   block.appendChild(label);
 
-  for (const edge of ['top', 'bot']) {
-    const handle = document.createElement('div');
-    handle.className = `sched-handle sched-handle-${edge}`;
-    handle.addEventListener('mousedown', (event) => onResize(event, entry, edge));
-    block.appendChild(handle);
+  if (!entry.external) {
+    for (const edge of ['top', 'bot']) {
+      const handle = document.createElement('div');
+      handle.className = `sched-handle sched-handle-${edge}`;
+      handle.addEventListener('mousedown', (event) => onResize(event, entry, edge));
+      block.appendChild(handle);
+    }
   }
 
   block.addEventListener('mousedown', (event) => {
@@ -212,9 +215,11 @@ function buildBlock(entry, slot) {
 
 // ── Dragging ───────────────────────────────────────────────────────────────
 
+// Joggl's own synced entries stay draggable; the move rewrites the worklog on the
+// next Finish Day. Worklogs made in Jira are not Joggl's to move.
 function locked(entry) {
-  if (entry.worklogId) {
-    toastWarn('Already logged to Jira — change the worklog in Jira instead.');
+  if (entry.external) {
+    toastWarn('This worklog was made in Jira — change it there.');
     return true;
   }
   return false;
@@ -241,7 +246,7 @@ function onResize(event, entry, edge) {
       let next = snapToQuarter(origStart + deltaMs, state.selectedDate);
       // Butting up against a neighbour beats the quarter-hour grid: closing a gap
       // exactly is the thing the grid alone cannot express.
-      for (const other of state.entries) {
+      for (const other of visibleEntries()) {
         if (other.id !== entry.id && other.endTs !== null && Math.abs(other.endTs - next) < EDGE_SNAP_MS) {
           next = other.endTs;
         }
@@ -249,7 +254,7 @@ function onResize(event, entry, edge) {
       if (next <= origEnd - MIN_DURATION_MS) entry.startTs = next;
     } else {
       let next = snapToQuarter(origEnd + deltaMs, state.selectedDate);
-      for (const other of state.entries) {
+      for (const other of visibleEntries()) {
         if (other.id !== entry.id && Math.abs(other.startTs - next) < EDGE_SNAP_MS) {
           next = other.startTs;
         }
@@ -338,16 +343,13 @@ function liveUpdate(block, entry) {
 
   const total = document.getElementById('total-display');
   if (total) {
-    const ms = state.entries.reduce((sum, e) => sum + Math.max(0, (e.endTs ?? e.startTs) - e.startTs), 0);
+    const ms = visibleEntries().reduce((sum, e) => sum + Math.max(0, (e.endTs ?? e.startTs) - e.startTs), 0);
     total.textContent = `Total: ${msToDur(ms + (state.timer ? Date.now() - state.timer.startTs : 0))}`;
   }
 }
 
 async function commitDrag(entry) {
-  if (entry.status === 'error') {
-    entry.status = entry.issueKey ? 'pending' : 'local';
-    entry.errorMsg = null;
-  }
+  markDirty(entry);
   await persistDayNow();
   renderAll();
 }

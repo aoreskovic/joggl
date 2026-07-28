@@ -9,6 +9,7 @@ import {
   appVersion,
   isToday,
   loadDay,
+  loadExternalWorklogs,
   loadPins,
   loadSettings,
   loadTimer,
@@ -128,6 +129,16 @@ async function selectDate(date) {
   $('start-stop-btn').disabled = !today;
 
   renderAll();
+
+  // Time booked straight into Jira belongs in this day's total too. Fetched after
+  // the first paint, and never allowed to break the local view if Jira is down.
+  refreshExternal(date);
+}
+
+function refreshExternal(date = state.selectedDate) {
+  return loadExternalWorklogs(date)
+    .then(() => renderAll())
+    .catch(() => renderAll());
 }
 
 function wireDayNav() {
@@ -136,8 +147,15 @@ function wireDayNav() {
     if (state.selectedDate < todayKey()) selectDate(addDays(state.selectedDate, 1));
   });
   $('today-btn').addEventListener('click', () => selectDate(todayKey()));
-  $('finish-day-btn').addEventListener('click', finishDay);
-  $('refresh-tasks-btn').addEventListener('click', loadIssues);
+  $('finish-day-btn').addEventListener('click', async () => {
+    await finishDay();
+    // Newly created worklogs are now claimed by local entries; re-reading keeps
+    // the two views from disagreeing about what is in Jira.
+    await refreshExternal();
+  });
+  $('refresh-tasks-btn').addEventListener('click', async () => {
+    await Promise.allSettled([loadIssues(), refreshExternal()]);
+  });
 }
 
 // ── Omnibar ────────────────────────────────────────────────────────────────
@@ -150,8 +168,10 @@ function updateTimerUi() {
   const running = Boolean(state.timer);
 
   button.innerHTML = running ? `${STOP_ICON}Stop` : `${PLAY_ICON}Start`;
+  // btn-stop only recolours. Swapping btn-primary out with it stripped the
+  // radius, padding and weight, leaving a small sharp-edged red button.
+  button.classList.add('btn-primary');
   button.classList.toggle('btn-stop', running);
-  button.classList.toggle('btn-primary', !running);
   display.classList.toggle('running', running);
 
   if (running) {

@@ -81,6 +81,17 @@ const handlers = {
   'jira:submitWorklog': async ({ issueIdOrKey, startTs, endTs } = {}) =>
     jira.submitWorklog(await resolveCreds(), { issueIdOrKey, startTs, endTs }),
 
+  'jira:updateWorklog': async ({ issueIdOrKey, worklogId, startTs, endTs } = {}) =>
+    jira.updateWorklog(await resolveCreds(), { issueIdOrKey, worklogId, startTs, endTs }),
+
+  'jira:deleteWorklog': async ({ issueIdOrKey, worklogId } = {}) =>
+    jira.deleteWorklog(await resolveCreds(), { issueIdOrKey, worklogId }),
+
+  // Everything this account logged on a day, including time entered straight into
+  // the Jira web UI, which Joggl otherwise cannot see.
+  'jira:dayWorklogs': async ({ date, dayStartTs, dayEndTs } = {}) =>
+    jira.fetchDayWorklogs(await resolveCreds(), { date, dayStartTs, dayEndTs }),
+
   'day:get': ({ date } = {}) => days.getDay(date),
   'day:save': ({ date, entries } = {}) => days.saveDay(date, entries),
 

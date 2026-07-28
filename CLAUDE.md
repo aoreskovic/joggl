@@ -53,6 +53,79 @@ Pure frontend logic, no SP coupling. Port as-is; refactor into modules only wher
 
 ---
 
+## Status — where the port actually is
+
+The port is **done and running against a live Jira Cloud site**. Everything below has
+been exercised end to end, not just written.
+
+### Working
+
+| Area | Notes |
+|---|---|
+| Process split | `main` / `preload` / `renderer` as specified, `sandbox: true` |
+| Store | Own atomic writer, one file per key (see deviations) |
+| Credentials | `safeStorage`, token never crosses into the renderer |
+| Jira client | `myself`, `search/jql` with `nextPageToken`, worklog create / update / delete / read |
+| Setup wizard | First run, with a working `Test connection` |
+| Timer, merge, day view | Ported, including overlap columns, drag, resize, split |
+| Finish Day | Confirmed against real Jira — worklog `60504` on `EHW-70` |
+| Jira-side worklogs | Time logged in the Jira web UI is read back and counted |
+| Logging | `logs/joggl.log`, credential-redacted |
+| Tests | 65 passing, `npm test` |
+
+### Deviations from this document, and why
+
+Each of these was a deliberate choice made while building. Change them back only with
+a reason.
+
+1. **No `electron-store`.** Own ~90-line atomic writer, **one file per key** rather than
+   one file for everything. A crash mid-write can then only cost the day being written,
+   not the whole history. The spec's key names (`day:2026-07-28`) are kept.
+
+2. **Merging never absorbs a synced entry.** Folding a block that already has a
+   `worklogId` into a larger one would either log its minutes twice on the next Finish
+   Day or discard the id that prevents exactly that. Synced entries are frozen against
+   merging, though not against editing — see below.
+
+3. **No worklog `comment`.** The plugin sent `comment: title` as a string, which v3
+   rejects — it wants ADF. Nothing is sent, per gotcha 5.
+
+4. **Editing a synced entry rewrites its worklog.** The entry keeps its `worklogId` and
+   returns to `pending`; Finish Day then issues `PUT .../worklog/{id}` instead of a
+   second `POST`. "Never POST an entry that already has one" still holds exactly.
+   Worklogs Joggl did **not** create are read-only — it has no record of them beyond
+   what Jira just said.
+
+5. **Snapping is to the clock, not to the drag.** Rounding the drag *offset* to 15
+   minutes left an entry that began at 09:07 landing on :07, :22, :37, with a minimum
+   length that depended on the minute the timer was stopped. Both edges and the block
+   move now snap the resulting wall-clock time, measured from local midnight.
+
+6. **`recentIssues()` replaced.** See the task sources section — it returns nothing
+   over REST.
+
+7. **Day keys are local dates.** The plugin used `toISOString().slice(0,10)`, which is
+   UTC and hands anyone east of Greenwich tomorrow's key late in the evening.
+
+### Next, roughly in order
+
+1. **Tray icon states** — the icon should show at a glance whether a timer is running.
+   Right now the only signal is opening the window.
+2. **Keyboard-first start/stop** — a global shortcut exists for showing the window;
+   starting the last task without touching the mouse is the obvious next one.
+3. **Pagination for busy issues** — `fetchDayWorklogs` asks for `maxResults=200` per
+   issue and does not follow `startAt`. Fine at present volumes, wrong eventually.
+4. **Splitting a synced entry** — currently refused. It needs one worklog updated and
+   one created, with a partial-failure story; worth doing only if it is actually missed.
+5. **macOS build** — a GitHub Actions job with a macOS runner, no code changes.
+6. **Auto-update** — still not worth it for ten users. Revisit if handing out installers
+   becomes the annoying part.
+
+Deliberately **not** planned: everything under *Out of scope* at the end of this file.
+The discipline the 100 KB limit used to impose now has to come from that list.
+
+---
+
 ## Stack
 
 Electron, chosen because the existing frontend is already JavaScript and Electron keeps the entire codebase in one language. No Rust, no Python, no native modules, therefore **no C++ build toolchain required**.
@@ -113,7 +186,18 @@ Rules:
 
 - `status: "local"` — no `issueKey`, will never sync, still counts toward the daily total
 - `worklogId` is the idempotency guard. **Never POST an entry that already has one.**
+  An entry that has one and is back to `pending` was edited after syncing: it is
+  rewritten with `PUT .../worklog/{id}`, never posted again.
 - One store key per day. Never put all history in a single key.
+
+### External worklogs
+
+Time booked straight into the Jira web UI is read back per day and shown alongside the
+local entries, so the daily total is not a lie. These are **never persisted** — they
+live only in `state.externalEntries` and are merged in at render time, so a stale copy
+can never end up in a day log. They are read-only: no drag, no edit, no delete, and
+Finish Day does not see them. A Jira worklog whose id already appears on a local entry
+is dropped, so Joggl's own synced entries are not shown twice.
 
 Persist on: stop, every inline edit (500 ms debounce), every merge, every drag/resize commit. A crash must never cost more than the current minute.
 
@@ -135,6 +219,8 @@ Merging is always local. Nothing reaches Jira until Finish Day.
 
 - Stopping a timer **never** submits anything. It writes a `pending` entry locally.
 - **Finish Day** submits all `pending` entries for the selected day, sequentially.
+  An entry that carries a `worklogId` is an edit of something already synced, and is
+  rewritten in place rather than posted again.
 - Entries without an `issueKey` are marked `local` and do not block the day from finishing.
 - On partial failure: successful entries keep `synced` and their `worklogId`; failures get `error` plus a message. **No automatic retry.** Show a summary with a `Retry failed` button.
 - Past days: the button becomes **Re-sync Day**, submitting only non-synced entries.
@@ -159,6 +245,16 @@ All calls originate in the main process using Node's global `fetch`.
 | Connection test | `GET /rest/api/3/myself` |
 | Issue search | `POST /rest/api/3/search/jql` |
 | Submit worklog | `POST /rest/api/3/issue/{issueIdOrKey}/worklog` |
+| Rewrite worklog | `PUT /rest/api/3/issue/{issueIdOrKey}/worklog/{id}` |
+| Delete worklog | `DELETE /rest/api/3/issue/{issueIdOrKey}/worklog/{id}` |
+| Read a day's worklogs | `GET /rest/api/3/issue/{key}/worklog?startedAfter=&startedBefore=` |
+
+**Reading back a day's worklogs takes two steps.** There is no "my worklogs on date X"
+endpoint. JQL (`worklogAuthor = currentUser() AND worklogDate = "…"`) narrows the whole
+instance to the issues carrying such a worklog; each of those is then asked for its
+worklogs, bounded server-side with `startedAfter`/`startedBefore` and filtered by
+`author.accountId`. The bounds matter: a shared issue can hold hundreds of other
+people's entries — one on this site has 660.
 
 ### Gotchas — these will cost hours if ignored
 

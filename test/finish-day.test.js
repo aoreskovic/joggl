@@ -43,10 +43,16 @@ test('splits a day into submit / local / already-synced / running', () => {
   assert.deepEqual(plan.running.map((e) => e.id), ['running']);
 });
 
-test('a worklogId alone keeps an entry out of the queue, whatever its status says', () => {
-  const plan = planFinishDay([entry({ id: 'x', status: 'pending', worklogId: '900' })]);
+test('a synced entry with a worklogId is left alone', () => {
+  const plan = planFinishDay([entry({ id: 'x', status: 'synced', worklogId: '900' })]);
   assert.deepEqual(plan.toSubmit, []);
   assert.deepEqual(plan.alreadySynced.map((e) => e.id), ['x']);
+});
+
+test('an entry edited after syncing is queued so its worklog can be rewritten', () => {
+  const plan = planFinishDay([entry({ id: 'x', status: 'pending', worklogId: '900' })]);
+  assert.deepEqual(plan.toSubmit.map((e) => e.id), ['x']);
+  assert.deepEqual(plan.alreadySynced, []);
 });
 
 test('submissions are ordered oldest first', () => {
@@ -184,6 +190,63 @@ test('a re-sync after a partial failure only retries what failed', async () => {
   assert.equal(byId(second.entries, 'b').status, 'synced');
   assert.equal(byId(second.entries, 'b').worklogId, 'w-b');
   assert.equal(byId(second.entries, 'a').worklogId, 'w-a');
+});
+
+// ── Editing something already synced ───────────────────────────────────────
+
+test('an edited synced entry keeps its worklog id through a successful rewrite', async () => {
+  const seen = [];
+  const result = await runFinishDay(
+    [entry({ id: 'a', status: 'pending', worklogId: '900', startTs: T(9), endTs: T(11) })],
+    async (e) => {
+      seen.push({ id: e.id, worklogId: e.worklogId, endTs: e.endTs });
+      return { worklogId: e.worklogId };
+    },
+  );
+
+  // The submit callback is handed the existing id, which is what tells the caller
+  // to rewrite rather than post a second worklog.
+  assert.deepEqual(seen, [{ id: 'a', worklogId: '900', endTs: T(11) }]);
+  assert.equal(byId(result.entries, 'a').status, 'synced');
+  assert.equal(byId(result.entries, 'a').worklogId, '900');
+});
+
+test('a failed rewrite keeps the worklog id so the retry rewrites too', async () => {
+  const first = await runFinishDay(
+    [entry({ id: 'a', status: 'pending', worklogId: '900' })],
+    async () => {
+      throw new Error('HTTP 500');
+    },
+  );
+
+  const failed = byId(first.entries, 'a');
+  assert.equal(failed.status, 'error');
+  assert.equal(failed.worklogId, '900', 'losing this would post a duplicate on retry');
+
+  const retried = resetFailedForRetry(first.entries);
+  assert.equal(byId(retried, 'a').status, 'pending');
+  assert.equal(byId(retried, 'a').worklogId, '900');
+
+  const seen = [];
+  await runFinishDay(retried, async (e) => {
+    seen.push(e.worklogId);
+    return { worklogId: e.worklogId };
+  });
+  assert.deepEqual(seen, ['900']);
+});
+
+test('a failed create still has no worklog id, so the retry posts', async () => {
+  const first = await runFinishDay([entry({ id: 'a' })], async () => {
+    throw new Error('network down');
+  });
+  assert.equal(byId(first.entries, 'a').worklogId, null);
+
+  const seen = [];
+  await runFinishDay(resetFailedForRetry(first.entries), async (e) => {
+    seen.push(e.worklogId);
+    return { worklogId: 'new-1' };
+  });
+  assert.deepEqual(seen, [null]);
 });
 
 test('runFinishDay does not mutate the entries it was given', async () => {

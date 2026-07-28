@@ -68,10 +68,15 @@ button {
   cursor: not-allowed;
 }
 
+/* A modifier on .btn-primary, never a replacement for it — it carries colour only. */
 .btn-stop {
-  background: var(--danger-line) !important;
-  border-color: var(--danger-line) !important;
-  color: #fff !important;
+  background: var(--danger-line);
+  border-color: var(--danger-line);
+  color: #fff;
+}
+
+.btn-stop:hover:not(:disabled) {
+  filter: brightness(1.08);
 }
 
 /* Drawn rather than typed, so play and stop share one optical size and baseline
@@ -464,6 +469,34 @@ button {
 .entry-card.overlapping {
   border-color: var(--warn);
   background: var(--warn-soft);
+}
+
+/* Logged in Jira, not by Joggl: visible and counted, but not Joggl's to change. */
+.entry-card.external {
+  border-style: dashed;
+  background: transparent;
+}
+
+.entry-card.external .entry-title {
+  color: var(--text-muted);
+}
+
+.entry-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 1px 7px;
+  flex-shrink: 0;
+  cursor: help;
+}
+
+.timeline-empty.warn {
+  color: var(--warn);
+  padding: 10px 0;
 }
 
 .entry-name {
@@ -886,6 +919,17 @@ button {
   background: var(--accent-softer);
   border-style: dashed;
   pointer-events: none;
+}
+
+.sched-entry-block.external {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--text-faint);
+  cursor: default;
+}
+
+.sched-entry-block.external .sched-entry-label {
+  color: var(--text-muted);
 }
 
 .sched-entry-block.dragging {

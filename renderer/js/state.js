@@ -120,6 +120,10 @@ export function searchJira(jql, maxResults) {
   return api.jira.search(jql, maxResults);
 }
 
+export function lookupJira(query, limit) {
+  return api.jira.lookup(query, limit);
+}
+
 /**
  * Create or rewrite the worklog for an entry.
  *

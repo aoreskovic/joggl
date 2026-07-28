@@ -256,6 +256,14 @@ All calls originate in the main process using Node's global `fetch`.
 | Rewrite worklog | `PUT /rest/api/3/issue/{issueIdOrKey}/worklog/{id}` |
 | Delete worklog | `DELETE /rest/api/3/issue/{issueIdOrKey}/worklog/{id}` |
 | Read a day's worklogs | `GET /rest/api/3/issue/{key}/worklog?startedAfter=&startedBefore=` |
+| Free-text lookup | `GET /rest/api/3/issue/picker` |
+| Exact-key lookup | `GET /rest/api/3/issue/{key}` |
+
+**`/issue/picker` cannot be trusted with keys.** It is good at summaries and it
+ignores status, which is exactly what the search box needs — but on the test site
+`GEN-100` returns nothing at all and `GEN-1` returns `GEN-147`. A key-shaped query
+therefore also gets a direct `GET /issue/{key}`, which resolves any issue whatever its
+status, and that result is put first. Neither call alone is enough.
 
 **Reading back a day's worklogs takes two steps.** There is no "my worklogs on date X"
 endpoint. JQL (`worklogAuthor = currentUser() AND worklogDate = "…"`) narrows the whole
@@ -308,6 +316,12 @@ worklogAuthor = currentUser() AND worklogDate >= -30d ORDER BY updated DESC
 > the issues you keep booking time against, shared ones like `Meetings` included.
 
 Pinned tasks are a **local list of issue keys** in the store, not a Jira filter.
+
+The task sources decide what the issue list shows, but they must not decide what is
+*findable*. An issue that is Done, or assigned to a colleague, is not in any of them —
+so once the local matches thin out to two or fewer, or the query names a key, the
+search box also asks Jira directly and shows those results under **Elsewhere in Jira**.
+Debounced, and a late answer for a query the user has already moved past is discarded.
 
 ### Credentials
 

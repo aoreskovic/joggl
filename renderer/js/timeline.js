@@ -9,7 +9,7 @@ import { showContextMenu } from './context-menu.js';
 import { markDirty } from './entries.js';
 import { renderAll } from './render.js';
 import { isToday, persistDayNow, pxPerMin, state, visibleEntries } from './state.js';
-import { searchIssues } from './tasks.js';
+import { createRemoteLookup, searchIssues } from './tasks.js';
 import { toastWarn } from './toast.js';
 import {
   dateKey,
@@ -371,9 +371,12 @@ function onQuickEntryOutside(event) {
 export function onGridClick(event) {
   if (event.target.closest('.sched-entry-block') || event.target.closest('.sched-handle')) return;
 
-  const panel = document.getElementById('right-panel');
   const grid = document.getElementById('schedule-grid');
-  const y = event.clientY - grid.getBoundingClientRect().top + panel.scrollTop;
+  // getBoundingClientRect is viewport-relative and already reflects the panel's
+  // scroll position. Adding scrollTop on top of it — as the plugin did — counted
+  // the scroll twice, so after the view auto-scrolled to now, a click at 16:00
+  // landed somewhere around 21:00.
+  const y = event.clientY - grid.getBoundingClientRect().top;
   const clicked = view.rangeStartMs + (y / view.pxPerMin) * 60_000;
 
   const startTs = snapToQuarter(clicked, state.selectedDate);
@@ -421,34 +424,51 @@ function showQuickEntry(cx, cy, startTs, endTs) {
     renderAll();
   };
 
-  const renderResults = (query) => {
-    results.replaceChildren();
-    const matches = searchIssues(query).slice(0, 8);
-    // Same rule as the omnibar: few enough candidates, show the whole summary.
-    results.classList.toggle('expanded', matches.length <= 2);
+  // Same reach as the omnibar: the loaded issues are only what the JQL sources
+  // returned, so anything Done or assigned elsewhere has to come from Jira.
+  let remote = { query: '', issues: [] };
+  const lookupRemote = createRemoteLookup((query, issues) => {
+    remote = { query, issues };
+    if (quickEntryEl === wrap) renderResults(input.value);
+  });
 
-    if (matches.length === 0) {
+  const issueRow = (issue) => {
+    const item = document.createElement('div');
+    item.className = 'task-dd-item';
+    item.innerHTML =
+      `<span class="jira-chip">${esc(issue.issueKey)}</span>` +
+      `<span class="task-dd-title">${esc(issue.title)}</span>`;
+    item.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      commit(issue.issueKey, issue.issueId, issue.title);
+    });
+    return item;
+  };
+
+  const renderResults = (rawQuery) => {
+    const query = String(rawQuery ?? '').trim();
+    const local = searchIssues(rawQuery).slice(0, 8);
+    const fromJira = remote.query === query ? remote.issues : [];
+
+    lookupRemote(query, local.length);
+    results.classList.toggle('expanded', local.length + fromJira.length <= 2);
+
+    const children = local.map(issueRow);
+    if (fromJira.length > 0) {
+      const separator = document.createElement('div');
+      separator.className = 'task-dd-sep';
+      separator.textContent = 'Elsewhere in Jira';
+      children.push(separator, ...fromJira.map(issueRow));
+    }
+
+    if (children.length === 0) {
       const hint = document.createElement('div');
       hint.className = 'task-dd-empty';
-      hint.textContent = query.trim()
-        ? 'No match — Enter adds it as a local entry.'
-        : 'No issues loaded.';
-      results.appendChild(hint);
-      return;
+      hint.textContent = query ? 'No match — Enter adds it as a local entry.' : 'No issues loaded.';
+      children.push(hint);
     }
 
-    for (const issue of matches) {
-      const item = document.createElement('div');
-      item.className = 'task-dd-item';
-      item.innerHTML =
-        `<span class="jira-chip">${esc(issue.issueKey)}</span>` +
-        `<span class="task-dd-title">${esc(issue.title)}</span>`;
-      item.addEventListener('mousedown', (event) => {
-        event.preventDefault();
-        commit(issue.issueKey, issue.issueId, issue.title);
-      });
-      results.appendChild(item);
-    }
+    results.replaceChildren(...children);
   };
 
   input.addEventListener('input', () => renderResults(input.value));
@@ -457,9 +477,10 @@ function showQuickEntry(cx, cy, startTs, endTs) {
     if (event.key !== 'Enter') return;
     const raw = input.value.trim();
     if (!raw) return hideQuickEntry();
-    const matches = searchIssues(raw);
-    if (matches.length === 1) {
-      commit(matches[0].issueKey, matches[0].issueId, matches[0].title);
+
+    const candidates = [...searchIssues(raw), ...(remote.query === raw ? remote.issues : [])];
+    if (candidates.length === 1) {
+      commit(candidates[0].issueKey, candidates[0].issueId, candidates[0].title);
     } else {
       const key = extractIssueKey(raw);
       commit(key, null, key ? stripTrailingKey(raw) || key : raw);

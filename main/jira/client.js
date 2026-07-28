@@ -166,6 +166,84 @@ export async function searchIssues(creds, jql, { maxResults = 100, pageLimit = 1
   return issues;
 }
 
+const EXACT_KEY = /\b([A-Za-z][A-Za-z0-9_]*-\d+)\b/;
+
+function toIssue(raw) {
+  return {
+    issueKey: raw.key,
+    issueId: raw.id ? String(raw.id) : null,
+    title: raw.fields?.summary ?? raw.summaryText ?? raw.key,
+    status: raw.fields?.status?.name ?? null,
+    issueType: raw.fields?.issuetype?.name ?? null,
+    projectKey: raw.fields?.project?.key ?? null,
+  };
+}
+
+/** GET /rest/api/3/issue/{key} — resolves any issue whatever its status. */
+async function findIssueByKey(creds, key) {
+  try {
+    const data = await request(
+      creds,
+      'GET',
+      `${API}/issue/${encodeURIComponent(key)}?fields=summary,status,issuetype,project`,
+      { context: `issue ${key}` },
+    );
+    return data ? toIssue(data) : null;
+  } catch (err) {
+    // An unknown key is a normal outcome while someone is still typing.
+    if (err.status === 404 || err.status === 403) return null;
+    throw err;
+  }
+}
+
+/**
+ * Free-text lookup across the whole instance, not just the configured task
+ * sources — for finding an issue that is Done, or assigned to somebody else.
+ *
+ * Two calls, because neither is sufficient alone:
+ *
+ *   - `/issue/picker` is Jira's own autocomplete and matches summaries well, but
+ *     it is unreliable for keys: on the test site `GEN-100` returns nothing at
+ *     all and `GEN-1` returns `GEN-147`.
+ *   - a direct `GET /issue/{key}` is definitive for a key and nothing else.
+ *
+ * So a key-shaped query gets both, and the exact match is put first.
+ */
+export async function lookupIssues(creds, query, { limit = 8 } = {}) {
+  const trimmed = String(query ?? '').trim();
+  if (trimmed.length < 2) return [];
+
+  const found = new Map();
+  const key = trimmed.match(EXACT_KEY)?.[1];
+
+  if (key) {
+    const exact = await findIssueByKey(creds, key.toUpperCase());
+    if (exact) found.set(exact.issueKey, exact);
+  }
+
+  try {
+    const params = new URLSearchParams({
+      query: trimmed,
+      showSubTasks: 'true',
+      showSubTaskParent: 'true',
+    });
+    const data = await request(creds, 'GET', `${API}/issue/picker?${params}`, {
+      context: 'issue lookup',
+    });
+    for (const section of data?.sections ?? []) {
+      for (const issue of section.issues ?? []) {
+        if (found.size >= limit) break;
+        if (!found.has(issue.key)) found.set(issue.key, toIssue(issue));
+      }
+    }
+  } catch (err) {
+    // An exact hit is still worth returning even if the picker is unhappy.
+    if (found.size === 0) throw err;
+  }
+
+  return [...found.values()].slice(0, limit);
+}
+
 /**
  * POST /rest/api/3/issue/{issueIdOrKey}/worklog
  *

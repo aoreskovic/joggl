@@ -76,6 +76,11 @@ const handlers = {
   'jira:search': async ({ jql, maxResults } = {}) =>
     jira.searchIssues(await resolveCreds(), jql, { maxResults }),
 
+  // Free-text and exact-key lookup across the whole instance, for issues the
+  // configured task sources do not cover.
+  'jira:lookup': async ({ query, limit } = {}) =>
+    jira.lookupIssues(await resolveCreds(), query, { limit }),
+
   // One worklog per call. The Finish Day loop, its ordering and its partial-failure
   // bookkeeping live in the renderer, where they need no Node APIs.
   'jira:submitWorklog': async ({ issueIdOrKey, startTs, endTs } = {}) =>

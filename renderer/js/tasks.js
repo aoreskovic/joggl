@@ -5,10 +5,11 @@
 import { PLAY_ICON } from './icons.js';
 import { isPinned, togglePin } from './pins.js';
 import { renderAll } from './render.js';
-import { isToday, searchJira, state } from './state.js';
+import { isToday, lookupJira, searchJira, state } from './state.js';
 import { startTimer } from './timer.js';
 import { toastErr, toastWarn } from './toast.js';
-import { esc } from './util.js';
+
+import { esc, shouldLookupRemote } from './util.js';
 
 const collapsed = new Set();
 let loading = false;
@@ -28,6 +29,49 @@ export function searchIssues(query) {
         i.title.toLowerCase().includes(q) || i.issueKey.toLowerCase().includes(q),
     )
     .slice(0, 20);
+}
+
+// ── Looking beyond the loaded issues ───────────────────────────────────────
+
+/**
+ * A debounced remote lookup that only ever reports results for the query the
+ * user is still looking at — an earlier, slower answer arriving late would
+ * otherwise repopulate the list under them.
+ *
+ * @param {(query: string, issues: object[]) => void} onResults
+ * @returns {(query: string, localCount: number) => void}
+ */
+export function createRemoteLookup(onResults) {
+  let timer = null;
+  let latest = '';
+
+  return (rawQuery, localCount) => {
+    const query = String(rawQuery ?? '').trim();
+    latest = query;
+    clearTimeout(timer);
+
+    if (!shouldLookupRemote(query, localCount) || !state.settings.tokenConfigured) {
+      onResults(query, []);
+      return;
+    }
+
+    timer = setTimeout(async () => {
+      try {
+        const issues = await lookupJira(query);
+        if (query !== latest) return;
+        // Anything already in the local list is not worth repeating.
+        const known = new Set(searchIssues(query).map((i) => i.issueKey));
+        onResults(
+          query,
+          issues.filter((i) => !known.has(i.issueKey)),
+        );
+      } catch (err) {
+        if (query !== latest) return;
+        onResults(query, []);
+        toastErr(`Jira lookup failed — ${err.message}`);
+      }
+    }, 300);
+  };
 }
 
 export async function loadIssues() {

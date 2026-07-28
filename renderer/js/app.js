@@ -35,7 +35,7 @@ import {
   wireSetup,
 } from './settings-ui.js';
 import { finishDay, updateFinishButton } from './sync.js';
-import { loadIssues, renderTaskList, searchIssues } from './tasks.js';
+import { createRemoteLookup, loadIssues, renderTaskList, searchIssues } from './tasks.js';
 import {
   hideQuickEntry,
   onGridClick,
@@ -205,16 +205,56 @@ function wireOmnibar() {
   const input = $('task-input');
   const dropdown = $('task-dropdown');
 
+  // Results from Jira for a query that is still on screen.
+  let remote = { query: '', issues: [] };
+  const lookupRemote = createRemoteLookup((query, issues) => {
+    remote = { query, issues };
+    if (document.activeElement === input) showDropdown();
+  });
+
+  const pick = (issue) => {
+    pickedIssue = issue;
+    input.value = `${issue.title} (${issue.issueKey})`;
+    dropdown.classList.add('hidden');
+  };
+
+  const issueRow = (issue, expanded) => {
+    const item = document.createElement('div');
+    item.className = 'task-dd-item';
+    item.innerHTML =
+      `<span class="jira-chip">${esc(issue.issueKey)}</span>` +
+      `<span class="task-dd-title">${esc(issue.title)}</span>` +
+      (expanded && issue.status ? `<span class="task-dd-meta">${esc(issue.status)}</span>` : '');
+    item.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      pick(issue);
+    });
+    return item;
+  };
+
   const showDropdown = () => {
     const query = input.value.trim();
-    const matches = searchIssues(input.value);
+    const local = searchIssues(input.value);
+    const fromJira = remote.query === query ? remote.issues : [];
+
+    lookupRemote(query, local.length);
 
     // Once the list is down to a couple of candidates there is room to show the
     // whole summary. Truncating "Axiom Water Bottle Mechanical De…" is only
     // tolerable while it is one of fifteen rows being scanned at a glance.
-    dropdown.classList.toggle('expanded', matches.length <= EXPAND_TITLES_AT);
+    const expanded = local.length + fromJira.length <= EXPAND_TITLES_AT;
+    dropdown.classList.toggle('expanded', expanded);
 
-    if (matches.length === 0) {
+    const children = local.map((issue) => issueRow(issue, expanded));
+
+    if (fromJira.length > 0) {
+      const separator = document.createElement('div');
+      separator.className = 'task-dd-sep';
+      separator.textContent = 'Elsewhere in Jira';
+      children.push(separator, ...fromJira.map((issue) => issueRow(issue, expanded)));
+    }
+
+    if (children.length === 0) {
       // Say what Enter will do rather than just vanishing.
       if (!query) {
         dropdown.classList.add('hidden');
@@ -224,33 +264,13 @@ function wireOmnibar() {
       const hint = document.createElement('div');
       hint.className = 'task-dd-empty';
       hint.textContent = key
-        ? `No loaded issue matches. Enter starts a timer on ${key} anyway.`
+        ? `No issue found for ${key}. Enter starts a timer on it anyway.`
         : `Nothing matches “${query}”. Enter tracks it as a local entry, which counts ` +
           'towards the day but never syncs to Jira.';
-      dropdown.replaceChildren(hint);
-      dropdown.classList.remove('hidden');
-      return;
+      children.push(hint);
     }
 
-    dropdown.replaceChildren(
-      ...matches.map((issue) => {
-        const item = document.createElement('div');
-        item.className = 'task-dd-item';
-        item.innerHTML =
-          `<span class="jira-chip">${esc(issue.issueKey)}</span>` +
-          `<span class="task-dd-title">${esc(issue.title)}</span>` +
-          (dropdown.classList.contains('expanded') && issue.status
-            ? `<span class="task-dd-meta">${esc(issue.status)}</span>`
-            : '');
-        item.addEventListener('mousedown', (event) => {
-          event.preventDefault();
-          pickedIssue = issue;
-          input.value = `${issue.title} (${issue.issueKey})`;
-          dropdown.classList.add('hidden');
-        });
-        return item;
-      }),
-    );
+    dropdown.replaceChildren(...children);
     dropdown.classList.remove('hidden');
   };
 

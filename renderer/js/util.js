@@ -125,6 +125,29 @@ export function extractIssueKey(text) {
   return m ? m[1] : null;
 }
 
+/** Same shape, but case-insensitive — for deciding whether a query names an issue. */
+export function looksLikeIssueKey(text) {
+  return /\b[A-Za-z][A-Za-z0-9_]*-\d+\b/.test(String(text ?? ''));
+}
+
+/** At or below this many local matches, it is worth asking Jira as well. */
+export const REMOTE_LOOKUP_BELOW = 2;
+
+/**
+ * Whether a query warrants going out to Jira on top of filtering the issues
+ * already loaded.
+ *
+ * The loaded set is only what the configured JQL sources returned, so anything
+ * Done, or assigned to somebody else, is simply not in it. Once the local list
+ * has thinned out — or the query names a key outright — the remote lookup is
+ * what makes the difference between finding an issue and not.
+ */
+export function shouldLookupRemote(query, localCount) {
+  const q = String(query ?? '').trim();
+  if (q.length < 2) return false;
+  return localCount <= REMOTE_LOOKUP_BELOW || looksLikeIssueKey(q);
+}
+
 export function stripTrailingKey(text) {
   return String(text ?? '')
     .replace(/\s*\(\s*[A-Z][A-Z0-9_]+-\d+\s*\)\s*$/, '')

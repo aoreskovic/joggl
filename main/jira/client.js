@@ -196,18 +196,41 @@ async function findIssueByKey(creds, key) {
   }
 }
 
+const ONLY_KEY = /^[A-Za-z][A-Za-z0-9_]*-\d+$/;
+
+/**
+ * Turn what someone typed into the right-hand side of a JQL `~` match.
+ *
+ * `~` takes a Lucene query, so every operator character has to go or the whole
+ * search fails on a stray bracket. The last word gets a `*` so the results are
+ * useful while still being typed — "meet" finds "Meetings".
+ */
+export function toSummaryTerm(raw) {
+  const cleaned = String(raw)
+    .replace(/[+\-&|!(){}\[\]^"~*?:\\/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return null;
+
+  const words = cleaned.split(' ');
+  words[words.length - 1] += '*';
+  return words.join(' ');
+}
+
 /**
  * Free-text lookup across the whole instance, not just the configured task
  * sources — for finding an issue that is Done, or assigned to somebody else.
  *
  * Two calls, because neither is sufficient alone:
  *
- *   - `/issue/picker` is Jira's own autocomplete and matches summaries well, but
- *     it is unreliable for keys: on the test site `GEN-100` returns nothing at
- *     all and `GEN-1` returns `GEN-147`.
+ *   - `summary ~ "…"` is the actual search. It matches titles, ignores status,
+ *     and prefix-matches the last word.
  *   - a direct `GET /issue/{key}` is definitive for a key and nothing else.
  *
- * So a key-shaped query gets both, and the exact match is put first.
+ * `/issue/picker`, Jira's own autocomplete, is deliberately **not** used. On the
+ * test site it returns only a browsing-history section, which an API-token
+ * request has none of: "meeting" finds nothing at all, and "Meeting - Protostar"
+ * returns nineteen unrelated issues.
  */
 export async function lookupIssues(creds, query, { limit = 8 } = {}) {
   const trimmed = String(query ?? '').trim();
@@ -221,23 +244,24 @@ export async function lookupIssues(creds, query, { limit = 8 } = {}) {
     if (exact) found.set(exact.issueKey, exact);
   }
 
+  // A query that is nothing but a key is already answered. Searching titles for
+  // its digits would only add noise.
+  if (ONLY_KEY.test(trimmed)) return [...found.values()];
+
+  const term = toSummaryTerm(trimmed);
+  if (!term) return [...found.values()];
+
   try {
-    const params = new URLSearchParams({
-      query: trimmed,
-      showSubTasks: 'true',
-      showSubTaskParent: 'true',
+    const issues = await searchIssues(creds, `summary ~ "${term}" ORDER BY updated DESC`, {
+      maxResults: limit,
+      pageLimit: 1,
     });
-    const data = await request(creds, 'GET', `${API}/issue/picker?${params}`, {
-      context: 'issue lookup',
-    });
-    for (const section of data?.sections ?? []) {
-      for (const issue of section.issues ?? []) {
-        if (found.size >= limit) break;
-        if (!found.has(issue.key)) found.set(issue.key, toIssue(issue));
-      }
+    for (const issue of issues) {
+      if (found.size >= limit) break;
+      if (!found.has(issue.issueKey)) found.set(issue.issueKey, issue);
     }
   } catch (err) {
-    // An exact hit is still worth returning even if the picker is unhappy.
+    // An exact key hit is still worth returning even if the text search fails.
     if (found.size === 0) throw err;
   }
 

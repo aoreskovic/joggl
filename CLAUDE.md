@@ -256,14 +256,25 @@ All calls originate in the main process using Node's global `fetch`.
 | Rewrite worklog | `PUT /rest/api/3/issue/{issueIdOrKey}/worklog/{id}` |
 | Delete worklog | `DELETE /rest/api/3/issue/{issueIdOrKey}/worklog/{id}` |
 | Read a day's worklogs | `GET /rest/api/3/issue/{key}/worklog?startedAfter=&startedBefore=` |
-| Free-text lookup | `GET /rest/api/3/issue/picker` |
+| Free-text lookup | `POST /rest/api/3/search/jql` with `summary ~ "term*"` |
 | Exact-key lookup | `GET /rest/api/3/issue/{key}` |
 
-**`/issue/picker` cannot be trusted with keys.** It is good at summaries and it
-ignores status, which is exactly what the search box needs — but on the test site
-`GEN-100` returns nothing at all and `GEN-1` returns `GEN-147`. A key-shaped query
-therefore also gets a direct `GET /issue/{key}`, which resolves any issue whatever its
-status, and that result is put first. Neither call alone is enough.
+**Do not use `/rest/api/3/issue/picker`.** It is the obvious choice — Jira's own
+autocomplete — and it does not work over an API token. On the test site it returns
+only an `hs` (browsing-history) section, which such a request has none of:
+`meeting` finds nothing at all, `GEN-100` finds nothing, `GEN-1` returns `GEN-147`,
+and `Meeting - Protostar` returns nineteen unrelated issues. It fails by returning
+plausible garbage rather than an error, which is the worst way to fail.
+
+`summary ~ "term*"` does the job properly: matches titles, ignores status, and
+prefix-matches so results appear while still being typed. The right-hand side of `~`
+is a **Lucene query**, so every operator character must be stripped from whatever the
+user typed — an unbalanced bracket 400s the whole request and the search box silently
+goes dead. A hyphen is Lucene negation, which is why `Meeting - Protostar` has to
+become `Meeting Protostar*`. See `toSummaryTerm` and its tests.
+
+An exact key still gets its own `GET /issue/{key}` on top, which is definitive where a
+title search is not, and that hit is listed first.
 
 **Reading back a day's worklogs takes two steps.** There is no "my worklogs on date X"
 endpoint. JQL (`worklogAuthor = currentUser() AND worklogDate = "…"`) narrows the whole

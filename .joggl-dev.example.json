@@ -13,8 +13,8 @@
     },
     {
       "id": "recent",
-      "name": "Recent",
-      "jql": "issuekey IN recentIssues()"
+      "name": "Logged time recently",
+      "jql": "worklogAuthor = currentUser() AND worklogDate >= -30d ORDER BY updated DESC"
     }
   ]
 }

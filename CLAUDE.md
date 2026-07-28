@@ -194,8 +194,14 @@ Replaces SP's task sections. **Queries must be user-configurable in settings —
 
 ```
 assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC
-issuekey IN recentIssues()
+worklogAuthor = currentUser() AND worklogDate >= -30d ORDER BY updated DESC
 ```
+
+> The second default was originally `issuekey IN recentIssues()`. Verified against a
+> live site: it returns **0 issues** over the REST API, because `recentIssues()`
+> resolves against the browser's view history, which an API-token request does not
+> have. Worklog authorship answers the question a time tracker actually cares about —
+> the issues you keep booking time against, shared ones like `Meetings` included.
 
 Pinned tasks are a **local list of issue keys** in the store, not a Jira filter.
 

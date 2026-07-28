@@ -15,8 +15,13 @@ export const DEFAULT_TASK_SOURCES = [
   },
   {
     id: 'recent',
-    name: 'Recent',
-    jql: 'issuekey IN recentIssues()',
+    name: 'Logged time recently',
+    // Not `issuekey IN recentIssues()`: that resolves against the browser's view
+    // history, which a REST call authenticated with an API token does not have,
+    // so over this API it reliably returns nothing. Worklog authorship is the
+    // better question for a time tracker anyway — it surfaces exactly the issues
+    // you keep booking time against, shared ones like Meetings included.
+    jql: 'worklogAuthor = currentUser() AND worklogDate >= -30d ORDER BY updated DESC',
   },
 ];
 

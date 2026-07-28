@@ -23,7 +23,11 @@ const DEFAULT_SOURCES = [
     name: 'Assigned to me',
     jql: 'assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC',
   },
-  { id: 'recent', name: 'Recent', jql: 'issuekey IN recentIssues()' },
+  {
+    id: 'recent',
+    name: 'Logged time recently',
+    jql: 'worklogAuthor = currentUser() AND worklogDate >= -30d ORDER BY updated DESC',
+  },
 ];
 
 let draftSources = [];

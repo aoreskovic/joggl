@@ -471,27 +471,30 @@ button {
   background: var(--warn-soft);
 }
 
-/* Logged in Jira, not by Joggl: visible and counted, but not Joggl's to change. */
+/* Logged in Jira, not by Joggl: visible and counted, but not Joggl's to change.
+   Dashed and unfilled so it reads as a record rather than something to grab. */
 .entry-card.external {
   border-style: dashed;
+  border-color: var(--external-line);
   background: transparent;
+}
+
+.entry-card.external:hover {
+  box-shadow: none;
+  background: var(--external-soft);
+}
+
+.entry-card.external .entry-jira,
+.entry-card.external .status-badge {
+  color: var(--external);
+}
+
+.entry-card.external .status-badge {
+  background: var(--external-soft);
 }
 
 .entry-card.external .entry-title {
   color: var(--text-muted);
-}
-
-.entry-badge {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  padding: 1px 7px;
-  flex-shrink: 0;
-  cursor: help;
 }
 
 .timeline-empty.warn {
@@ -503,9 +506,27 @@ button {
   flex: 1;
   min-width: 110px;
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  overflow: hidden;
+}
+
+.entry-name-row {
+  display: flex;
   align-items: center;
   gap: 6px;
   overflow: hidden;
+  max-width: 100%;
+}
+
+.entry-sub {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--external);
+  cursor: help;
 }
 
 .entry-title {
@@ -921,15 +942,22 @@ button {
   pointer-events: none;
 }
 
-.sched-entry-block.external {
+.sched-entry-block.external,
+.sched-entry-block.external.st-synced {
   background: transparent;
   border-style: dashed;
-  border-color: var(--text-faint);
+  border-color: var(--external-line);
   cursor: default;
 }
 
-.sched-entry-block.external .sched-entry-label {
-  color: var(--text-muted);
+.sched-entry-block.external .sched-entry-label,
+.sched-entry-block.external.st-synced .sched-entry-label {
+  color: var(--external);
+}
+
+.sched-entry-block.external:hover {
+  background: var(--external-soft);
+  box-shadow: none;
 }
 
 .sched-entry-block.dragging {

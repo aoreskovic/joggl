@@ -199,6 +199,13 @@ can never end up in a day log. They are read-only: no drag, no edit, no delete, 
 Finish Day does not see them. A Jira worklog whose id already appears on a local entry
 is dropped, so Joggl's own synced entries are not shown twice.
 
+They are drawn dashed and unfilled in the `--external` cyan, labelled **Manual Jira
+entry** beneath the issue title. Cyan because it has to sit clearly apart from the
+indigo of a pending entry and the green of a synced one — the distinction that matters
+is *whose record is this*, not *has it been sent*. They take part in overlap detection,
+so a local entry clashing with one is still flagged, but the warning is not repeated on
+the Jira row itself: it invites a fix, and there is nothing there to fix.
+
 Persist on: stop, every inline edit (500 ms debounce), every merge, every drag/resize commit. A crash must never cost more than the current minute.
 
 ---

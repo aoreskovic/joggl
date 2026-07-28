@@ -95,18 +95,26 @@ function note(text, kind) {
 function buildEntryCard(entry, isOverlapping) {
   const duration = Math.max(0, (entry.endTs ?? entry.startTs) - entry.startTs);
   const external = isExternal(entry);
+  // External rows still take part in overlap detection, so a local entry that
+  // clashes with one is flagged — but the warning is not repeated on the Jira row
+  // itself. It invites a fix, and there is nothing here to fix: the row is
+  // read-only and the clash is Jira's to sort out.
+  const flagOverlap = isOverlapping && !external;
+
   const card = document.createElement('div');
   card.className =
-    'entry-card' + (isOverlapping ? ' overlapping' : '') + (external ? ' external' : '');
+    'entry-card' + (flagOverlap ? ' overlapping' : '') + (external ? ' external' : '');
   card.dataset.id = entry.id;
 
   card.innerHTML =
     '<div class="entry-name">' +
+    '<div class="entry-name-row">' +
     (entry.issueKey ? `<span class="entry-jira">${esc(entry.issueKey)}</span>` : '') +
     `<span class="entry-title" title="${esc(entry.title)}">${esc(entry.title)}</span>` +
+    '</div>' +
     (external
-      ? '<span class="entry-badge" title="Logged in Jira, not by Joggl. Shown so the ' +
-        'day total is right; edit it in Jira.">in Jira</span>'
+      ? '<div class="entry-sub" title="Logged straight into Jira, not by Joggl. ' +
+        'Shown so the day total is right; edit it in Jira.">Manual Jira entry</div>'
       : '') +
     '</div>' +
     '<div class="time-range">' +
@@ -122,7 +130,7 @@ function buildEntryCard(entry, isOverlapping) {
       ? ''
       : `<button class="icon-btn del" data-a="delete" data-id="${esc(entry.id)}" title="Delete">🗑</button>`) +
     '</div>' +
-    (isOverlapping
+    (flagOverlap
       ? '<div class="entry-err-row">⚠ Overlaps another entry — allowed, but usually a mistake.</div>'
       : '') +
     (entry.errorMsg ? `<div class="entry-err-row">⚠ ${esc(entry.errorMsg)}</div>` : '');

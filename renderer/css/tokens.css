@@ -31,6 +31,13 @@
   --danger-soft: rgba(220, 38, 38, 0.12);
   --danger-line: #dc2626;
 
+  /* Worklogs made in Jira rather than by Joggl. Cyan reads as "someone else's
+     record" and stays clear of the indigo of a pending entry and the green of a
+     synced one, which is the distinction that actually matters here. */
+  --external: #155e75;
+  --external-line: #0e7490;
+  --external-soft: rgba(14, 116, 144, 0.1);
+
   --now: #dc2626;
 
   --shadow-sm: 0 1px 3px rgba(16, 22, 30, 0.1);
@@ -77,6 +84,10 @@
     --danger-soft: rgba(252, 165, 165, 0.14);
     --danger-line: #f87171;
 
+    --external: #a5f3fc;
+    --external-line: #22d3ee;
+    --external-soft: rgba(34, 211, 238, 0.1);
+
     --now: #f87171;
 
     --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
@@ -109,6 +120,9 @@
   --danger: #b91c1c;
   --danger-soft: rgba(220, 38, 38, 0.12);
   --danger-line: #dc2626;
+  --external: #155e75;
+  --external-line: #0e7490;
+  --external-soft: rgba(14, 116, 144, 0.1);
   --now: #dc2626;
   --shadow-sm: 0 1px 3px rgba(16, 22, 30, 0.1);
   --shadow-md: 0 3px 10px rgba(16, 22, 30, 0.14);
@@ -138,6 +152,9 @@
   --danger: #fca5a5;
   --danger-soft: rgba(252, 165, 165, 0.14);
   --danger-line: #f87171;
+  --external: #a5f3fc;
+  --external-line: #22d3ee;
+  --external-soft: rgba(34, 211, 238, 0.1);
   --now: #f87171;
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
   --shadow-md: 0 3px 10px rgba(0, 0, 0, 0.55);

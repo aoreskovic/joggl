@@ -13,7 +13,13 @@ release/
 
 # Local runtime data (never commit — may contain Jira credentials)
 userData/
+logs/
 *.log
+*.log.1
+
+# Development credential preset. Contains a real Jira API token in plain text,
+# so it must never leave the machine that created it. Template: .joggl-dev.example.json
+.joggl-dev.json
 
 # Env / secrets
 .env

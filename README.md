@@ -56,6 +56,23 @@ npm start
 npm test
 ```
 
+### Skipping the setup wizard while developing
+
+Copy `.joggl-dev.example.json` to `.joggl-dev.json`, fill in your own Jira site,
+email and API token, and Joggl will seed them on every start instead of showing the
+wizard. The file is git-ignored, is read **only** when the app is unpackaged, and its
+token is immediately re-stored through `safeStorage` — the plaintext copy never leaves
+your working directory. Point `JOGGL_DEV_CREDENTIALS` at another path to override it.
+
+### Logs
+
+Joggl writes a rolling log — `logs/joggl.log` next to the project in development,
+`<userData>/logs/joggl.log` in an installed build. It captures startup details,
+main-process errors, failed IPC calls, and renderer errors and warnings. API tokens
+and auth headers are stripped before anything is written, so the file is safe to
+send when reporting a problem. **Settings → Diagnostics → Open log folder**, or the
+same entry in the tray menu, will find it. Set `JOGGL_LOG_DIR` to write elsewhere.
+
 ## Configuration
 
 On first run a setup wizard asks for:

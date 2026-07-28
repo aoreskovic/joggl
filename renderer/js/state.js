@@ -118,3 +118,12 @@ export function testConnection(creds) {
 export function appVersion() {
   return api.app.version();
 }
+
+export function openLogFolder() {
+  return api.app.openLogFolder();
+}
+
+/** Mirror a renderer-side failure into the log file, best effort. */
+export function logToFile(level, message) {
+  api.app.log(level, message).catch(() => {});
+}

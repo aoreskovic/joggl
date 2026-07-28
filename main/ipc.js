@@ -5,11 +5,12 @@
 // so an actionable Jira message survives the bridge instead of being mangled
 // into "Error invoking remote method".
 
-import { app, ipcMain } from 'electron';
+import { app, ipcMain, shell } from 'electron';
 
 import * as credentials from './credentials.js';
 import * as days from './days.js';
 import * as jira from './jira/client.js';
+import * as log from './log.js';
 import * as settings from './settings.js';
 
 /** Resolve the credentials a Jira call needs, preferring values passed in by a
@@ -36,7 +37,24 @@ async function settingsView() {
 }
 
 const handlers = {
-  'app:version': () => ({ version: app.getVersion(), electron: process.versions.electron }),
+  'app:version': () => ({
+    version: app.getVersion(),
+    electron: process.versions.electron,
+    logPath: log.getLogPath(),
+  }),
+
+  'app:openLogFolder': () => {
+    const file = log.getLogPath();
+    if (file) shell.showItemInFolder(file);
+    return { logPath: file };
+  },
+
+  // Renderer-side failures worth keeping: a Finish Day error the user closed
+  // before reading it is otherwise gone.
+  'app:log': ({ level = 'info', message = '' } = {}) => {
+    log.log(level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'info', `[ui] ${message}`);
+    return true;
+  },
 
   'settings:get': () => settingsView(),
 
@@ -84,6 +102,7 @@ export function registerIpc() {
       try {
         return { ok: true, data: await handler(payload) };
       } catch (err) {
+        if (channel !== 'app:log') log.error(`IPC ${channel} failed:`, err);
         return {
           ok: false,
           error: {

@@ -5,7 +5,9 @@ import { app, BrowserWindow, Menu, Tray, globalShortcut, shell, nativeImage } fr
 import path from 'node:path';
 
 import { initCredentials } from './credentials.js';
+import { applyDevCredentials } from './dev-credentials.js';
 import { registerIpc } from './ipc.js';
+import * as log from './log.js';
 import { initStore } from './store.js';
 import { getUiPrefs, saveUiPrefs } from './settings.js';
 
@@ -25,15 +27,31 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function start() {
+  // In development the log sits in the project directory where it is easy to
+  // tail; a packaged build has no writable install directory, so it goes to
+  // userData alongside the day logs.
+  await log.initLogger({
+    dir: process.env.JOGGL_LOG_DIR ?? path.join(app.isPackaged ? app.getPath('userData') : ROOT, 'logs'),
+  });
+  log.info(
+    `Joggl ${app.getVersion()} starting — Electron ${process.versions.electron}, ` +
+      `Node ${process.versions.node}, ${process.platform}`,
+  );
+  log.info(`Log file: ${log.getLogPath()}`);
+  log.info(`User data: ${app.getPath('userData')}`);
+
   await initStore(app.getPath('userData'));
   initCredentials();
+  await applyDevCredentials({ isPackaged: app.isPackaged, projectRoot: ROOT }).catch((err) =>
+    log.error('Dev credential preset failed:', err),
+  );
   registerIpc();
 
   await createWindow();
   createTray();
 
   if (!globalShortcut.register(TOGGLE_SHORTCUT, toggleWindow)) {
-    console.warn(`Could not register ${TOGGLE_SHORTCUT} — another app already owns it.`);
+    log.warn(`Could not register ${TOGGLE_SHORTCUT} — another app already owns it.`);
   }
 
   app.on('activate', () => {
@@ -80,18 +98,21 @@ async function createWindow() {
     mainWindow = null;
   });
 
-  // Ten people cannot be debugged over the shoulder, so renderer failures are
-  // surfaced where `--enable-logging` will show them.
+  // Ten people cannot be debugged over the shoulder, so renderer failures end up
+  // in the same file as everything else.
   mainWindow.webContents.on('console-message', (event) => {
     if (event.level === 'error' || event.level === 'warning') {
-      console.error(`[renderer:${event.level}] ${event.message} (${event.sourceId}:${event.lineNumber})`);
+      log.log(
+        event.level === 'error' ? 'error' : 'warn',
+        `[renderer] ${event.message} (${event.sourceId}:${event.lineNumber})`,
+      );
     }
   });
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
-    console.error('[renderer] process gone:', details.reason, details.exitCode);
+    log.error('[renderer] process gone:', details.reason, `exit ${details.exitCode}`);
   });
-  mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
-    console.error('[preload] failed:', preloadPath, error);
+  mainWindow.webContents.on('preload-error', (_event, preloadPath, err) => {
+    log.error('[preload] failed:', preloadPath, err);
   });
 
   // The renderer has no business navigating anywhere. Links open in the real browser.
@@ -118,6 +139,10 @@ function createTray() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: 'Show Joggl', click: showWindow },
+      {
+        label: 'Open log folder',
+        click: () => shell.showItemInFolder(log.getLogPath()),
+      },
       { type: 'separator' },
       {
         label: 'Quit',
@@ -150,10 +175,16 @@ app.on('before-quit', () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  log.info('Joggl exiting');
+  log.closeLogger();
 });
 
 // Hiding to tray means "no windows open" is a normal state, so do not quit here.
 app.on('window-all-closed', () => {});
+
+// A crash that leaves nothing in the log is the one that cannot be diagnosed.
+process.on('uncaughtException', (err) => log.error('Uncaught exception in main:', err));
+process.on('unhandledRejection', (reason) => log.error('Unhandled rejection in main:', reason));
 
 function debounce(fn, ms) {
   let handle = null;
@@ -164,6 +195,6 @@ function debounce(fn, ms) {
 }
 
 function fatal(err) {
-  console.error('Joggl failed to start:', err);
+  log.error('Joggl failed to start:', err);
   app.quit();
 }

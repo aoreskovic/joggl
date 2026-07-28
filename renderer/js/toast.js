@@ -1,8 +1,13 @@
 // Transient messages. Modals are for decisions; anything informational lands here.
 
+import { logToFile } from './state.js';
+
 const AUTO_DISMISS_MS = { ok: 3500, info: 4000, warn: 6000, err: 12000 };
 
 export function toast(message, kind = 'info') {
+  // A toast the user dismissed before reading is otherwise gone for good.
+  if (kind === 'err' || kind === 'warn') logToFile(kind === 'err' ? 'error' : 'warn', message);
+
   const stack = document.getElementById('toast-stack');
   if (!stack) return;
 

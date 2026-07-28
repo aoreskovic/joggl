@@ -4,9 +4,17 @@
 // so this screen can only ever say whether one is stored.
 
 import { renderAll } from './render.js';
-import { loadSettings, saveSettings, saveUi, state, testConnection } from './state.js';
+import {
+  loadSettings,
+  openLogFolder,
+  saveSettings,
+  saveUi,
+  state,
+  testConnection,
+} from './state.js';
 import { loadIssues } from './tasks.js';
 import { toastErr, toastOk } from './toast.js';
+
 import { esc } from './util.js';
 
 const DEFAULT_SOURCES = [
@@ -195,6 +203,10 @@ export function wireSettings() {
   document.getElementById('reset-sources-btn').addEventListener('click', () => {
     draftSources = DEFAULT_SOURCES.map((s) => ({ ...s }));
     renderSourceEditor();
+  });
+
+  document.getElementById('open-log-btn').addEventListener('click', () => {
+    openLogFolder().catch((err) => toastErr(err.message));
   });
 
   document.getElementById('cfg-theme').addEventListener('change', async (event) => {

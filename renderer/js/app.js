@@ -12,6 +12,7 @@ import {
   loadSettings,
   loadTimer,
   loadUi,
+  logToFile,
   saveUi,
   state,
   ZOOM_LEVELS,
@@ -96,8 +97,12 @@ async function boot() {
   setTimeout(scrollToNow, 150);
 
   appVersion()
-    .then(({ version, electron }) => {
+    .then(({ version, electron, logPath }) => {
       $('version-label').textContent = `Joggl ${version} · Electron ${electron}`;
+      $('log-path-hint').textContent = logPath
+        ? `Joggl writes a log to ${logPath}. Send it along when reporting a problem — ` +
+          'credentials are stripped out before anything is written.'
+        : 'No log file is being written.';
     })
     .catch(() => {});
 
@@ -391,7 +396,14 @@ function wireGlobal() {
   }, 60_000);
 
   window.addEventListener('error', (event) => {
-    console.error('Uncaught renderer error:', event.error ?? event.message);
+    const err = event.error ?? event.message;
+    console.error('Uncaught renderer error:', err);
+    logToFile('error', `Uncaught: ${err?.stack ?? err}`);
+  });
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason;
+    console.error('Unhandled rejection:', reason);
+    logToFile('error', `Unhandled rejection: ${reason?.stack ?? reason?.message ?? reason}`);
   });
 }
 

@@ -1,0 +1,20 @@
+{
+  "_comment": "Copy this to .joggl-dev.json (git-ignored) to skip the setup wizard while developing. Read only when the app is not packaged; the token is re-stored through safeStorage on startup, exactly as if it had been typed into the wizard.",
+
+  "baseUrl": "https://yourcompany.atlassian.net",
+  "email": "you@company.com",
+  "apiToken": "paste-an-atlassian-api-token-here",
+
+  "taskSources": [
+    {
+      "id": "assigned",
+      "name": "Assigned to me",
+      "jql": "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC"
+    },
+    {
+      "id": "recent",
+      "name": "Recent",
+      "jql": "issuekey IN recentIssues()"
+    }
+  ]
+}

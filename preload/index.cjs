@@ -20,6 +20,8 @@ async function call(channel, payload) {
 contextBridge.exposeInMainWorld('joggl', {
   app: {
     version: () => call('app:version'),
+    openLogFolder: () => call('app:openLogFolder'),
+    log: (level, message) => call('app:log', { level, message }),
   },
 
   settings: {

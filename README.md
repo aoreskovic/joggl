@@ -42,6 +42,28 @@ plugin plus reliability — nothing more, until it has been used for a while.
 No Python, Rust, or C++ build toolchain is required, and no dependency that needs one
 will be added.
 
+## Running it
+
+Double-click **`run.cmd`**. It installs dependencies the first time, then starts the
+app. Closing that console window quits Joggl.
+
+From a terminal, the same thing:
+
+```bash
+npm start
+```
+
+Either way the window can be toggled with **Ctrl+Shift+J**, and closing the window
+hides Joggl to the tray rather than quitting it — use **Quit** in the tray menu to
+exit properly, so a running timer is not lost to a stray Alt+F4.
+
+For a real installed copy with a Start-menu entry and a desktop shortcut, build the
+Windows installer once and run it:
+
+```bash
+npm run dist
+```
+
 ## Development
 
 ```bash
@@ -49,11 +71,13 @@ npm install
 ```
 
 ```bash
-npm start
+npm test
 ```
 
+The tray and window icon is generated rather than committed as binary art:
+
 ```bash
-npm test
+npm run icon
 ```
 
 ### Skipping the setup wizard while developing

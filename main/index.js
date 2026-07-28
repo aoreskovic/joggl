@@ -12,6 +12,7 @@ import { initStore } from './store.js';
 import { getUiPrefs, saveUiPrefs } from './settings.js';
 
 const ROOT = path.join(import.meta.dirname, '..');
+const ICON = path.join(ROOT, 'assets', 'icon.png');
 const TOGGLE_SHORTCUT = 'CommandOrControl+Shift+J';
 
 let mainWindow = null;
@@ -69,6 +70,7 @@ async function createWindow() {
     minWidth: 720,
     minHeight: 480,
     title: 'Joggl',
+    icon: ICON,
     backgroundColor: '#14161a',
     show: false,
     webPreferences: {
@@ -132,9 +134,11 @@ async function persistBounds() {
 }
 
 function createTray() {
-  // No icon asset yet — an empty image still gives a working tray entry rather
-  // than crashing on a missing file.
-  tray = new Tray(nativeImage.createEmpty());
+  // Closing the window hides to the tray, so an invisible tray icon would strand
+  // the app with only the global shortcut to get it back.
+  const icon = nativeImage.createFromPath(ICON);
+  tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 }));
+  if (icon.isEmpty()) log.warn(`Tray icon missing at ${ICON} — the tray entry will be invisible.`);
   tray.setToolTip('Joggl');
   tray.setContextMenu(
     Menu.buildFromTemplate([

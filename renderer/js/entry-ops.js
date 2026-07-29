@@ -27,6 +27,20 @@ export function duplicateOf(entry, newId) {
 }
 
 /**
+ * Whether two snapshots of an entry cover the same stretch of time.
+ *
+ * Guards every path that would otherwise mark an entry as needing a re-sync just
+ * for having been touched. A click on a block runs the whole move gesture and
+ * lands it back where it was; focusing a time field and clicking away runs the
+ * whole inline edit and re-parses the same value. Both used to flip a `synced`
+ * entry back to `pending`, so Finish Day offered to rewrite a worklog that was
+ * already correct.
+ */
+export function sameTimes(a, b) {
+  return a?.startTs === b?.startTs && (a?.endTs ?? null) === (b?.endTs ?? null);
+}
+
+/**
  * Whether an entry's issue may be swapped for a different one.
  *
  * Two refusals, both for the same underlying reason — a worklog belongs to the

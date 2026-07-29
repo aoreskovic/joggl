@@ -32,6 +32,9 @@ Pure frontend logic, no SP coupling. Port as-is; refactor into modules only wher
   picker that books the same block against a different issue, times untouched.
 - The day's entries live in a collapsible **On this day** panel above the issue list,
   open by default, its state remembered like the sidebar's
+- Settings for the two things people read differently: pin labels (key and title by
+  default, since a title alone does not identify a `Meetings` issue when every project
+  has one) and a faint tint on Saturday and Sunday in the day view
 - Inline editing of start / end / duration / title with bidirectional recalculation
 - Merge prompt logic
 - Zoom controls, resizable panel width, configurable font size
@@ -128,13 +131,16 @@ a reason.
    starting the last task without touching the mouse is the obvious next one.
 5. **Pagination for busy issues** — `fetchDayWorklogs` asks for `maxResults=200` per
    issue and does not follow `startAt`. Fine at present volumes, wrong eventually.
-6. **Splitting a synced entry, and repointing one at another issue** — both refused,
+6. **Which days are not worked is a toggle, not a schedule.** The weekend tint is
+   hardcoded to Saturday and Sunday; anyone whose week runs otherwise switches it off.
+   A per-day working-week setting is the obvious next step if that is not enough.
+7. **Splitting a synced entry, and repointing one at another issue** — both refused,
    for the same reason: a worklogId is only valid on the issue it was created against,
    so either needs a delete plus a create with its own partial-failure story. Until
    someone actually misses them, deleting the entry (which offers to remove the Jira
    worklog too) and re-adding it is the honest path, and both messages say so.
-7. **macOS build** — a GitHub Actions job with a macOS runner, no code changes.
-8. **Auto-update** — still not worth it for ten users. Revisit if handing out installers
+8. **macOS build** — a GitHub Actions job with a macOS runner, no code changes.
+9. **Auto-update** — still not worth it for ten users. Revisit if handing out installers
    becomes the annoying part.
 
 Deliberately **not** planned: everything under *Out of scope* at the end of this file.
@@ -444,6 +450,12 @@ Never probe the environment. If something above appears missing, say so and stop
 - **Bump the minor version on every commit** — `npm run bump`, `0.1.0` → `0.2.0`. The
   version shows in the footer, so "which build are you on" has an answer without
   asking anyone to check a commit hash.
+- **Touching an entry is not editing it.** Every path that can mark an entry as
+  needing a re-sync compares the times first — `sameTimes` in `entry-ops.js`. A click
+  on a day-view block runs the whole move gesture and lands where it started;
+  focusing a time field and clicking away re-parses the value it already held. Both
+  used to flip a `synced` entry to `pending`, so Finish Day offered to rewrite a
+  worklog that was already correct.
 - **A render must never start a lookup.** Search boxes render from state and trigger
   the remote lookup from the event that changed it. Doing it inside the render put
   `render → lookup → callback → render` into a loop that blew the stack, and because

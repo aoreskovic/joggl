@@ -38,6 +38,10 @@
   --external-line: #0e7490;
   --external-soft: rgba(14, 116, 144, 0.1);
 
+  /* Non-working day. Barely there on purpose: it has to read as a background
+     property of the day, not as a warning about it. */
+  --weekend-tint: rgba(220, 38, 38, 0.055);
+
   --now: #dc2626;
 
   --shadow-sm: 0 1px 3px rgba(16, 22, 30, 0.1);
@@ -88,6 +92,8 @@
     --external-line: #22d3ee;
     --external-soft: rgba(34, 211, 238, 0.1);
 
+    --weekend-tint: rgba(248, 113, 113, 0.075);
+
     --now: #f87171;
 
     --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
@@ -123,6 +129,7 @@
   --external: #155e75;
   --external-line: #0e7490;
   --external-soft: rgba(14, 116, 144, 0.1);
+  --weekend-tint: rgba(220, 38, 38, 0.055);
   --now: #dc2626;
   --shadow-sm: 0 1px 3px rgba(16, 22, 30, 0.1);
   --shadow-md: 0 3px 10px rgba(16, 22, 30, 0.14);
@@ -155,6 +162,8 @@
   --external: #a5f3fc;
   --external-line: #22d3ee;
   --external-soft: rgba(34, 211, 238, 0.1);
+  --weekend-tint: rgba(248, 113, 113, 0.075);
+
   --now: #f87171;
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
   --shadow-md: 0 3px 10px rgba(0, 0, 0, 0.55);

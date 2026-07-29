@@ -80,6 +80,8 @@ const UI_DEFAULTS = {
   theme: 'system', // system | light | dark
   sidebarCollapsed: false,
   dayPanelCollapsed: false, // "On this day" starts open, like the issue sources
+  weekendTint: true, // shade Saturday and Sunday in the day view
+  pinLabel: 'keyname', // key | keyname | name — see pinLabelParts
   activeView: 'day', // day | week | month — week and month arrive in later phases
 };
 

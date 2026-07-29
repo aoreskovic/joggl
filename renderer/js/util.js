@@ -57,6 +57,35 @@ export function snapToQuarter(ts, dayKey) {
   return midnight + Math.round((ts - midnight) / QUARTER) * QUARTER;
 }
 
+/**
+ * Saturday or Sunday, for the day the key names.
+ *
+ * Which days are not worked is a local convention rather than a fact, so this is
+ * deliberately the simple version: the tint it drives can be switched off in
+ * Settings, and anyone whose week runs differently turns it off.
+ */
+export function isWeekend(key) {
+  const day = startOfDay(key).getDay();
+  return day === 0 || day === 6;
+}
+
+/**
+ * How a pinned issue is labelled.
+ *
+ * `keyname` is the default because titles on this kind of instance repeat — a
+ * `Meetings` issue per project — so a title alone does not say which issue a pin
+ * points at, while the key alone does not say what it is.
+ *
+ * @param {{issueKey: string, title: string}} pin
+ * @param {'key'|'keyname'|'name'} mode
+ * @returns {{key: string|null, title: string|null}} parts to render, either omitted
+ */
+export function pinLabelParts(pin, mode = 'keyname') {
+  if (mode === 'key') return { key: pin.issueKey, title: null };
+  if (mode === 'name') return { key: null, title: pin.title || pin.issueKey };
+  return { key: pin.issueKey, title: pin.title || null };
+}
+
 export function formatDateLabel(key) {
   const d = startOfDay(key);
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

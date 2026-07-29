@@ -2,17 +2,19 @@
 
 What to test by hand, how to test it, and what is known to be broken.
 
-Joggl has 138 unit tests (`npm test`) covering the things where a silent failure loses
+Joggl has 153 unit tests (`npm test`) covering the things where a silent failure loses
 time data: the worklog timestamp formatter, merge decisions at the 30-minute boundary,
 Finish Day's partial-failure transitions, the day-log round trip, quarter-hour snapping,
-what a duplicate, a moved and a repointed entry inherit, and the search box's remote-lookup loop.
+what a duplicate, a moved and a repointed entry
+inherit, when a touch counts as an edit, weekend detection, pin labelling, and the
+search box's remote-lookup loop.
 Everything else — the whole UI — is verified against the checklist below, because the
 project deliberately has no DOM test harness and adding one would break the
 short-dependency rule in `CLAUDE.md`.
 
 That makes this file the other half of the test suite. Keep it current.
 
-**Last full pass: 2026-07-29, all 33 checklist items green**, driven by dispatching real
+**Last full pass: 2026-07-30, all 39 checklist items green**, driven by dispatching real
 mouse events into the renderer from the main process against a throwaway
 `--user-data-dir`. See *The script* at the end for how, and for what it does not cover.
 
@@ -22,8 +24,8 @@ mouse events into the renderer from the main process against a throwaway
 
 ```
 npm start      # the app
-npm test       # 138 tests, must be 0 failures
-npm run uicheck # the checklist below, driven as a script — 33 checks, must be 0 failures
+npm test       # 153 tests, must be 0 failures
+npm run uicheck # the checklist below, driven as a script — 39 checks, must be 0 failures
 ```
 
 The log is at `logs/joggl.log`, credential-redacted. Send it along with any bug report.
@@ -67,6 +69,28 @@ Grouped by area. Each item says what to do and what correct looks like.
 | Pick the issue it is already on, or press Cancel or Escape | Nothing changes. |
 | Do it to an entry that has already synced | Refused, with a message saying to delete it — which offers to remove the Jira worklog — and add it again. A worklog cannot be moved between issues. |
 | Do it to a **Manual Jira entry** | Refused. Not Joggl's record to repoint. |
+
+### Touching an entry without changing it
+
+The point of these is that **nothing** should end up offered for a re-sync.
+
+| Do this | Correct result |
+|---|---|
+| Click a synced block on the day view, without moving it | It stays `✓ synced`. Finish Day says everything is already in Jira. |
+| Click into a synced entry's start field and click away without typing | Still `✓ synced`. |
+| Type `9:0` into a start field that already reads `09:00` and blur | Tidies to `09:00`, still `✓ synced` — normalising the text is not an edit. |
+| Drag a synced block and drop it back on its own start | Still `✓ synced`. |
+| Now change something for real — drag it an hour, or type a new end | Back to `● pending`, and Finish Day rewrites that one worklog. |
+
+### Display settings
+
+| Do this | Correct result |
+|---|---|
+| Look at the pins | Each shows its key **and** the full issue title, the title ellipsised if the bar is narrow. |
+| Settings → Pin labels → Title only, then Key only | The chips change immediately, and the choice survives a restart. |
+| Step to a Saturday or Sunday | The day view column is faintly reddish. The rest of the window is unchanged, and hour labels stay legible. |
+| Step to a weekday | No tint. |
+| Settings → untick Tint weekends, go back to a Saturday | No tint. Tick it again and it returns. |
 
 ### The day view's own click
 
@@ -148,6 +172,15 @@ Fixed on 2026-07-29, in the order found:
 - The Stop button dropped `btn-primary` instead of adding `btn-stop` to it, so it lost its
   radius, padding and weight the moment a timer started.
 
+Fixed on 2026-07-30:
+
+- **Merely touching an entry offered a re-sync.** A click on a day-view block runs the
+  whole move gesture — mousedown, no movement, mouseup — and committed unconditionally;
+  focusing a time field and clicking away re-parsed the value it already held and did the
+  same. Both flipped a `synced` entry to `pending`, so Finish Day offered to rewrite a
+  worklog that was already correct. Every such path now compares the times first
+  (`sameTimes` in `renderer/js/entry-ops.js`).
+
 ### Known, deliberately not fixed
 
 Nothing. The cosmetic leftovers listed here previously — dead `.icon-square` CSS, the
@@ -165,7 +198,7 @@ Every table above except the persistence rows is executed by `scripts/ui-check.m
 npm run uicheck
 ```
 
-33 checks, exits non-zero on failure. It needs **no dependency and no DevTools Protocol** —
+39 checks, exits non-zero on failure. It needs **no dependency and no DevTools Protocol** —
 the main process already holds `webContents.executeJavaScript`, which is enough to
 dispatch real `MouseEvent`s, read computed styles and element boxes, and drive the app end
 to end. `main/index.js` loads it only under `--uicheck`, which also redirects `userData` to
@@ -174,8 +207,14 @@ a temp directory, so a run cannot touch a real day log and can run while the app
 The traps that make checks pass or fail for the wrong reason are documented at the top of
 the script and in `CLAUDE.md`. The short version: back-date a timer's start or it is
 discarded before it counts; scope entry counts to `.entry-card:not(.external)`; expect
-externals in the overlap layout; and assert a drop landed where the preview said rather
-than at a hard-coded hour.
+externals in the overlap layout; assert a drop landed where the preview said rather than
+at a hard-coded hour; clamp any computed time into the selected day, because HH:MM
+resolves against it; and scroll a target hour into view with `H.showHour` rather than
+aiming where it happens to sit.
+
+Two of those were learned by running the suite either side of midnight, which is worth
+doing deliberately: the visible hour range grows to cover the current hour, so an empty
+day at 00:05 starts at 00:00 and every hour a check aims at moves.
 
 **Add a check whenever a UI bug is fixed.** That is the whole point — of the three bugs
 found on 2026-07-29, two were "does this element's box fit in the window" and "did the

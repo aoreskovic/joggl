@@ -2,7 +2,13 @@
 // the day total.
 
 import { showContextMenu } from './context-menu.js';
-import { canRetarget, duplicateOf, overlappingIds, retargetEntry } from './entry-ops.js';
+import {
+  canRetarget,
+  duplicateOf,
+  overlappingIds,
+  retargetEntry,
+  sameTimes,
+} from './entry-ops.js';
 import { createIssuePicker } from './issue-picker.js';
 import { PLAY_ICON } from './icons.js';
 import { sortEntries } from './merge.js';
@@ -195,6 +201,7 @@ function handleInlineEdit(event) {
 
   const field = input.dataset.f;
   const card = input.closest('.entry-card');
+  const before = { startTs: entry.startTs, endTs: entry.endTs };
 
   if (field === 'start') {
     const ts = hhmmToTs(input.value, state.selectedDate);
@@ -229,6 +236,12 @@ function handleInlineEdit(event) {
     if (endInput) endInput.value = tsToHHMM(entry.endTs ?? entry.startTs);
     if (durInput) durInput.value = msToDur((entry.endTs ?? entry.startTs) - entry.startTs);
   }
+
+  // Focusing a field and clicking away re-parses the value it already held. That
+  // is not an edit, and treating it as one flipped a synced entry back to pending
+  // so Finish Day offered to rewrite a worklog that was already correct. The
+  // fields above have already been normalised, so "09:0" still tidies to "09:00".
+  if (sameTimes(entry, before)) return;
 
   markDirty(entry);
   persistDay();

@@ -11,7 +11,7 @@
 // `webContents.executeJavaScript`, which is enough to dispatch real MouseEvents,
 // read computed styles and element boxes, and drive the whole app.
 //
-// ── Four traps, all of which made checks pass or fail for the wrong reason ──
+// ── Six traps, all of which made checks pass or fail for the wrong reason ──
 //
 // 1. A timer stopped inside ten seconds is discarded on purpose (MIN_ENTRY_MS in
 //    timer.js). Back-date the start with H.backdateStart() or the check measures
@@ -24,6 +24,14 @@
 // 4. At 0.5x zoom a quarter hour is 11px. Clicking a few pixels below an hour
 //    label lands in the next quarter — so a drop check asserts the entry landed
 //    where the *preview* said, which is what the checklist asks anyway.
+// 5. HH:MM resolves against the *selected day*. "Five minutes ago" just after
+//    midnight is 23:55 yesterday, which reads as tonight, is refused as a future
+//    start, and leaves a timer that runs for milliseconds. H.backdateStart clamps
+//    into today; anything computing a time from `Date.now()` must do the same.
+// 6. The visible hour range grows to cover the current hour, so on an empty day
+//    just after midnight it starts at 00:00 and the afternoon is far below the
+//    fold. Never aim at an hour where it happens to sit — H.showHour scrolls it
+//    to the middle first, clear of the window edge and of the auto-scroll band.
 //
 // ── What this cannot reach ──
 //
@@ -66,9 +74,25 @@ window.H = {
     const p = (n) => String(n).padStart(2, '0');
     return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
   },
-  hourY(hhmm) {
-    const l = H.all('.sched-hour-label').find(e => e.textContent === hhmm);
-    return l ? Math.round(l.getBoundingClientRect().top + 3) : null;
+  /**
+   * Scroll an hour line to the middle of the panel and return its viewport y.
+   *
+   * Aiming at wherever an hour happens to sit is not safe. The visible range grows
+   * to cover the current hour, so on an empty day just after midnight it starts at
+   * 00:00 and every afternoon hour is far below the fold — a click there lands
+   * outside the window, and a drag ending near the panel edge trips the auto-scroll
+   * band and drifts to a different quarter. Centring puts the target clear of both.
+   */
+  async showHour(hhmm) {
+    const find = () => H.all('.sched-hour-label').find((e) => e.textContent === hhmm);
+    if (!find()) return null;
+    const panel = H.q('#right-panel');
+    const grid = H.q('#schedule-grid');
+    const offset = find().getBoundingClientRect().top - grid.getBoundingClientRect().top;
+    panel.scrollTop = Math.max(0, offset - panel.clientHeight / 2);
+    await H.sleep(150);
+    const el = find();
+    return el ? Math.round(el.getBoundingClientRect().top + 3) : null;
   },
   gridX() {
     const r = H.q('#schedule-grid').getBoundingClientRect();
@@ -90,7 +114,7 @@ window.H = {
     }
     H.mouse(document, 'mouseup', tx, ty, 0);
   },
-  dragToHour(el, hhmm) { H.drag(el, H.gridX(), H.hourY(hhmm)); },
+  async dragToHour(el, hhmm) { H.drag(el, H.gridX(), await H.showHour(hhmm)); },
   click(el) {
     const r = el.getBoundingClientRect();
     const x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2);
@@ -138,12 +162,22 @@ window.H = {
   },
   firstTask() { return H.q('.task-item'); },
   // A timer stopped under ten seconds old is discarded on purpose; back-date it.
+  //
+  // Clamped into today, because the field resolves HH:MM against the *selected
+  // day*: just after midnight, "five minutes ago" is 23:55 yesterday, which reads
+  // as 23:55 tonight, gets refused as a future start, and the timer then runs for
+  // milliseconds and is discarded. Between 00:00 and 00:00:10 there is genuinely
+  // no back-date that gives a ten-second timer, and the checks that need one will
+  // say so rather than quietly passing.
   backdateStart(minutes) {
-    const t = new Date(Date.now() - minutes * 60000);
     const p = (n) => String(n).padStart(2, '0');
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    const t = new Date(Math.max(Date.now() - minutes * 60000, midnight.getTime()));
     const inp = H.q('#start-time-input');
     inp.value = p(t.getHours()) + ':' + p(t.getMinutes());
     inp.dispatchEvent(new FocusEvent('blur'));
+    return inp.value;
   },
 };
 'installed'`;
@@ -311,7 +345,7 @@ async function dragging() {
     `await H.resetDay();
      const row = H.firstTask(); const r = row.getBoundingClientRect();
      const sx = Math.round(r.left + 20), sy = Math.round(r.top + r.height / 2);
-     const tx = H.gridX(), ty = H.hourY('11:00');
+     const tx = H.gridX(), ty = await H.showHour('11:00');
      H.mouse(row, 'mousedown', sx, sy, 1);
      let preview = '', dashed = '';
      for (let i = 1; i <= 5; i++) {
@@ -348,13 +382,12 @@ async function dragging() {
          await H.sleep(120);
        }
        await H.resetDay();
-       H.q('#right-panel').scrollTop = 200;
        // The zoom change re-renders the grid behind an await, so wait for the
        // hour line to stop moving before measuring where to drop.
        let ty = null, prev = null;
        for (let w = 0; w < 12; w++) {
          await H.sleep(150);
-         ty = H.hourY('14:00');
+         ty = await H.showHour('14:00');
          if (ty !== null && ty === prev) break;
          prev = ty;
        }
@@ -387,7 +420,7 @@ async function dragging() {
     `await H.resetDay();
      const row = H.firstTask(); const r = row.getBoundingClientRect();
      const sx = Math.round(r.left + 20), sy = Math.round(r.top + r.height / 2);
-     const tx = H.gridX(), ty = H.hourY('12:00');
+     const tx = H.gridX(), ty = await H.showHour('12:00');
      H.mouse(row, 'mousedown', sx, sy, 1);
      for (let i = 1; i <= 4; i++)
        H.mouse(document, 'mousemove', Math.round(sx + (tx - sx) * i / 4), Math.round(sy + (ty - sy) * i / 4), 1);
@@ -409,8 +442,8 @@ async function dragging() {
   await check(
     'the same issue dropped twice an hour apart: two entries, no merge prompt',
     `await H.resetDay();
-     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(500);
-     H.dragToHour(H.firstTask(), '10:00'); await H.sleep(500);
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(500);
+     await H.dragToHour(H.firstTask(), '10:00'); await H.sleep(500);
      const modal = !H.q('#modal-overlay').classList.contains('hidden');
      const ranges = H.entries().map(e => e.range);
      await H.resetDay();
@@ -424,8 +457,8 @@ async function dragging() {
   await check(
     'dropping on top of an existing entry: both flagged, timeline splits into columns',
     `await H.resetDay();
-     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(500);
-     H.dragToHour(H.all('.task-item')[1], '09:00'); await H.sleep(500);
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(500);
+     await H.dragToHour(H.all('.task-item')[1], '09:00'); await H.sleep(500);
      const flagged = H.entries().filter(e => e.overlapping).length;
      const ids = new Set(H.all('.entry-card:not(.external)').map(c => c.dataset.id));
      const widths = H.all('.sched-entry-block').filter(b => ids.has(b.dataset.id)).map(b => b.style.width || 'full');
@@ -461,7 +494,7 @@ async function dragging() {
     'a drop on a past day stays on that day',
     `await H.resetDay();
      H.q('#prev-day').click(); await H.sleep(600);
-     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
      const onPast = H.entries().length;
      H.q('#today-btn').click(); await H.sleep(600);
      const onToday = H.entries().length;
@@ -559,18 +592,28 @@ async function timeSafety() {
     `await H.resetDay();
      H.backdateStart(5); H.click(H.firstTask()); await H.sleep(700);
      const inp = H.q('#start-time-input');
-     const future = new Date(Date.now() + 3 * 3600000);
      const p = (n) => String(n).padStart(2, '0');
-     inp.value = p(future.getHours()) + ':00';
+     // A time later *today*. "now + 3h" wraps past midnight late in the evening,
+     // and the field resolves HH:MM against the selected day — so 02:00 would be
+     // this morning, legitimately in the past, and the check would test nothing.
+     const nowH = new Date().getHours();
+     if (nowH >= 23) {
+       H.click(H.q('#start-stop-btn')); await H.sleep(600);
+       await H.resetDay();
+       return 'SKIP no future hour left in the day';
+     }
+     const targetH = Math.min(nowH + 3, 23);
+     inp.value = p(targetH) + ':00';
      inp.dispatchEvent(new Event('input'));
      inp.dispatchEvent(new FocusEvent('blur'));
      await H.sleep(400);
      const warned = H.all('.toast').some(t => /future/i.test(t.textContent));
-     const reverted = inp.value !== p(future.getHours()) + ':00';
+     const reverted = inp.value !== p(targetH) + ':00';
      H.click(H.q('#start-stop-btn')); await H.sleep(600);
      await H.resetDay();
      return JSON.stringify({ warned, reverted })`,
     (v) => {
+      if (typeof v === 'string' && v.startsWith('SKIP')) return 'skipped';
       const d = JSON.parse(v);
       return d.warned && d.reverted;
     },
@@ -605,9 +648,9 @@ async function timeSafety() {
   await check(
     'entries dragged from the day list move; Jira-side rows do not',
     `await H.resetDay();
-     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(500);
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(500);
      const before = H.entries()[0].range;
-     H.dragToHour(H.q('.entry-card'), '15:00'); await H.sleep(600);
+     await H.dragToHour(H.q('.entry-card'), '15:00'); await H.sleep(600);
      const after = H.entries()[0].range;
      await H.resetDay();
      return JSON.stringify({ before, after })`,
@@ -629,7 +672,7 @@ async function timeSafety() {
      await H.sleep(350);
      H.q('#close-pin').click(); await H.sleep(250);
      const chips = H.all('.pin-chip').length;
-     if (chips) { H.dragToHour(H.q('.pin-chip'), '16:00'); await H.sleep(600); }
+     if (chips) { await H.dragToHour(H.q('.pin-chip'), '16:00'); await H.sleep(600); }
      const ranges = H.entries().map(e => e.range);
      await window.joggl.pins.save([]);
      await H.resetDay();
@@ -645,8 +688,7 @@ async function quickEntry() {
   await check(
     'clicking the grid opens a visible, focused quick entry at the clicked hour',
     `await H.resetDay();
-     H.q('#right-panel').scrollTop = 260; await H.sleep(200);
-     const y = H.hourY('13:00');
+     const y = await H.showHour('13:00');
      H.q('#schedule-grid').dispatchEvent(new MouseEvent('click', {
        bubbles: true, cancelable: true, clientX: H.gridX(), clientY: y }));
      await H.sleep(500);
@@ -688,7 +730,7 @@ async function dayPanel() {
     `await H.resetDay();
      const hdr = H.q('#day-panel-hdr');
      const openAtStart = !H.q('#entry-list').hidden;
-     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
      // The count is every row the panel shows, Jira-side worklogs included —
      // it answers "is there anything in this day", not "how many are mine".
      const count = H.q('#day-count').textContent;
@@ -709,7 +751,7 @@ async function dayPanel() {
   await check(
     '"On this day" collapses and reopens, and the count survives the collapse',
     `await H.resetDay();
-     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
      const hdr = H.q('#day-panel-hdr'), list = H.q('#entry-list');
      const rows = H.all('.entry-card').length;
      hdr.click(); await H.sleep(250);
@@ -749,7 +791,7 @@ async function editTask() {
   await check(
     'Edit task is the first item on a day-view block\'s menu',
     `await H.resetDay();
-     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
      H.q('.sched-entry-block').dispatchEvent(new MouseEvent('contextmenu', {
        bubbles: true, cancelable: true, clientX: 400, clientY: 300 }));
      await H.sleep(250);
@@ -763,7 +805,7 @@ async function editTask() {
   await check(
     'Edit task swaps the issue and leaves the times exactly as they were',
     `await H.resetDay();
-     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
      const before = H.entries()[0];
      H.q('.sched-entry-block').dispatchEvent(new MouseEvent('contextmenu', {
        bubbles: true, cancelable: true, clientX: 400, clientY: 300 }));
@@ -815,6 +857,176 @@ async function editTask() {
   );
 }
 
+async function noOpEdits() {
+  await check(
+    'clicking a synced block leaves it synced — no re-sync offered',
+    `await H.resetDay();
+     const at = new Date(); at.setHours(9, 0, 0, 0);
+     await window.joggl.days.save(H.todayKey(), [{
+       id: 'sync1', issueKey: 'X-1', issueId: null, title: 'Already logged',
+       startTs: at.getTime(), endTs: at.getTime() + 3600000,
+       status: 'synced', worklogId: '60711', errorMsg: null }]);
+     H.q('#today-btn').click(); await H.sleep(600);
+     const before = H.entries()[0];
+     // Press and release on the block without moving: the full move gesture.
+     const b = H.q('.sched-entry-block[data-id="sync1"]');
+     const r = b.getBoundingClientRect();
+     const x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2);
+     H.mouse(b, 'mousedown', x, y, 1);
+     H.mouse(document, 'mouseup', x, y, 0);
+     await H.sleep(500);
+     const after = H.entries()[0];
+     await H.resetDay();
+     return JSON.stringify({ before, after })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.after.status === d.before.status && d.after.status.includes('synced') &&
+        d.after.range === d.before.range;
+    },
+  );
+
+  await check(
+    'focusing a time field and leaving it untouched leaves the entry synced',
+    `await H.resetDay();
+     const at = new Date(); at.setHours(9, 0, 0, 0);
+     await window.joggl.days.save(H.todayKey(), [{
+       id: 'sync2', issueKey: 'X-1', issueId: null, title: 'Already logged',
+       startTs: at.getTime(), endTs: at.getTime() + 3600000,
+       status: 'synced', worklogId: '60712', errorMsg: null }]);
+     H.q('#today-btn').click(); await H.sleep(600);
+     const before = H.entries()[0];
+     const field = H.q('.entry-card[data-id="sync2"] [data-f="start"]');
+     field.focus(); field.select();
+     field.dispatchEvent(new FocusEvent('blur'));
+     await H.sleep(500);
+     const after = H.entries()[0];
+     await H.resetDay();
+     return JSON.stringify({ before, after })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.after.status === d.before.status && d.after.status.includes('synced');
+    },
+  );
+
+  await check(
+    'a real edit still marks it pending, so the guard has not disabled editing',
+    `await H.resetDay();
+     const at = new Date(); at.setHours(9, 0, 0, 0);
+     await window.joggl.days.save(H.todayKey(), [{
+       id: 'sync3', issueKey: 'X-1', issueId: null, title: 'Already logged',
+       startTs: at.getTime(), endTs: at.getTime() + 3600000,
+       status: 'synced', worklogId: '60713', errorMsg: null }]);
+     H.q('#today-btn').click(); await H.sleep(600);
+     const field = H.q('.entry-card[data-id="sync3"] [data-f="end"]');
+     field.value = '11:00';
+     field.dispatchEvent(new FocusEvent('blur'));
+     await H.sleep(500);
+     const after = H.entries()[0];
+     await H.resetDay();
+     return JSON.stringify(after)`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.status.includes('pending') && d.range === '09:00-11:00';
+    },
+  );
+}
+
+async function displayPrefs() {
+  await check(
+    'the day view is tinted on a Saturday and plain on a weekday',
+    `await H.resetDay();
+     const readTint = () => H.q('#right-panel').classList.contains('is-weekend');
+     const onWeekday = readTint();
+     // Step back to the most recent Saturday.
+     let guard = 0, label = '';
+     while (guard++ < 8) {
+       H.q('#prev-day').click(); await H.sleep(500);
+       label = H.q('#current-date-label').textContent;
+       if (label.startsWith('Sat')) break;
+     }
+     const onSaturday = readTint();
+     const tinted = getComputedStyle(H.q('#right-panel')).backgroundImage;
+     H.q('#today-btn').click(); await H.sleep(500);
+     return JSON.stringify({ onWeekday, onSaturday, label, tinted })`,
+    (v) => {
+      const d = JSON.parse(v);
+      // The run itself may fall on a weekend, so assert the Saturday and the
+      // gradient rather than assuming today is a working day.
+      return d.label.startsWith('Sat') && d.onSaturday === true && d.tinted.includes('gradient');
+    },
+  );
+
+  await check(
+    'turning the weekend tint off clears it, and it comes back',
+    `H.q('#settings-btn').click(); await H.sleep(300);
+     const box = H.q('#cfg-weekend-tint');
+     const defaultOn = box.checked;
+     box.checked = false; box.dispatchEvent(new Event('change'));
+     await H.sleep(350);
+     H.q('#close-settings').click(); await H.sleep(200);
+     let guard = 0, label = '';
+     while (guard++ < 8) {
+       H.q('#prev-day').click(); await H.sleep(450);
+       label = H.q('#current-date-label').textContent;
+       if (label.startsWith('Sat')) break;
+     }
+     const offOnSaturday = H.q('#right-panel').classList.contains('is-weekend');
+     H.q('#settings-btn').click(); await H.sleep(300);
+     H.q('#cfg-weekend-tint').checked = true;
+     H.q('#cfg-weekend-tint').dispatchEvent(new Event('change'));
+     await H.sleep(350);
+     H.q('#close-settings').click(); await H.sleep(200);
+     const backOn = H.q('#right-panel').classList.contains('is-weekend');
+     H.q('#today-btn').click(); await H.sleep(500);
+     return JSON.stringify({ defaultOn, label, offOnSaturday, backOn })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.defaultOn === true && d.label.startsWith('Sat') &&
+        d.offOnSaturday === false && d.backOn === true;
+    },
+  );
+
+  await check(
+    'a pin shows its key and full title, and the setting switches that',
+    `await H.resetDay();
+     H.q('#add-pin-btn').click(); await H.sleep(250);
+     const inp = H.q('#pin-search-input');
+     const wanted = H.all('.task-item')[0].querySelector('.task-dd-title').textContent;
+     inp.value = wanted.slice(0, 12); inp.dispatchEvent(new Event('input'));
+     await H.sleep(400);
+     H.all('#pin-results button').find(b => b.textContent === 'Pin')?.click();
+     await H.sleep(350);
+     H.q('#close-pin').click(); await H.sleep(250);
+
+     const read = () => ({
+       key: H.q('.pin-chip .pin-chip-key')?.textContent ?? null,
+       title: H.q('.pin-chip .pin-chip-title')?.textContent ?? null,
+     });
+     const asDefault = read();
+
+     const set = async (mode) => {
+       H.q('#settings-btn').click(); await H.sleep(250);
+       const sel = H.q('#cfg-pin-label');
+       sel.value = mode; sel.dispatchEvent(new Event('change'));
+       await H.sleep(350);
+       H.q('#close-settings').click(); await H.sleep(200);
+     };
+     await set('name');  const asName = read();
+     await set('key');   const asKey = read();
+     await set('keyname');
+
+     await window.joggl.pins.save([]);
+     await H.resetDay();
+     return JSON.stringify({ wanted, asDefault, asName, asKey })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.asDefault.key && d.asDefault.title === d.wanted &&
+        d.asName.key === null && d.asName.title === d.wanted &&
+        d.asKey.key && d.asKey.title === null;
+    },
+  );
+}
+
 async function externals() {
   await check(
     'Jira-side worklogs read back dashed, labelled and read-only',
@@ -847,6 +1059,8 @@ export async function runChecks(mainWindow, app) {
     await dayPanel();
     await dragging();
     await editTask();
+    await noOpEdits();
+    await displayPrefs();
     await timeSafety();
     await externals();
   } catch (err) {

@@ -11,7 +11,13 @@
 // movement threshold is what lets a single click on a task keep doing what it always
 // did, which is start a timer.
 
-import { clampDropStart, DEFAULT_DROP_MS, dropEntryFor, movedEntry } from './entry-ops.js';
+import {
+  clampDropStart,
+  DEFAULT_DROP_MS,
+  dropEntryFor,
+  movedEntry,
+  sameTimes,
+} from './entry-ops.js';
 import { markDirty } from './entries.js';
 import { renderAll } from './render.js';
 import { setDragging } from './shell.js';
@@ -283,6 +289,9 @@ async function onMouseUp() {
     // It could have been deleted, or the day changed, while the drag was running.
     if (!entry) return;
     const moved = movedEntry(entry, startTs, dayStartTs);
+    // Dropped back where it started: not a move, so do not mark it as needing a
+    // re-sync. Same reason commitDrag checks.
+    if (sameTimes(moved, entry)) return;
     // A move needs syncing again for exactly the reason a block drag does.
     markDirty(moved);
     state.entries = state.entries.map((e) => (e.id === moved.id ? moved : e));

@@ -15,7 +15,7 @@ import {
 import { loadIssues } from './tasks.js';
 import { toastErr, toastOk } from './toast.js';
 
-import { esc } from './util.js';
+import { esc, isWeekend } from './util.js';
 
 const DEFAULT_SOURCES = [
   {
@@ -42,6 +42,18 @@ export function applyTheme(theme) {
 
 export function applyFontSize(px) {
   document.documentElement.style.setProperty('--sched-font-size', `${px}px`);
+}
+
+/**
+ * Shade the day view when the day on screen is not a working one. Called from
+ * selectDate, because it is a property of the selected day, and from the setting
+ * that switches it off.
+ */
+export function applyWeekendTint() {
+  const panel = document.getElementById('right-panel');
+  if (!panel) return;
+  const on = state.ui.weekendTint !== false && isWeekend(state.selectedDate);
+  panel.classList.toggle('is-weekend', on);
 }
 
 // ── First-run wizard ───────────────────────────────────────────────────────
@@ -106,6 +118,8 @@ export function openSettings() {
 
   document.getElementById('cfg-theme').value = state.ui.theme ?? 'system';
   document.getElementById('cfg-fontsize').value = String(state.ui.fontSize ?? 9);
+  document.getElementById('cfg-pin-label').value = state.ui.pinLabel ?? 'keyname';
+  document.getElementById('cfg-weekend-tint').checked = state.ui.weekendTint !== false;
 
   draftSources = state.settings.taskSources.map((s) => ({ ...s }));
   renderSourceEditor();
@@ -216,6 +230,16 @@ export function wireSettings() {
   document.getElementById('cfg-theme').addEventListener('change', async (event) => {
     applyTheme(event.target.value);
     await saveUi({ theme: event.target.value });
+  });
+
+  document.getElementById('cfg-pin-label').addEventListener('change', async (event) => {
+    await saveUi({ pinLabel: event.target.value });
+    renderAll();
+  });
+
+  document.getElementById('cfg-weekend-tint').addEventListener('change', async (event) => {
+    await saveUi({ weekendTint: event.target.checked });
+    applyWeekendTint();
   });
 
   document.getElementById('cfg-fontsize').addEventListener('change', async (event) => {

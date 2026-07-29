@@ -33,6 +33,7 @@ import {
 import {
   applyFontSize,
   applyTheme,
+  applyWeekendTint,
   needsSetup,
   openSetup,
   wireSettings,
@@ -161,6 +162,9 @@ async function selectDate(date) {
   $('task-input').disabled = !today;
   $('start-time-input').disabled = !today;
   $('start-stop-btn').disabled = !today;
+
+  // A property of the day now on screen, so it belongs here rather than in a render.
+  applyWeekendTint();
 
   renderAll();
 

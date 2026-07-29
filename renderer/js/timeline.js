@@ -7,6 +7,7 @@
 
 import { showContextMenu } from './context-menu.js';
 import { markDirty } from './entries.js';
+import { sameTimes } from './entry-ops.js';
 import { renderAll } from './render.js';
 import { isToday, persistDayNow, pxPerMin, state, visibleEntries } from './state.js';
 import { createIssueLookup, searchIssues } from './tasks.js';
@@ -326,7 +327,7 @@ function onResize(event, entry, edge) {
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseup', onMouseUp);
     block?.classList.remove('dragging');
-    await commitDrag(entry);
+    await commitDrag(entry, { startTs: origStart, endTs: origEnd });
   };
 
   document.addEventListener('mousemove', onMouseMove);
@@ -370,7 +371,7 @@ function onMoveBlock(event, entry) {
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseup', onMouseUp);
     block?.classList.remove('dragging', 'moving');
-    await commitDrag(entry);
+    await commitDrag(entry, { startTs: origStart, endTs: origStart + duration });
   };
 
   document.addEventListener('mousemove', onMouseMove);
@@ -405,7 +406,20 @@ function liveUpdate(block, entry) {
   }
 }
 
-async function commitDrag(entry) {
+/**
+ * End of a move or resize. `before` is where the block started the gesture.
+ *
+ * A plain click on a block runs this whole path — mousedown, no movement,
+ * mouseup — so committing unconditionally flipped a synced entry back to
+ * pending and had Finish Day offer to rewrite a worklog that was already right.
+ * A render still happens: liveUpdate left inline styles on the block, and this
+ * restores the canonical layout.
+ */
+async function commitDrag(entry, before) {
+  if (sameTimes(entry, before)) {
+    renderAll();
+    return;
+  }
   markDirty(entry);
   await persistDayNow();
   renderAll();

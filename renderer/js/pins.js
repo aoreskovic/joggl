@@ -3,7 +3,7 @@
 import { isToday, savePins, state } from './state.js';
 import { startTimer } from './timer.js';
 import { toastWarn } from './toast.js';
-import { esc } from './util.js';
+import { esc, pinLabelParts } from './util.js';
 
 const MAX_PINS = 12;
 
@@ -35,7 +35,14 @@ export function renderPins() {
       // How the drag gesture identifies which pin was grabbed.
       chip.dataset.key = pin.issueKey;
       chip.title = `${pin.issueKey} — ${pin.title}\nClick to start a timer, or drag onto the day view`;
-      chip.innerHTML = `<span>${esc(pin.issueKey)}</span>`;
+
+      // The label is a setting because a key alone does not say what a pin is, and
+      // a title alone does not say which issue it is — on this kind of instance
+      // there is a `Meetings` issue per project.
+      const label = pinLabelParts(pin, state.ui.pinLabel);
+      chip.innerHTML =
+        (label.key ? `<span class="pin-chip-key">${esc(label.key)}</span>` : '') +
+        (label.title ? `<span class="pin-chip-title">${esc(label.title)}</span>` : '');
 
       const remove = document.createElement('button');
       remove.className = 'pin-remove';

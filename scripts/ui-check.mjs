@@ -1,0 +1,736 @@
+// Drives the manual checklist in test-and-issues.md as a script.
+//
+//   npm run uicheck
+//
+// Loaded by main/index.js only when the app is started with `--uicheck`, which
+// also points userData at a throwaway directory — nothing here touches a real
+// day log. It still reads the real Jira, because the credential preset applies
+// to any profile; it never writes to Jira.
+//
+// No dependency and no DevTools Protocol. The main process already holds
+// `webContents.executeJavaScript`, which is enough to dispatch real MouseEvents,
+// read computed styles and element boxes, and drive the whole app.
+//
+// ── Four traps, all of which made checks pass or fail for the wrong reason ──
+//
+// 1. A timer stopped inside ten seconds is discarded on purpose (MIN_ENTRY_MS in
+//    timer.js). Back-date the start with H.backdateStart() or the check measures
+//    nothing at all.
+// 2. Jira-side worklogs render as `.entry-card` too. Anything counting entries
+//    must scope to `.entry-card:not(.external)`, or every "nothing was created"
+//    assertion reads as a failure.
+// 3. Externals take part in overlap layout by design, so a two-entry overlap can
+//    legitimately produce three columns.
+// 4. At 0.5x zoom a quarter hour is 11px. Clicking a few pixels below an hour
+//    label lands in the next quarter — so a drop check asserts the entry landed
+//    where the *preview* said, which is what the checklist asks anyway.
+//
+// ── What this cannot reach ──
+//
+// Anything crossing a process restart (the persistence rows), and anything that
+// writes to Jira (Finish Day, and the synced-entry rewrite). Those stay manual.
+//
+// ── Adding a check ──
+//
+// check(name, pageScript, expectation). The script runs in the page wrapped in an
+// async IIFE, so `await` works and the last `return` is the value. It must return
+// something structured-cloneable — a string or a number, so JSON.stringify what
+// you collect. Start and end with `await H.resetDay()`.
+
+const results = [];
+let win = null;
+
+const run = (js) => win.webContents.executeJavaScript(js);
+
+async function check(name, js, expectation) {
+  try {
+    const raw = await run(`(async () => { ${js} })()`);
+    const value = typeof raw === 'string' ? raw : JSON.stringify(raw);
+    results.push({ name, ok: expectation(raw), value });
+  } catch (err) {
+    results.push({ name, ok: false, value: `THREW ${err.message}` });
+  }
+}
+
+const eq = (want) => (got) => JSON.stringify(got) === JSON.stringify(want);
+
+// ── Page-side helpers, installed once ──────────────────────────────────────
+
+const HELPERS = `
+window.H = {
+  q: (s) => document.querySelector(s),
+  all: (s) => [...document.querySelectorAll(s)],
+  sleep: (ms) => new Promise(r => setTimeout(r, ms)),
+  todayKey() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  },
+  hourY(hhmm) {
+    const l = H.all('.sched-hour-label').find(e => e.textContent === hhmm);
+    return l ? Math.round(l.getBoundingClientRect().top + 3) : null;
+  },
+  gridX() {
+    const r = H.q('#schedule-grid').getBoundingClientRect();
+    return Math.round(r.left + r.width * 0.6);
+  },
+  mouse(el, type, x, y, buttons) {
+    (el || document).dispatchEvent(new MouseEvent(type, {
+      bubbles: true, cancelable: true, button: 0, buttons, clientX: x, clientY: y,
+    }));
+  },
+  // Press on el, move in steps to (tx,ty), release there.
+  drag(el, tx, ty, steps = 5) {
+    const r = el.getBoundingClientRect();
+    const sx = Math.round(r.left + 14), sy = Math.round(r.top + r.height / 2);
+    H.mouse(el, 'mousedown', sx, sy, 1);
+    for (let i = 1; i <= steps; i++) {
+      H.mouse(document, 'mousemove', Math.round(sx + (tx - sx) * i / steps),
+                                     Math.round(sy + (ty - sy) * i / steps), 1);
+    }
+    H.mouse(document, 'mouseup', tx, ty, 0);
+  },
+  dragToHour(el, hhmm) { H.drag(el, H.gridX(), H.hourY(hhmm)); },
+  click(el) {
+    const r = el.getBoundingClientRect();
+    const x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2);
+    H.mouse(el, 'mousedown', x, y, 1);
+    H.mouse(el, 'mouseup', x, y, 0);
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+  },
+  entries() {
+    return H.all('.entry-card:not(.external)').map(c => ({
+      key: c.querySelector('.entry-jira')?.textContent ?? null,
+      range: H.all('.time-ie', c).length ? [...c.querySelectorAll('.time-ie')].map(i => i.value).join('-') : null,
+      status: c.querySelector('.status-badge')?.textContent ?? null,
+      external: c.classList.contains('external'),
+      overlapping: c.classList.contains('overlapping'),
+    }));
+  },
+  /**
+   * Selecting a day kicks off an async read of that day's Jira-side worklogs,
+   * and the re-render when it lands will replace every row. A gesture started
+   * before that settles gets its element pulled out from under it, which shows
+   * up as a drag that never begins. So: wait until the row count stops moving.
+   */
+  async settle(timeoutMs = 4000) {
+    const count = () => H.all('.entry-card').length + H.all('.task-item').length;
+    let last = -1;
+    const until = Date.now() + timeoutMs;
+    while (Date.now() < until) {
+      const now = count();
+      if (now === last && now > 0) return;
+      last = now;
+      await H.sleep(250);
+    }
+  },
+  async resetDay() {
+    if (H.q('#modal-overlay') && !H.q('#modal-overlay').classList.contains('hidden')) {
+      H.all('#modal-buttons button').at(-1)?.click();
+      await H.sleep(150);
+    }
+    H.all('.toast').forEach(t => t.remove());
+    await window.joggl.timer.save(null);
+    await window.joggl.days.save(H.todayKey(), []);
+    H.q('#today-btn').click();
+    await H.sleep(300);
+    await H.settle();
+  },
+  firstTask() { return H.q('.task-item'); },
+  // A timer stopped under ten seconds old is discarded on purpose; back-date it.
+  backdateStart(minutes) {
+    const t = new Date(Date.now() - minutes * 60000);
+    const p = (n) => String(n).padStart(2, '0');
+    const inp = H.q('#start-time-input');
+    inp.value = p(t.getHours()) + ':' + p(t.getMinutes());
+    inp.dispatchEvent(new FocusEvent('blur'));
+  },
+};
+'installed'`;
+
+// ── The checklist ──────────────────────────────────────────────────────────
+
+async function sidebar() {
+  await check(
+    'sidebar: brand, three tabs, settings, day active',
+    `return JSON.stringify({
+       brand: H.q('.sidebar-brand-name')?.textContent,
+       tabs: H.all('.sidebar-item[data-view]').map(b => b.dataset.view),
+       settings: !!H.q('#settings-btn'),
+       active: H.q('.sidebar-item.is-active')?.dataset.view,
+     })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.brand === 'Joggl' && d.settings && d.active === 'day' &&
+        JSON.stringify(d.tabs) === JSON.stringify(['day', 'week', 'month']);
+    },
+  );
+
+  await check(
+    'sidebar: week and month disabled, "Not built yet"',
+    `return JSON.stringify(H.all('.sidebar-item[data-view]')
+       .filter(b => b.dataset.view !== 'day')
+       .map(b => ({ v: b.dataset.view, disabled: b.disabled, title: b.title })))`,
+    (v) => JSON.parse(v).every((b) => b.disabled && b.title === 'Not built yet'),
+  );
+
+  await check(
+    'sidebar: clicking Week does nothing',
+    `H.q('.sidebar-item[data-view="week"]').click(); await H.sleep(200);
+     return H.q('.sidebar-item.is-active')?.dataset.view`,
+    eq('day'),
+  );
+
+  await check(
+    'settings: opens from the sidebar, closes, no gear in day header',
+    `H.q('#settings-btn').click(); await H.sleep(250);
+     const opened = !H.q('#settings-overlay').classList.contains('hidden');
+     H.q('#close-settings').click(); await H.sleep(250);
+     const closed = H.q('#settings-overlay').classList.contains('hidden');
+     const gear = !!H.q('.day-header #settings-btn, .day-header .icon-square');
+     return JSON.stringify({ opened, closed, gear })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.opened && d.closed && !d.gear;
+    },
+  );
+
+  await check(
+    'sidebar: toggle collapses and expands, content does not jump',
+    `const s = H.q('#sidebar'), host = H.q('#view-day');
+     const before = Math.round(host.getBoundingClientRect().left);
+     H.q('#sidebar-toggle').click(); await H.sleep(350);
+     const collapsed = s.classList.contains('collapsed');
+     const collapsedLeft = Math.round(host.getBoundingClientRect().left);
+     H.q('#sidebar-toggle').click(); await H.sleep(350);
+     return JSON.stringify({ collapsed, expanded: !s.classList.contains('collapsed'),
+                             before, collapsedLeft,
+                             after: Math.round(host.getBoundingClientRect().left) })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.collapsed && d.expanded && d.after === d.before && d.collapsedLeft < d.before;
+    },
+  );
+
+  await check(
+    'sidebar: peek opens on rest, and floats over rather than pushing',
+    `const s = H.q('#sidebar'), host = H.q('#view-day');
+     H.q('#sidebar-toggle').click(); await H.sleep(300);
+     const leftBefore = Math.round(host.getBoundingClientRect().left);
+     s.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }));
+     await H.sleep(400);
+     const peeked = s.classList.contains('peek');
+     const leftDuring = Math.round(host.getBoundingClientRect().left);
+     s.dispatchEvent(new MouseEvent('mouseleave', { bubbles: false }));
+     await H.sleep(200);
+     H.q('#sidebar-toggle').click(); await H.sleep(300);
+     return JSON.stringify({ peeked, leftBefore, leftDuring })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.peeked && d.leftDuring === d.leftBefore;
+    },
+  );
+
+  await check(
+    'sidebar: a quick sweep across does not open the peek',
+    `const s = H.q('#sidebar');
+     H.q('#sidebar-toggle').click(); await H.sleep(300);
+     s.dispatchEvent(new MouseEvent('mouseenter'));
+     await H.sleep(80);
+     s.dispatchEvent(new MouseEvent('mouseleave'));
+     await H.sleep(300);
+     const peeked = s.classList.contains('peek');
+     H.q('#sidebar-toggle').click(); await H.sleep(300);
+     return String(peeked)`,
+    eq('false'),
+  );
+}
+
+async function dragging() {
+  await check(
+    'click a task row: timer starts, no entry created',
+    `await H.resetDay();
+     H.click(H.firstTask()); await H.sleep(600);
+     const running = H.q('#start-stop-btn').classList.contains('btn-stop');
+     const n = H.entries().length;
+     H.click(H.q('#start-stop-btn')); await H.sleep(500);
+     await H.resetDay();
+     return JSON.stringify({ running, n })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.running === true && d.n === 0;
+    },
+  );
+
+  await check(
+    'four sloppy clicks on task rows: every one starts a timer, none creates an entry',
+    `await H.resetDay();
+     let started = 0, created = 0;
+     for (let i = 0; i < 4; i++) {
+       const row = H.all('.task-item')[i];
+       const r = row.getBoundingClientRect();
+       const x = Math.round(r.left + 30), y = Math.round(r.top + r.height / 2);
+       H.mouse(row, 'mousedown', x, y, 1);
+       H.mouse(document, 'mousemove', x + 3, y + 2, 1);   // under the 6px threshold
+       H.mouse(document, 'mouseup', x + 3, y + 2, 0);
+       row.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x + 3, clientY: y + 2 }));
+       await H.sleep(400);
+       if (H.q('#start-stop-btn').classList.contains('btn-stop')) started++;
+       created = Math.max(created, H.entries().length);
+     }
+     H.click(H.q('#start-stop-btn')); await H.sleep(400);
+     await H.resetDay();
+     return JSON.stringify({ started, created })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.started === 4 && d.created === 0;
+    },
+  );
+
+  await check(
+    'press a task, move sideways only, release off the grid: nothing created',
+    `await H.resetDay();
+     const row = H.firstTask(); const r = row.getBoundingClientRect();
+     const x = Math.round(r.left + 30), y = Math.round(r.top + r.height / 2);
+     H.mouse(row, 'mousedown', x, y, 1);
+     for (const dx of [20, 60, 120]) H.mouse(document, 'mousemove', x + dx, y, 1);
+     H.mouse(document, 'mouseup', x + 120, y, 0);
+     await H.sleep(500);
+     const n = H.entries().length;
+     const toasts = H.all('.toast').length;
+     await H.resetDay();
+     return JSON.stringify({ n, toasts })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.n === 0 && d.toasts === 0;
+    },
+  );
+
+  await check(
+    'drag a task onto the timeline: ghost follows, dashed preview shows a quarter-hour range',
+    `await H.resetDay();
+     const row = H.firstTask(); const r = row.getBoundingClientRect();
+     const sx = Math.round(r.left + 20), sy = Math.round(r.top + r.height / 2);
+     const tx = H.gridX(), ty = H.hourY('11:00');
+     H.mouse(row, 'mousedown', sx, sy, 1);
+     let preview = '', dashed = '';
+     for (let i = 1; i <= 5; i++) {
+       H.mouse(document, 'mousemove', Math.round(sx + (tx - sx) * i / 5), Math.round(sy + (ty - sy) * i / 5), 1);
+       await H.sleep(60);
+       const el = H.q('.sched-drop-preview');
+       if (el) { preview = el.textContent; dashed = getComputedStyle(el).borderStyle; }
+     }
+     const ghost = !!H.q('.drag-ghost');
+     const ghostText = H.q('.drag-ghost')?.textContent ?? '';
+     H.mouse(document, 'mouseup', tx, ty, 0);
+     await H.sleep(500);
+     const entries = H.entries();
+     await H.resetDay();
+     return JSON.stringify({ ghost, ghostText, preview, dashed, entries })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.ghost && /^\d\d:\d\d – \d\d:\d\d$/.test(d.preview) && d.dashed === 'dashed' &&
+        d.entries.length === 1 && d.entries[0].range === '11:00-11:30' &&
+        d.entries[0].status.includes('pending');
+    },
+  );
+
+  await check(
+    'drop lands where the preview said, at 0.5x / 1x / 2x / 3x zoom',
+    `const out = [];
+     for (const idx of [0, 2, 4, 5]) {
+       // Set zoom by clicking the buttons until the label matches the level.
+       const levels = [0.5, 0.75, 1, 1.5, 2, 3];
+       let guard = 0;
+       while (H.q('#zoom-lbl').textContent !== levels[idx] + '×' && guard++ < 12) {
+         const cur = levels.indexOf(parseFloat(H.q('#zoom-lbl').textContent));
+         H.q(cur < idx ? '#zoom-in' : '#zoom-out').click();
+         await H.sleep(120);
+       }
+       await H.resetDay();
+       H.q('#right-panel').scrollTop = 200;
+       // The zoom change re-renders the grid behind an await, so wait for the
+       // hour line to stop moving before measuring where to drop.
+       let ty = null, prev = null;
+       for (let w = 0; w < 12; w++) {
+         await H.sleep(150);
+         ty = H.hourY('14:00');
+         if (ty !== null && ty === prev) break;
+         prev = ty;
+       }
+       const row = H.firstTask();
+       if (ty === null) { out.push({ zoom: levels[idx], skipped: 'no 14:00 label' }); continue; }
+       // Drag by hand so the preview can be read mid-gesture: the checklist asks
+       // that the entry land where the preview said, not at a hour picked here.
+       const rr = row.getBoundingClientRect();
+       const sx = Math.round(rr.left + 20), sy = Math.round(rr.top + rr.height / 2);
+       const tx = H.gridX();
+       H.mouse(row, 'mousedown', sx, sy, 1);
+       let preview = '';
+       for (let i = 1; i <= 5; i++) {
+         H.mouse(document, 'mousemove', Math.round(sx + (tx - sx) * i / 5), Math.round(sy + (ty - sy) * i / 5), 1);
+         await H.sleep(90);
+         preview = H.q('.sched-drop-preview')?.textContent ?? preview;
+       }
+       H.mouse(document, 'mouseup', tx, ty, 0);
+       await H.sleep(500);
+       out.push({ zoom: levels[idx], preview, entries: H.entries().map(e => e.range) });
+     }
+     await H.resetDay();
+     return JSON.stringify(out)`,
+    (v) => JSON.parse(v).every((r) => r.skipped ||
+      (r.entries.length === 1 && r.preview.replace(/\s*–\s*/, '-') === r.entries[0])),
+  );
+
+  await check(
+    'Escape mid-drag: ghost and preview vanish, nothing created',
+    `await H.resetDay();
+     const row = H.firstTask(); const r = row.getBoundingClientRect();
+     const sx = Math.round(r.left + 20), sy = Math.round(r.top + r.height / 2);
+     const tx = H.gridX(), ty = H.hourY('12:00');
+     H.mouse(row, 'mousedown', sx, sy, 1);
+     for (let i = 1; i <= 4; i++)
+       H.mouse(document, 'mousemove', Math.round(sx + (tx - sx) * i / 4), Math.round(sy + (ty - sy) * i / 4), 1);
+     await H.sleep(100);
+     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+     await H.sleep(150);
+     const gone = !H.q('.drag-ghost') && !H.q('.sched-drop-preview');
+     H.mouse(document, 'mouseup', tx, ty, 0);
+     await H.sleep(400);
+     const n = H.entries().length;
+     await H.resetDay();
+     return JSON.stringify({ gone, n })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.gone && d.n === 0;
+    },
+  );
+
+  await check(
+    'the same issue dropped twice an hour apart: two entries, no merge prompt',
+    `await H.resetDay();
+     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(500);
+     H.dragToHour(H.firstTask(), '10:00'); await H.sleep(500);
+     const modal = !H.q('#modal-overlay').classList.contains('hidden');
+     const ranges = H.entries().map(e => e.range);
+     await H.resetDay();
+     return JSON.stringify({ modal, ranges })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.modal === false && JSON.stringify(d.ranges) === JSON.stringify(['09:00-09:30', '10:00-10:30']);
+    },
+  );
+
+  await check(
+    'dropping on top of an existing entry: both flagged, timeline splits into columns',
+    `await H.resetDay();
+     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(500);
+     H.dragToHour(H.all('.task-item')[1], '09:00'); await H.sleep(500);
+     const flagged = H.entries().filter(e => e.overlapping).length;
+     const ids = new Set(H.all('.entry-card:not(.external)').map(c => c.dataset.id));
+     const widths = H.all('.sched-entry-block').filter(b => ids.has(b.dataset.id)).map(b => b.style.width || 'full');
+     await H.resetDay();
+     return JSON.stringify({ flagged, widths })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.flagged === 2 && d.widths.length === 2 && d.widths.every((w) => w !== 'full');
+    },
+  );
+
+  await check(
+    'dragging across the collapsed rail does not open the peek',
+    `await H.resetDay();
+     H.q('#sidebar-toggle').click(); await H.sleep(300);
+     const row = H.firstTask(); const r = row.getBoundingClientRect();
+     const sx = Math.round(r.left + 20), sy = Math.round(r.top + r.height / 2);
+     H.mouse(row, 'mousedown', sx, sy, 1);
+     H.mouse(document, 'mousemove', sx - 40, sy, 1);
+     H.q('#sidebar').dispatchEvent(new MouseEvent('mouseenter'));
+     H.mouse(document, 'mousemove', 20, sy, 1);
+     await H.sleep(400);
+     const peeked = H.q('#sidebar').classList.contains('peek');
+     H.mouse(document, 'mouseup', 20, sy, 0);
+     await H.sleep(300);
+     H.q('#sidebar-toggle').click(); await H.sleep(300);
+     await H.resetDay();
+     return String(peeked)`,
+    eq('false'),
+  );
+
+  await check(
+    'a drop on a past day stays on that day',
+    `await H.resetDay();
+     H.q('#prev-day').click(); await H.sleep(600);
+     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     const onPast = H.entries().length;
+     H.q('#today-btn').click(); await H.sleep(600);
+     const onToday = H.entries().length;
+     H.q('#prev-day').click(); await H.sleep(600);
+     const stillThere = H.entries().length;
+     // Clean the past day up.
+     const d = new Date(); d.setDate(d.getDate() - 1);
+     const p = (n) => String(n).padStart(2, '0');
+     await window.joggl.days.save(d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()), []);
+     H.q('#today-btn').click(); await H.sleep(400);
+     return JSON.stringify({ onPast, onToday, stillThere })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.onPast === 1 && d.onToday === 0 && d.stillThere === 1;
+    },
+  );
+}
+
+async function timeSafety() {
+  await check(
+    'a block booked ahead is never absorbed by a timer started now',
+    `await H.resetDay();
+     const key = H.all('.task-item')[0].dataset.key;
+     const now = Date.now();
+     const at = new Date(now); at.setHours(at.getHours() + 2, 0, 0, 0);
+     await window.joggl.days.save(H.todayKey(), [{
+       id: 'booked', issueKey: key, issueId: null, title: 'Booked ahead',
+       startTs: at.getTime(), endTs: at.getTime() + 1800000,
+       status: 'pending', worklogId: null, errorMsg: null }]);
+     H.q('#today-btn').click(); await H.sleep(500);
+     H.backdateStart(5); H.click(H.firstTask()); await H.sleep(700);
+     const prompted = !H.q('#modal-overlay').classList.contains('hidden');
+     if (prompted) H.all('#modal-buttons button')[0].click();
+     await H.sleep(300);
+     H.click(H.q('#start-stop-btn')); await H.sleep(800);
+     const n = H.entries().length;
+     await H.resetDay();
+     return JSON.stringify({ prompted, n })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.prompted === false && d.n === 2;
+    },
+  );
+
+  await check(
+    'a past entry under 30 minutes old merges silently',
+    `await H.resetDay();
+     const key = H.all('.task-item')[0].dataset.key;
+     const end = Date.now() - 10 * 60000;
+     await window.joggl.days.save(H.todayKey(), [{
+       id: 'recent', issueKey: key, issueId: null, title: 'Earlier',
+       startTs: end - 1800000, endTs: end,
+       status: 'pending', worklogId: null, errorMsg: null }]);
+     H.q('#today-btn').click(); await H.sleep(500);
+     H.backdateStart(5); H.click(H.firstTask()); await H.sleep(700);
+     const prompted = !H.q('#modal-overlay').classList.contains('hidden');
+     if (prompted) H.all('#modal-buttons button').at(-1).click();
+     await H.sleep(200);
+     H.click(H.q('#start-stop-btn')); await H.sleep(800);
+     const n = H.entries().length;
+     await H.resetDay();
+     return JSON.stringify({ prompted, n })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.prompted === false && d.n === 1;
+    },
+  );
+
+  await check(
+    'a gap over 30 minutes asks instead of merging',
+    `await H.resetDay();
+     const key = H.all('.task-item')[0].dataset.key;
+     const end = Date.now() - 90 * 60000;
+     await window.joggl.days.save(H.todayKey(), [{
+       id: 'older', issueKey: key, issueId: null, title: 'Much earlier',
+       startTs: end - 1800000, endTs: end,
+       status: 'pending', worklogId: null, errorMsg: null }]);
+     H.q('#today-btn').click(); await H.sleep(500);
+     H.click(H.firstTask()); await H.sleep(900);
+     const prompted = !H.q('#modal-overlay').classList.contains('hidden');
+     const labels = H.all('#modal-buttons button').map(b => b.textContent);
+     if (prompted) H.all('#modal-buttons button')[0].click();
+     await H.sleep(300);
+     if (H.q('#start-stop-btn').classList.contains('btn-stop')) { H.click(H.q('#start-stop-btn')); await H.sleep(600); }
+     await H.resetDay();
+     return JSON.stringify({ prompted, labels })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.prompted === true && d.labels.includes('Merge into one') && d.labels.includes('Keep separate');
+    },
+  );
+
+  await check(
+    'a running timer refuses a start time in the future',
+    `await H.resetDay();
+     H.backdateStart(5); H.click(H.firstTask()); await H.sleep(700);
+     const inp = H.q('#start-time-input');
+     const future = new Date(Date.now() + 3 * 3600000);
+     const p = (n) => String(n).padStart(2, '0');
+     inp.value = p(future.getHours()) + ':00';
+     inp.dispatchEvent(new Event('input'));
+     inp.dispatchEvent(new FocusEvent('blur'));
+     await H.sleep(400);
+     const warned = H.all('.toast').some(t => /future/i.test(t.textContent));
+     const reverted = inp.value !== p(future.getHours()) + ':00';
+     H.click(H.q('#start-stop-btn')); await H.sleep(600);
+     await H.resetDay();
+     return JSON.stringify({ warned, reverted })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.warned && d.reverted;
+    },
+  );
+
+  await check(
+    'a hand-drawn entry in the future can still have its start edited',
+    `await H.resetDay();
+     const at = new Date(); at.setHours(at.getHours() + 3, 0, 0, 0);
+     await window.joggl.days.save(H.todayKey(), [{
+       id: 'ahead', issueKey: 'X-1', issueId: null, title: 'Leave',
+       startTs: at.getTime(), endTs: at.getTime() + 1800000,
+       status: 'pending', worklogId: null, errorMsg: null }]);
+     H.q('#today-btn').click(); await H.sleep(500);
+     const card = H.q('.entry-card[data-id="ahead"]');
+     const start = card.querySelector('[data-f="start"]');
+     const disabled = start.disabled;
+     const p = (n) => String(n).padStart(2, '0');
+     const want = p((at.getHours() + 23) % 24) + ':00';
+     start.value = want;
+     start.dispatchEvent(new FocusEvent('blur'));
+     await H.sleep(400);
+     const now = H.q('.entry-card[data-id="ahead"] [data-f="start"]').value;
+     await H.resetDay();
+     return JSON.stringify({ disabled, want, now })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.disabled === false && d.now === d.want;
+    },
+  );
+
+  await check(
+    'entries dragged from the day list move; Jira-side rows do not',
+    `await H.resetDay();
+     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(500);
+     const before = H.entries()[0].range;
+     H.dragToHour(H.q('.entry-card'), '15:00'); await H.sleep(600);
+     const after = H.entries()[0].range;
+     await H.resetDay();
+     return JSON.stringify({ before, after })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.before === '09:00-09:30' && d.after === '15:00-15:30';
+    },
+  );
+
+  await check(
+    'a pinned issue can be dragged onto the day view',
+    `await H.resetDay();
+     H.q('#add-pin-btn').click(); await H.sleep(250);
+     const inp = H.q('#pin-search-input');
+     inp.value = H.all('.task-item')[0].querySelector('.task-dd-title').textContent.slice(0, 12);
+     inp.dispatchEvent(new Event('input')); await H.sleep(350);
+     const btn = H.all('#pin-results button').find(b => b.textContent === 'Pin');
+     if (btn) btn.click();
+     await H.sleep(350);
+     H.q('#close-pin').click(); await H.sleep(250);
+     const chips = H.all('.pin-chip').length;
+     if (chips) { H.dragToHour(H.q('.pin-chip'), '16:00'); await H.sleep(600); }
+     const ranges = H.entries().map(e => e.range);
+     await window.joggl.pins.save([]);
+     await H.resetDay();
+     return JSON.stringify({ chips, ranges })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.chips === 1 && JSON.stringify(d.ranges) === JSON.stringify(['16:00-16:30']);
+    },
+  );
+}
+
+async function quickEntry() {
+  await check(
+    'clicking the grid opens a visible, focused quick entry at the clicked hour',
+    `await H.resetDay();
+     H.q('#right-panel').scrollTop = 260; await H.sleep(200);
+     const y = H.hourY('13:00');
+     H.q('#schedule-grid').dispatchEvent(new MouseEvent('click', {
+       bubbles: true, cancelable: true, clientX: H.gridX(), clientY: y }));
+     await H.sleep(500);
+     const el = H.q('.sched-quick-entry');
+     const out = { time: H.q('.sched-quick-entry-time')?.textContent ?? 'NONE',
+                   visible: el ? getComputedStyle(el).visibility : 'none',
+                   focused: document.activeElement?.tagName,
+                   inWindow: el ? (el.getBoundingClientRect().right <= window.innerWidth &&
+                                   el.getBoundingClientRect().bottom <= window.innerHeight) : false };
+     document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+     await H.sleep(200);
+     return JSON.stringify(out)`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.time === '13:00 – 13:30' && d.visible === 'visible' && d.focused === 'INPUT' && d.inWindow;
+    },
+  );
+
+  await check(
+    'the omnibar search does not recurse and finds issues beyond the loaded list',
+    `const i = H.q('#task-input');
+     i.focus(); i.value = 'meeting'; i.dispatchEvent(new Event('input'));
+     await H.sleep(1800);
+     const rows = H.all('#task-dropdown .task-dd-item').length;
+     const sep = !!H.q('#task-dropdown .task-dd-sep');
+     i.value = ''; i.dispatchEvent(new Event('input')); i.blur();
+     await H.sleep(200);
+     return JSON.stringify({ rows, sep })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.rows > 0 && d.sep === true;
+    },
+  );
+}
+
+async function externals() {
+  await check(
+    'Jira-side worklogs read back dashed, labelled and read-only',
+    `await H.resetDay();
+     H.q('#refresh-tasks-btn').click();
+     await H.sleep(4000);
+     const ext = H.all('.entry-card.external');
+     return JSON.stringify({
+       count: ext.length,
+       label: ext[0]?.querySelector('.entry-sub')?.textContent ?? null,
+       inputsDisabled: ext.length ? [...ext[0].querySelectorAll('.ie')].every(i => i.disabled) : null,
+       hasDelete: ext.length ? !!ext[0].querySelector('[data-a="delete"]') : null,
+     })`,
+    (v) => {
+      const d = JSON.parse(v);
+      if (d.count === 0) return 'skipped';
+      return d.label === 'Manual Jira entry' && d.inputsDisabled === true && d.hasDelete === false;
+    },
+  );
+}
+
+// ── Entry point ────────────────────────────────────────────────────────────
+
+export async function runChecks(mainWindow, app) {
+  win = mainWindow;
+  try {
+    await run(HELPERS);
+    await sidebar();
+    await quickEntry();
+    await dragging();
+    await timeSafety();
+    await externals();
+  } catch (err) {
+    results.push({ name: '(harness)', ok: false, value: `THREW ${err.stack}` });
+  }
+
+  const pass = results.filter((r) => r.ok === true).length;
+  const skip = results.filter((r) => r.ok === 'skipped').length;
+  const fail = results.filter((r) => r.ok !== true && r.ok !== 'skipped');
+
+  console.log('\n─── ui-check ────────────────────────────────────');
+  for (const r of results) {
+    const mark = r.ok === true ? 'PASS' : r.ok === 'skipped' ? 'SKIP' : 'FAIL';
+    console.log(`${mark}  ${r.name}`);
+    // The observed value, only when it did not pass — that is the whole diagnosis.
+    if (mark !== 'PASS') console.log(`      ${r.value}`);
+  }
+  console.log(`───  ${pass} passed, ${fail.length} failed, ${skip} skipped\n`);
+
+  // Non-zero on failure, so this can gate a release without anyone reading it.
+  app.exit(fail.length === 0 ? 0 : 1);
+}

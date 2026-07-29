@@ -3,6 +3,7 @@
 
 import { app, BrowserWindow, Menu, Tray, globalShortcut, shell, nativeImage } from 'electron';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { initCredentials } from './credentials.js';
 import { applyDevCredentials } from './dev-credentials.js';
@@ -19,8 +20,21 @@ let mainWindow = null;
 let tray = null;
 let quitting = false;
 
+/**
+ * `npm run uicheck` — drive the manual checklist as a script. See
+ * scripts/ui-check.mjs.
+ *
+ * userData is redirected before anything reads it, so a run can never touch a
+ * real day log, and the single-instance lock is skipped so a check can run while
+ * the app is open. Both have to happen here, before `whenReady`.
+ */
+const uiCheck = process.argv.includes('--uicheck');
+if (uiCheck) {
+  app.setPath('userData', path.join(app.getPath('temp'), `joggl-uicheck-${process.pid}`));
+}
+
 // One instance only: two copies writing the same day log would race each other.
-if (!app.requestSingleInstanceLock()) {
+if (!uiCheck && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', showWindow);
@@ -85,6 +99,15 @@ async function createWindow() {
   Menu.setApplicationMenu(null);
   await mainWindow.loadFile(path.join(ROOT, 'renderer', 'index.html'));
   mainWindow.show();
+
+  if (uiCheck) {
+    const { runChecks } = await import(
+      pathToFileURL(path.join(ROOT, 'scripts', 'ui-check.mjs')).href
+    );
+    // Long enough for the first issue load to land — several checks need a task
+    // row to press.
+    setTimeout(() => runChecks(mainWindow, app), 7000);
+  }
 
   mainWindow.on('resize', debounce(persistBounds, 500));
 

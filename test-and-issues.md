@@ -24,6 +24,7 @@ what it did not cover.
 ```
 npm start      # the app
 npm test       # 131 tests, must be 0 failures
+npm run uicheck # the checklist below, driven as a script — 27 checks, must be 0 failures
 ```
 
 The log is at `logs/joggl.log`, credential-redacted. Send it along with any bug report.
@@ -135,30 +136,35 @@ cleared on 2026-07-29.
 
 ---
 
-## Automating the manual half
+## The script
 
-Every table above was executed as a script on 2026-07-29 — 27 checks, all green — so the
-approach is settled: it needs **no dependency and no DevTools Protocol**. The main process
-already holds `webContents.executeJavaScript`, which is enough to dispatch real
-`MouseEvent`s, read computed styles and element boxes, and drive the app end to end. A
-`--user-data-dir` pointed at a temp directory keeps the run away from real day logs.
+Every table above except the persistence rows is executed by `scripts/ui-check.mjs`:
 
-Four things that pass took getting right, and are the traps for anyone rebuilding it:
+```
+npm run uicheck
+```
 
-1. **A timer stopped inside ten seconds is discarded by design.** Two merge checks silently
-   measured nothing until the timer's start was back-dated first.
-2. **Jira-side worklogs render as entry cards.** Anything counting `.entry-card` counts
-   them, and every "nothing was created" assertion reads as a failure. Scope to
-   `.entry-card:not(.external)`.
-3. **Externals take part in overlap layout**, so a two-entry overlap check can legitimately
-   see three columns.
-4. **At 0.5× zoom a quarter hour is 11 px.** Clicking a few pixels below an hour label
-   lands in the next quarter, so the assertion has to be "the entry landed where the
-   preview said", which is what the checklist actually asks — not "it landed at 14:00".
+27 checks, exits non-zero on failure. It needs **no dependency and no DevTools Protocol** —
+the main process already holds `webContents.executeJavaScript`, which is enough to
+dispatch real `MouseEvent`s, read computed styles and element boxes, and drive the app end
+to end. `main/index.js` loads it only under `--uicheck`, which also redirects `userData` to
+a temp directory, so a run cannot touch a real day log and can run while the app is open.
 
-What it still cannot reach: anything crossing a process restart (the three persistence
-rows), and anything that writes to Jira (Finish Day, and the synced-entry rewrite). Those
-stay manual.
+The traps that make checks pass or fail for the wrong reason are documented at the top of
+the script and in `CLAUDE.md`. The short version: back-date a timer's start or it is
+discarded before it counts; scope entry counts to `.entry-card:not(.external)`; expect
+externals in the overlap layout; and assert a drop landed where the preview said rather
+than at a hard-coded hour.
 
-The script itself is not committed. It is worth committing before the week and month views,
-which multiply this file's surface by seven and then by thirty.
+**Add a check whenever a UI bug is fixed.** That is the whole point — of the three bugs
+found on 2026-07-29, two were "does this element's box fit in the window" and "did the
+panel's scrollTop change", which no amount of reading catches and this catches in seconds.
+
+### Still manual
+
+| Why | What |
+|---|---|
+| Crosses a process restart | the three Persistence rows |
+| Writes to Jira | Finish Day on a future block; rewriting a synced entry's worklog |
+
+Never run Finish Day against a live site from a script.

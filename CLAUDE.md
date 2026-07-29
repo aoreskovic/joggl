@@ -453,6 +453,60 @@ Full UI coverage is not the goal. These four need real tests, because a silent f
 3. Finish Day partial-failure state transitions
 4. Day log persist / reload round trip
 
+```bash
+npm test
+```
+
+### Driving the UI — read this before deciding something cannot be verified
+
+The UI is not untestable, and it needs no dependency, no framework and no DevTools
+Protocol. The main process already holds `webContents.executeJavaScript`, which is
+enough to dispatch real `MouseEvent`s, read computed styles and element boxes, and drive
+the whole app end to end.
+
+```bash
+npm run uicheck
+```
+
+That runs `scripts/ui-check.mjs`, which walks every table in `test-and-issues.md` and
+exits non-zero on failure. `main/index.js` loads it only under `--uicheck`, which also
+redirects `userData` to a temp directory — a run can never touch a real day log, and it
+can run while the app is open. **Add a check there whenever a UI bug is fixed.**
+
+For one-off investigation, the same mechanism inline is often faster than reasoning about
+what the DOM probably does: a temporary env-gated block in `createWindow` that calls
+`executeJavaScript`, reports what it found, and calls `app.exit(0)`. Remove it before
+committing. `webContents.capturePage()` gives a screenshot, which is the quickest way to
+settle a question about layout or colour.
+
+Four traps make checks pass or fail for the wrong reason. All four cost real time before
+they were understood, and all four are restated in `scripts/ui-check.mjs`:
+
+1. **A timer stopped inside ten seconds is discarded on purpose.** Back-date the start
+   first, or a merge check measures nothing at all and passes.
+2. **Jira-side worklogs render as `.entry-card` too.** Scope to
+   `.entry-card:not(.external)`, or every "nothing was created" assertion fails.
+3. **Externals take part in overlap layout**, so a two-entry overlap can legitimately
+   produce three columns.
+4. **At 0.5× zoom a quarter hour is 11 px.** Assert that a drop landed where the *preview*
+   said, not at an hour hard-coded in the test.
+
+Two more, learned from flakes rather than from wrong results:
+
+- **Selecting a day starts an async read of that day's Jira worklogs**, and the re-render
+  when it lands replaces every row. A gesture begun before that settles has its element
+  pulled out from under it and simply never starts. Wait for the row count to stop moving.
+- **A zoom change re-renders the grid behind an `await`.** Re-measure the hour line
+  afterwards rather than trusting a coordinate read before the click.
+
+What this cannot reach, and what therefore stays manual: anything crossing a process
+restart, and anything that writes to Jira — **never run Finish Day against a live site
+from a script.**
+
+Timing out an Electron run does not kill it. `timeout … electron .` reaps the launcher,
+leaves the app holding the single-instance lock, and every later launch then exits
+silently. Stop stray processes before concluding anything about a failed start.
+
 ---
 
 ## Out of scope

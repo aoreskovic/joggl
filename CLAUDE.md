@@ -72,7 +72,9 @@ been exercised end to end, not just written.
 | Finish Day | Confirmed against real Jira — worklog `60504` on `EHW-70` |
 | Jira-side worklogs | Time logged in the Jira web UI is read back and counted |
 | Logging | `logs/joggl.log`, credential-redacted |
-| Tests | 65 passing, `npm test` |
+| Tests | 107 passing, `npm test` |
+| Shell | Collapsible sidebar with a view registry; week and month tabs present but disabled |
+| Drag to day view | An issue dragged from the task list becomes a 30-minute pending entry |
 
 ### Deviations from this document, and why
 
@@ -110,16 +112,23 @@ a reason.
 
 ### Next, roughly in order
 
-1. **Tray icon states** — the icon should show at a glance whether a timer is running.
+1. **Week view** — phase 2 of the sidebar work. Day columns, a work-week / 7-day
+   toggle, a week stepper that names the week of the month, and dragging entries
+   between days. Needs the multi-day state and the generalised timeline column that
+   phase 1 deliberately left alone: the `view` singleton in `timeline.js` still ties
+   every drag handler to one column.
+2. **Month view** — phase 3. A calendar grid with hours logged per day, and the day
+   view beside it showing whichever day was clicked.
+3. **Tray icon states** — the icon should show at a glance whether a timer is running.
    Right now the only signal is opening the window.
-2. **Keyboard-first start/stop** — a global shortcut exists for showing the window;
+4. **Keyboard-first start/stop** — a global shortcut exists for showing the window;
    starting the last task without touching the mouse is the obvious next one.
-3. **Pagination for busy issues** — `fetchDayWorklogs` asks for `maxResults=200` per
+5. **Pagination for busy issues** — `fetchDayWorklogs` asks for `maxResults=200` per
    issue and does not follow `startAt`. Fine at present volumes, wrong eventually.
-4. **Splitting a synced entry** — currently refused. It needs one worklog updated and
+6. **Splitting a synced entry** — currently refused. It needs one worklog updated and
    one created, with a partial-failure story; worth doing only if it is actually missed.
-5. **macOS build** — a GitHub Actions job with a macOS runner, no code changes.
-6. **Auto-update** — still not worth it for ten users. Revisit if handing out installers
+7. **macOS build** — a GitHub Actions job with a macOS runner, no code changes.
+8. **Auto-update** — still not worth it for ten users. Revisit if handing out installers
    becomes the annoying part.
 
 Deliberately **not** planned: everything under *Out of scope* at the end of this file.

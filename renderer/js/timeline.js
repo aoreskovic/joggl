@@ -428,10 +428,20 @@ function onQuickEntryOutside(event) {
 export function onGridClick(event) {
   if (event.target.closest('.sched-entry-block') || event.target.closest('.sched-handle')) return;
 
-  const startTs = gridTimeAt(event.clientX, event.clientY);
-  if (startTs === null) return;
+  const rawStartTs = gridTimeAt(event.clientX, event.clientY);
+  if (rawStartTs === null) return;
 
-  showQuickEntry(event.clientX, event.clientY, startTs, startTs + 30 * 60_000);
+  const duration = 30 * 60_000;
+  // Same rule dropEntryFor applies, and for the same reason: pull the start back
+  // rather than shorten the block. When the visible range extends to hour 24, a
+  // click near the bottom can resolve to exactly next-day midnight, and without
+  // this the block would commit as 00:00–00:30 of *tomorrow* under today's key.
+  // A 30-minute click silently becoming a 15-minute entry would be a worse
+  // surprise than one that lands a quarter hour earlier than clicked.
+  const latestStart = startOfDayMs(state.selectedDate) + 86_400_000 - duration;
+  const startTs = Math.min(rawStartTs, latestStart);
+
+  showQuickEntry(event.clientX, event.clientY, startTs, startTs + duration);
 }
 
 function showQuickEntry(cx, cy, startTs, endTs) {

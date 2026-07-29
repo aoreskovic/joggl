@@ -237,7 +237,11 @@ Merging is always local. Nothing reaches Jira until Finish Day.
 ### Validation
 
 - Overlapping entries are permitted (the timeline renders them in overlap columns) but flagged visually — usually a mistake.
-- Start time may not be in the future.
+- A **running timer's** start may not be in the future — it would measure negative
+  elapsed time. Entries drawn by hand may be: dropping an issue at 18:00 while it is
+  14:00 books leave, an out-of-office block, or a meeting already in the diary, and
+  Finish Day submits it like any other pending entry. The constraint therefore lives
+  on the omnibar start-time field, not on entry creation.
 - An edit producing `end < start` is rejected inline, never via modal.
 
 ---

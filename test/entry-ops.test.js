@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { duplicateOf, overlappingIds } from '../renderer/js/entry-ops.js';
+import { DEFAULT_DROP_MS, dropEntryFor, duplicateOf, overlappingIds } from '../renderer/js/entry-ops.js';
 import { planFinishDay } from '../renderer/js/finish-day.js';
 
 const T = (h, m = 0) => new Date(2026, 6, 28, h, m, 0, 0).getTime();
@@ -114,4 +114,54 @@ test('a running entry is not counted as overlapping anything', () => {
     entry({ id: 'live', startTs: T(10), endTs: null }),
   ]);
   assert.equal(ids.size, 0);
+});
+
+// ── What a drop onto the day view creates ───────────────────────────────────
+
+const DAY_START = T(0);
+
+const dropped = { issueKey: 'PROJ-1', issueId: '10001', title: 'Meetings' };
+
+test('a dropped issue becomes a pending entry of exactly 30 minutes', () => {
+  const e = dropEntryFor(dropped, 'e1', T(9, 15), DAY_START);
+  assert.equal(e.startTs, T(9, 15));
+  assert.equal(e.endTs, T(9, 45));
+  assert.equal(e.endTs - e.startTs, DEFAULT_DROP_MS);
+  assert.equal(e.status, 'pending');
+  assert.equal(e.worklogId, null);
+  assert.equal(e.errorMsg, null);
+});
+
+test('the dropped entry carries the issue, the title and the given id', () => {
+  const e = dropEntryFor(dropped, 'e1', T(9), DAY_START);
+  assert.equal(e.id, 'e1');
+  assert.equal(e.issueKey, 'PROJ-1');
+  assert.equal(e.issueId, '10001');
+  assert.equal(e.title, 'Meetings');
+});
+
+test('a drop near midnight is pulled back so the block ends on it', () => {
+  const e = dropEntryFor(dropped, 'e1', T(23, 45), DAY_START);
+  assert.equal(e.endTs, DAY_START + 86_400_000, 'ends exactly at midnight');
+  assert.equal(e.startTs, T(23, 30));
+  assert.equal(e.endTs - e.startTs, DEFAULT_DROP_MS, 'and keeps its full length');
+});
+
+test('a start later than now is allowed, so leave can be booked ahead', () => {
+  // Far enough ahead that it is in the future whatever day the test runs on.
+  const farStart = new Date(2099, 0, 1, 0, 0, 0, 0).getTime();
+  const e = dropEntryFor(dropped, 'e1', farStart + 9 * 3_600_000, farStart);
+  assert.equal(e.status, 'pending', 'nothing is rejected for being in the future');
+  assert.equal(e.startTs, farStart + 9 * 3_600_000);
+});
+
+test('a dropped entry syncs like any other pending entry', () => {
+  const e = dropEntryFor(dropped, 'e1', T(9), DAY_START);
+  assert.deepEqual(planFinishDay([e]).toSubmit.map((x) => x.id), ['e1']);
+});
+
+test('dropEntryFor does not mutate the issue it was given', () => {
+  const issue = { ...dropped };
+  dropEntryFor(issue, 'e1', T(9), DAY_START);
+  assert.deepEqual(issue, dropped);
 });

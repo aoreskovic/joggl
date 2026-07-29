@@ -26,6 +26,44 @@ export function duplicateOf(entry, newId) {
   };
 }
 
+/** A block drawn by hand on the day view is half an hour wherever it lands. */
+export const DEFAULT_DROP_MS = 30 * 60_000;
+
+/**
+ * The entry created by dropping an issue onto the day view.
+ *
+ * `startTs` arrives already snapped to a quarter hour, so the only adjustment made
+ * here is at the end of the day: a block that would run past midnight is pulled
+ * back to end on it rather than being shortened, because a 30-minute drop that
+ * silently became a 15-minute entry would be a worse surprise than one that sits a
+ * quarter hour earlier than aimed.
+ *
+ * A start later than the current time is deliberately allowed. Booking leave, an
+ * out-of-office block, or a meeting already in the diary is the reason to draw a
+ * block by hand instead of running a timer, and Finish Day submits such an entry
+ * like any other. Only a *running timer* may not start in the future — that would
+ * have it measuring negative elapsed time.
+ *
+ * The status is always `pending`: everything in the task list came from Jira and so
+ * carries an issue key. There is no keyless path into this function.
+ */
+export function dropEntryFor(issue, newId, startTs, dayStartTs, durationMs = DEFAULT_DROP_MS) {
+  const latestStart = dayStartTs + 86_400_000 - durationMs;
+  const start = Math.min(Math.max(startTs, dayStartTs), latestStart);
+
+  return {
+    id: newId,
+    issueKey: issue.issueKey,
+    issueId: issue.issueId ?? null,
+    title: issue.title,
+    startTs: start,
+    endTs: start + durationMs,
+    status: 'pending',
+    worklogId: null,
+    errorMsg: null,
+  };
+}
+
 /** Ids of entries whose time ranges overlap. Allowed, but usually a mistake. */
 export function overlappingIds(entries) {
   const ids = new Set();

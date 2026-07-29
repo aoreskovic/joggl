@@ -2,13 +2,20 @@
 
 What to test by hand, how to test it, and what is known to be broken.
 
-Joggl has 117 unit tests (`npm test`) covering the things where a silent failure loses
+Joggl has 131 unit tests (`npm test`) covering the things where a silent failure loses
 time data: the worklog timestamp formatter, merge decisions at the 30-minute boundary,
-Finish Day's partial-failure transitions, and the day-log round trip. Everything else —
-the whole UI — is verified by hand, because the project deliberately has no DOM test
-harness and adding one would break the short-dependency rule in `CLAUDE.md`.
+Finish Day's partial-failure transitions, the day-log round trip, quarter-hour snapping,
+what a duplicate and a moved entry inherit, and the search box's remote-lookup loop.
+Everything else — the whole UI — is verified against the checklist below, because the
+project deliberately has no DOM test harness and adding one would break the
+short-dependency rule in `CLAUDE.md`.
 
 That makes this file the other half of the test suite. Keep it current.
+
+**Last full pass: 2026-07-29, all 27 checklist items green**, driven by dispatching real
+mouse events into the renderer from the main process against a throwaway
+`--user-data-dir`. See *Automating the manual half* at the end for what that took and
+what it did not cover.
 
 ---
 
@@ -16,7 +23,7 @@ That makes this file the other half of the test suite. Keep it current.
 
 ```
 npm start      # the app
-npm test       # 117 tests, must be 0 failures
+npm test       # 131 tests, must be 0 failures
 ```
 
 The log is at `logs/joggl.log`, credential-redacted. Send it along with any bug report.
@@ -39,7 +46,18 @@ Grouped by area. Each item says what to do and what correct looks like.
 | Collapse, then rest the mouse on the rail | After a beat it floats open **over** the content. The content underneath must not move. |
 | Sweep the mouse quickly across the rail on the way to the entry list | The peek does not open. |
 
-### Dragging an issue onto the day view
+### The day view's own click
+
+| Do this | Correct result |
+|---|---|
+| Scroll the timeline, then click an empty hour | A quick-entry popup opens **visibly**, focused, titled with that hour and the half hour after it, and sitting fully inside the window. |
+| Type in it, then press Escape | It closes and nothing is created. |
+| Click an empty hour, then click elsewhere | It closes. A second click on the grid opens it again — a popup that closed itself must not eat the next click. |
+
+### Dragging onto the day view
+
+Three sources, one gesture. Task rows and pins create a half-hour block; a row in the
+day's own entry list moves the block it already stands for.
 
 | Do this | Correct result |
 |---|---|
@@ -55,6 +73,11 @@ Grouped by area. Each item says what to do and what correct looks like.
 | Drop an issue on top of an existing entry | Both flagged as overlapping, timeline splits them into side-by-side columns. |
 | Drag an issue slowly across the collapsed sidebar | The peek does not open. |
 | Step back a day with `‹` and drop a task | It lands, and it is still there after quitting and restarting. |
+| Drag a **pin** onto the timeline | Same as a task row: a 30-minute pending entry. A plain click on the pin still starts a timer. |
+| Drag a row from the day's **entry list** onto a different hour | The entry **moves** there and keeps its length. No second entry appears — that is what Duplicate is for. |
+| Drag a synced entry's row to a new hour | It moves and returns to `pending`, so Finish Day rewrites its worklog rather than posting a second one. |
+| Try to drag a **Manual Jira entry** row | Nothing moves. The row is not Joggl's to change. |
+| Press on an entry row's time field and drag | The field takes the press; no drag starts. |
 
 ### Time safety — the things that cost real money if wrong
 
@@ -87,38 +110,55 @@ on Jira.
 
 ### Confirmed bugs
 
-None open right now. The two found in the 2026-07-29 review — the quick-entry popup
-positioning itself against an empty result list, and auto-scroll's edge test being
-unreachable from outside the panel — are fixed; see git history for `renderer/js/timeline.js`
-and `renderer/js/drag-issue.js` around that date.
+None open right now.
+
+Fixed on 2026-07-29, in the order found:
+
+- The quick-entry popup positioned itself against an empty result list, and auto-scroll's
+  edge test was unreachable from outside the panel. See git history for
+  `renderer/js/timeline.js` and `renderer/js/drag-drop.js` (then `drag-issue.js`).
+- **Clicking the day view did nothing at all.** The popup renders its results and *then*
+  reveals itself, and the render threw, so it never got past `visibility: hidden`. What
+  threw was unbounded recursion: the remote lookup reported "no results" synchronously
+  when there was nothing to look up, and callers re-rendered from that callback. Fixed by
+  making a render never start a lookup, and the lookup never call back synchronously —
+  `renderer/js/remote-lookup.js`, with the loop covered by tests.
+- The Stop button dropped `btn-primary` instead of adding `btn-stop` to it, so it lost its
+  radius, padding and weight the moment a timer started.
 
 ### Known, deliberately not fixed
 
-**1. Cosmetic leftovers.** Dead `.icon-square` CSS, about twenty lines describing no
-element. `renderer/js/state.js:28`'s inline UI defaults do not list `sidebarCollapsed` or
-`activeView`, so the two default sets read as out of sync even though only the main-process
-one is ever used. `<nav id="sidebar">` has no `aria-label`. The `#view-day` block in
-`renderer/index.html` was left at its old indentation when the wrapper was added around it.
+Nothing. The cosmetic leftovers listed here previously — dead `.icon-square` CSS, the
+renderer's duplicate UI defaults drifting from the main-process ones, `<nav id="sidebar">`
+without an `aria-label`, and the `#view-day` block left at its old indentation — were all
+cleared on 2026-07-29.
 
 ---
 
 ## Automating the manual half
 
-Everything above the "Open issues" line is done by hand today. Both confirmed bugs fixed on
-2026-07-29 illustrate why that is thin cover: a full review pass caught the reasoning behind
-each but neither was provably fixed without opening the window, since no reviewer could.
+Every table above was executed as a script on 2026-07-29 — 27 checks, all green — so the
+approach is settled: it needs **no dependency and no DevTools Protocol**. The main process
+already holds `webContents.executeJavaScript`, which is enough to dispatch real
+`MouseEvent`s, read computed styles and element boxes, and drive the app end to end. A
+`--user-data-dir` pointed at a temp directory keeps the run away from real day logs.
 
-Electron can be driven without adding a single dependency. Launching it with
-`--remote-debugging-port` exposes the Chrome DevTools Protocol on the renderer, and a plain
-Node script can then dispatch real mouse events, read the DOM, and take screenshots over a
-WebSocket. `Input.dispatchMouseEvent` is enough to press a task row, move in steps, and
-release on the grid — which is exactly the gesture that is hardest to check by hand and
-easiest to get wrong.
+Four things that pass took getting right, and are the traps for anyone rebuilding it:
 
-That would turn most of the drag-and-drop and sidebar tables above into a script, and both
-of the bugs just fixed are the kind it would have caught before a human had to: one is "does
-this element's box fit inside the window", the other is "does the panel's scrollTop change".
-Neither needs a framework.
+1. **A timer stopped inside ten seconds is discarded by design.** Two merge checks silently
+   measured nothing until the timer's start was back-dated first.
+2. **Jira-side worklogs render as entry cards.** Anything counting `.entry-card` counts
+   them, and every "nothing was created" assertion reads as a failure. Scope to
+   `.entry-card:not(.external)`.
+3. **Externals take part in overlap layout**, so a two-entry overlap check can legitimately
+   see three columns.
+4. **At 0.5× zoom a quarter hour is 11 px.** Clicking a few pixels below an hour label
+   lands in the next quarter, so the assertion has to be "the entry landed where the
+   preview said", which is what the checklist actually asks — not "it landed at 14:00".
 
-Worth doing before the week and month views, which multiply the surface this file has to
-cover by seven and then by thirty.
+What it still cannot reach: anything crossing a process restart (the three persistence
+rows), and anything that writes to Jira (Finish Day, and the synced-entry rewrite). Those
+stay manual.
+
+The script itself is not committed. It is worth committing before the week and month views,
+which multiply this file's surface by seven and then by thirty.

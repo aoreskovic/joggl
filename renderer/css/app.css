@@ -486,8 +486,7 @@ button {
   gap: 6px;
 }
 
-.nav-btn,
-.icon-square {
+.nav-btn {
   width: 30px;
   height: 30px;
   display: flex;
@@ -503,8 +502,7 @@ button {
   cursor: pointer;
 }
 
-.nav-btn:hover:not(:disabled),
-.icon-square:hover {
+.nav-btn:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
 }

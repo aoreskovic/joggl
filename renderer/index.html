@@ -14,7 +14,7 @@
   </head>
   <body>
     <div class="shell">
-      <nav id="sidebar" class="sidebar">
+      <nav id="sidebar" class="sidebar" aria-label="Views">
         <div class="sidebar-brand">
           <span class="sidebar-brand-name">Joggl</span>
           <button id="sidebar-toggle" class="sidebar-toggle" title="Collapse sidebar"
@@ -43,84 +43,84 @@
       </nav>
 
       <div class="app-layout" id="view-day">
-      <!-- ── LEFT PANEL ── -->
-      <div class="left-panel">
-        <div class="omnibar">
-          <div class="omnibar-row">
-            <div class="task-search-wrap">
+        <!-- ── LEFT PANEL ── -->
+        <div class="left-panel">
+          <div class="omnibar">
+            <div class="omnibar-row">
+              <div class="task-search-wrap">
+                <input
+                  id="task-input"
+                  type="text"
+                  placeholder="Search an issue, or type a name for a local entry…"
+                  autocomplete="off"
+                />
+                <div id="task-dropdown" class="task-dropdown hidden"></div>
+              </div>
               <input
-                id="task-input"
+                id="start-time-input"
+                class="start-time-input"
                 type="text"
-                placeholder="Search an issue, or type a name for a local entry…"
-                autocomplete="off"
+                placeholder="--:--"
+                maxlength="5"
+                title="Start time — set before pressing Start to backdate the entry"
               />
-              <div id="task-dropdown" class="task-dropdown hidden"></div>
+              <div id="timer-display">00:00:00</div>
+              <button id="start-stop-btn" class="btn-primary">Start</button>
             </div>
-            <input
-              id="start-time-input"
-              class="start-time-input"
-              type="text"
-              placeholder="--:--"
-              maxlength="5"
-              title="Start time — set before pressing Start to backdate the entry"
-            />
-            <div id="timer-display">00:00:00</div>
-            <button id="start-stop-btn" class="btn-primary">Start</button>
+          </div>
+
+          <div class="day-header">
+            <div class="day-picker">
+              <button id="prev-day" class="nav-btn" title="Previous day">‹</button>
+              <span id="current-date-label">—</span>
+              <button id="next-day" class="nav-btn" title="Next day">›</button>
+              <button id="today-btn" class="btn-outline">Today</button>
+            </div>
+            <div class="day-header-right">
+              <span id="total-display" class="total-display">Total: 0m</span>
+              <button id="finish-day-btn" class="btn-primary">Finish Day</button>
+            </div>
+          </div>
+
+          <div class="pins-bar">
+            <span class="pins-label">Pins</span>
+            <div id="pin-chips" class="pin-chips"></div>
+            <button id="add-pin-btn" class="add-pin-btn">+ Pin issue</button>
+          </div>
+
+          <div id="entry-list"></div>
+
+          <div class="task-panel">
+            <div class="task-panel-hdr">
+              <span>Issues</span>
+              <button id="refresh-tasks-btn" class="add-pin-btn" title="Reload from Jira">↻ Refresh</button>
+              <span class="tt-count" id="task-count">—</span>
+            </div>
+            <div class="task-list" id="task-list">
+              <div class="list-note">Loading…</div>
+            </div>
+          </div>
+
+          <div class="app-footer">
+            <span id="version-label"></span>
+            <span id="conn-label"></span>
           </div>
         </div>
 
-        <div class="day-header">
-          <div class="day-picker">
-            <button id="prev-day" class="nav-btn" title="Previous day">‹</button>
-            <span id="current-date-label">—</span>
-            <button id="next-day" class="nav-btn" title="Next day">›</button>
-            <button id="today-btn" class="btn-outline">Today</button>
+        <!-- ── RIGHT PANEL: day view ── -->
+        <div class="right-panel" id="right-panel">
+          <div class="sched-resize-handle" id="sched-resize-handle"></div>
+          <div class="sched-hdr">
+            <span>Day View</span>
+            <div class="sched-zoom">
+              <span class="sched-zoom-icon" id="zoom-icon" title="Zoom the timeline"></span>
+              <button class="sched-zoom-btn" id="zoom-out" title="Zoom out">−</button>
+              <span class="sched-zoom-lbl" id="zoom-lbl">1×</span>
+              <button class="sched-zoom-btn" id="zoom-in" title="Zoom in">+</button>
+            </div>
           </div>
-          <div class="day-header-right">
-            <span id="total-display" class="total-display">Total: 0m</span>
-            <button id="finish-day-btn" class="btn-primary">Finish Day</button>
-          </div>
+          <div class="schedule-grid" id="schedule-grid"></div>
         </div>
-
-        <div class="pins-bar">
-          <span class="pins-label">Pins</span>
-          <div id="pin-chips" class="pin-chips"></div>
-          <button id="add-pin-btn" class="add-pin-btn">+ Pin issue</button>
-        </div>
-
-        <div id="entry-list"></div>
-
-        <div class="task-panel">
-          <div class="task-panel-hdr">
-            <span>Issues</span>
-            <button id="refresh-tasks-btn" class="add-pin-btn" title="Reload from Jira">↻ Refresh</button>
-            <span class="tt-count" id="task-count">—</span>
-          </div>
-          <div class="task-list" id="task-list">
-            <div class="list-note">Loading…</div>
-          </div>
-        </div>
-
-        <div class="app-footer">
-          <span id="version-label"></span>
-          <span id="conn-label"></span>
-        </div>
-      </div>
-
-      <!-- ── RIGHT PANEL: day view ── -->
-      <div class="right-panel" id="right-panel">
-        <div class="sched-resize-handle" id="sched-resize-handle"></div>
-        <div class="sched-hdr">
-          <span>Day View</span>
-          <div class="sched-zoom">
-            <span class="sched-zoom-icon" id="zoom-icon" title="Zoom the timeline"></span>
-            <button class="sched-zoom-btn" id="zoom-out" title="Zoom out">−</button>
-            <span class="sched-zoom-lbl" id="zoom-lbl">1×</span>
-            <button class="sched-zoom-btn" id="zoom-in" title="Zoom in">+</button>
-          </div>
-        </div>
-        <div class="schedule-grid" id="schedule-grid"></div>
-      </div>
       </div>
     </div>
 

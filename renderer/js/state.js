@@ -25,7 +25,12 @@ export const state = {
   issuesBySource: new Map(),
   pins: [],
   settings: { baseUrl: '', email: '', taskSources: [], tokenConfigured: false },
-  ui: { zoomIdx: 2, fontSize: 9, panelWidth: 320, theme: 'system' },
+  /**
+   * Filled by loadUi() before anything renders. Deliberately empty rather than a
+   * second copy of the defaults: main/settings.js owns them, and a duplicate here
+   * only ever drifts — it already had neither `sidebarCollapsed` nor `activeView`.
+   */
+  ui: {},
 };
 
 export const ZOOM_LEVELS = [0.5, 0.75, 1, 1.5, 2, 3];

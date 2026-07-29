@@ -2,6 +2,7 @@
 // connects the DOM to it.
 
 import { hideContextMenu, setContextActions } from './context-menu.js';
+import { wireIssueDrag } from './drag-issue.js';
 import {
   deleteEntry,
   duplicateEntry,
@@ -115,6 +116,7 @@ async function boot() {
   wireOmnibar();
   wireDayNav();
   wireDayView();
+  wireIssueDrag();
   wirePinPicker();
   wireGlobal();
 

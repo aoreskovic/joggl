@@ -177,6 +177,7 @@ function issueRow(issue) {
   const active = state.timer?.issueKey === issue.issueKey;
   const row = document.createElement('div');
   row.className = `task-item${active ? ' is-active' : ''}`;
+  row.dataset.key = issue.issueKey;
   row.title = `${issue.issueKey} — ${issue.title}${issue.status ? ` (${issue.status})` : ''}`;
   row.innerHTML =
     `<span class="tt-play">${PLAY_ICON}</span>` +

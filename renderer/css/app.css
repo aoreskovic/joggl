@@ -1506,6 +1506,39 @@ button {
   color: var(--danger);
 }
 
+/* ── Dragging an issue onto the day view ── */
+
+/* Above the quick-entry popup (3000) so it is never hidden behind one that was left
+   open, but below the toasts (4000). */
+.drag-ghost {
+  position: fixed;
+  z-index: 3500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 5px 9px;
+  background: var(--surface-raised);
+  border: 1.5px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.drag-ghost-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The cursor has to say "carrying something" everywhere, not just over the row it
+   started on. */
+body.is-dragging-issue,
+body.is-dragging-issue * {
+  cursor: grabbing !important;
+}
+
 /* ── Toasts ── */
 
 .toast-stack {

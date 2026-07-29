@@ -276,6 +276,10 @@ button {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  /* Matches the rail's own `width` transition below, so the content eases in
+     step with it in both directions instead of snapping while the rail (which
+     is positioned on top of it while collapsed) animates over it. */
+  transition: margin-left 120ms ease;
 }
 
 .left-panel {

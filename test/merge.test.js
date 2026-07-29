@@ -218,6 +218,80 @@ test('a local entry with no issue key stays local after merging', () => {
   assert.equal(result[0].status, 'local');
 });
 
+// ── The bound is fixed at start, not recomputed at stop ────────────────────
+//
+// The omnibar's start-time field edits a *running* timer's start in place, and the
+// merge decision is not retaken. If the stop recomputed the candidate bound from
+// the entry's (now edited) start, moving the start forward would admit a block the
+// start had excluded. The bound therefore travels on the timer.
+
+test('a start edited forward cannot pull in a block the decision excluded', () => {
+  const entries = [
+    entry({ id: 'earlier', startTs: T(9, 50), endTs: T(9, 55) }),
+    entry({ id: 'ahead', startTs: T(10, 30), endTs: T(11) }),
+  ];
+
+  // 10:00: decideMerge sees the 5-minute gap to 'earlier' and excludes 'ahead'.
+  const decidedAt = T(10);
+  const decision = decideMerge(entries, 'issue:PROJ-1', decidedAt);
+  assert.equal(decision.action, 'merge');
+  assert.deepEqual(decision.candidates.map((e) => e.id), ['earlier']);
+
+  // 11:30 the user corrects the start to 11:00 — allowed, it is not in the future.
+  // 11:35 the timer stops, carrying the bound the decision was made against.
+  const stopped = entry({ id: 'new', startTs: T(11), endTs: T(11, 35) });
+  const result = applyMerge(entries, stopped, decidedAt);
+
+  assert.equal(result.length, 2, 'the booked-ahead block is not swallowed');
+  const ahead = result.find((e) => e.id === 'ahead');
+  assert.equal(ahead.startTs, T(10, 30));
+  assert.equal(ahead.endTs, T(11));
+  const merged = result.find((e) => e.id !== 'ahead');
+  assert.equal(merged.startTs, T(9, 50));
+  assert.equal(merged.endTs, T(11, 35));
+});
+
+test('the same stop without the stored bound absorbs the block — why the parameter exists', () => {
+  const entries = [
+    entry({ id: 'earlier', startTs: T(9, 50), endTs: T(9, 55) }),
+    entry({ id: 'ahead', startTs: T(10, 30), endTs: T(11) }),
+  ];
+  const stopped = entry({ id: 'new', startTs: T(11), endTs: T(11, 35) });
+
+  // Bounding by the edited start instead of the decision's start is the defect.
+  const result = applyMerge(entries, stopped, stopped.startTs);
+
+  assert.equal(result.length, 1, 'one entry — the half hour booked ahead is gone');
+  assert.equal(result[0].startTs, T(9, 50));
+  assert.equal(result[0].endTs, T(11, 35));
+});
+
+test('a start edited backward keeps a candidate the decision legitimately offered', () => {
+  const entries = [entry({ id: 'earlier', startTs: T(9, 50), endTs: T(9, 55) })];
+
+  const decidedAt = T(10);
+  assert.equal(decideMerge(entries, 'issue:PROJ-1', decidedAt).action, 'merge');
+
+  // Corrected back to 09:40 — earlier than 'earlier' starts. The default bound
+  // would drop it; the stored one keeps what the user was told would happen.
+  const stopped = entry({ id: 'new', startTs: T(9, 40), endTs: T(10, 30) });
+  const result = applyMerge(entries, stopped, decidedAt);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].startTs, T(9, 40));
+  assert.equal(result[0].endTs, T(10, 30));
+});
+
+test('an absent bound falls back to the new entry start, exactly as before', () => {
+  const entries = [
+    entry({ id: 'a', startTs: T(8), endTs: T(9) }),
+    entry({ id: 'ahead', startTs: T(14), endTs: T(14, 30) }),
+  ];
+  const fresh = entry({ id: 'new', startTs: T(10, 30), endTs: T(11) });
+
+  assert.deepEqual(applyMerge(entries, fresh), applyMerge(entries, fresh, fresh.startTs));
+});
+
 test('applyMerge does not mutate its input', () => {
   const original = entry({ id: 'a', startTs: T(8), endTs: T(9) });
   const entries = [original];

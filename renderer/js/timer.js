@@ -56,6 +56,12 @@ export async function startTimer(task) {
     ...draft,
     startTs,
     mergeChoice,
+    // The bound the merge decision was made against. It travels with mergeChoice
+    // because the two were decided together and only mean anything together: the
+    // omnibar can edit `startTs` while the timer runs without retaking the
+    // decision, so recomputing this at stop would change the candidate set behind
+    // the user's back. Persisted with the timer, so a restore keeps it.
+    mergeNotAfterTs: startTs,
   };
 
   await persistTimer();
@@ -136,9 +142,13 @@ export async function stopTimer({ save = true } = {}) {
     const onScreen = targetDate === state.selectedDate;
     const existing = onScreen ? state.entries : (await readDay(targetDate)).entries;
 
+    // A timer written by an older build has no stored bound; fall back to the
+    // entry's start, which is what applyMerge used to derive on its own.
+    const notAfterTs = timer.mergeNotAfterTs ?? entry.startTs;
+
     const merged =
       timer.mergeChoice === 'merge'
-        ? sortEntries(applyMerge(existing, entry))
+        ? sortEntries(applyMerge(existing, entry, notAfterTs))
         : sortEntries([...existing, entry]);
 
     if (onScreen) {

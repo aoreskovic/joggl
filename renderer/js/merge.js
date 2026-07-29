@@ -42,15 +42,17 @@ export function mergeableEntries(entries, taskKey, notAfterTs = Infinity) {
 /**
  * Decide what starting a timer at `startTs` should do.
  *
+ * `startTs` is also the candidate bound, and it is decided *here*, once, at the
+ * moment the timer starts. The caller must carry it on the timer and hand the same
+ * number to `applyMerge` at stop — see the note there. Recomputing it later gives
+ * a different candidate set and silently rewrites time data.
+ *
  * @returns {{action: 'new'}
  *          |{action: 'merge', gapMs: number, candidates: object[]}
  *          |{action: 'ask',   gapMs: number, candidates: object[], totalMs: number,
  *            earliestTs: number, latestTs: number}}
  */
 export function decideMerge(entries, taskKey, startTs) {
-  // The bound is the timer's start, exactly as in applyMerge below. The two calls
-  // are minutes or hours apart — one at start, one at stop — and if they disagreed
-  // on the candidate set, the stop would absorb an entry the start never offered.
   const candidates = mergeableEntries(entries, taskKey, startTs);
   if (candidates.length === 0) return { action: 'new' };
 
@@ -77,14 +79,20 @@ export function decideMerge(entries, taskKey, startTs) {
  * earliest start, latest end. The gap between them is deliberately swallowed —
  * that is the point for a shared, all-day issue like Meetings.
  *
+ * `notAfterTs` must be the bound `decideMerge` was given when it offered this merge,
+ * not a number worked out again here. It defaults to the new entry's start, which is
+ * the same thing whenever nothing moved in between — but a running timer's start can
+ * be edited from the omnibar, and the merge decision is not retaken when it is.
+ * Deriving the bound from an edited start lets the stop absorb a block booked for
+ * later in the day that the start had excluded: 09:50–09:55 worked, 10:30–11:00
+ * booked ahead, timer started 10:00 and later corrected to 11:00, and the stop
+ * produces one 09:50–11:35 entry that eats the half hour booked ahead.
+ *
  * Returns a new array; the input is not mutated.
  */
-export function applyMerge(entries, newEntry) {
+export function applyMerge(entries, newEntry, notAfterTs = newEntry.startTs) {
   const taskKey = taskKeyOf(newEntry);
-  // newEntry.startTs is the timer's start — the same bound decideMerge used when
-  // it offered the merge. Passing anything else here (the end, say) would let the
-  // stop swallow a block booked for later in the day that was never a candidate.
-  const absorbed = mergeableEntries(entries, taskKey, newEntry.startTs);
+  const absorbed = mergeableEntries(entries, taskKey, notAfterTs);
   if (absorbed.length === 0) return [...entries, newEntry];
 
   const absorbedIds = new Set(absorbed.map((e) => e.id));

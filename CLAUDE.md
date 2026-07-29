@@ -239,6 +239,16 @@ reads as an overlap, producing one 10:30–14:30 entry that Finish Day submits a
 hours. The bound is threaded through `mergeableEntries` so the decision taken at
 start and the merge applied at stop cannot disagree about the candidate set.
 
+**That bound is fixed when the timer starts and carried on the timer** as
+`mergeNotAfterTs`, alongside `mergeChoice` — the two are decided together and mean
+nothing apart. It is not recomputed at stop, because the omnibar edits a *running*
+timer's start in place and does not retake the merge decision. Deriving the bound
+from the edited start instead let the stop absorb a block the start had excluded:
+worked 09:50–09:55, `Meetings` booked ahead on 10:30–11:00, timer started at 10:00
+and later corrected to 11:00, and stopping produced one 09:50–11:35 entry that ate
+the half hour booked ahead. A timer persisted by an older build has no such field,
+so the stop falls back to the entry's start.
+
 Merging is always local. Nothing reaches Jira until Finish Day.
 
 ### Finish Day

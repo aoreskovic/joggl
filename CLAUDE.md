@@ -400,6 +400,15 @@ The app is shared with colleagues internally. Each installs their own copy and c
 
 This is why the following are **in** scope despite being unnecessary for a solo tool:
 
+- **No prerequisites to run it.** `run.cmd` → `scripts/launch.ps1` uses a Node on PATH if
+  there is one new enough, and otherwise fetches a **portable** Node into `.node\`,
+  checked against the SHA-256 nodejs.org publishes. No administrator rights, nothing
+  outside the project folder, and deleting `.node\` undoes it. A managed laptop that
+  will not grant an MSI install is the case this exists for.
+
+  It is still the low-ceremony route rather than the good one: it leaves a console
+  window open and costs ~400 MB per machine. `npm run dist` builds a proper NSIS
+  installer, which is what colleagues should eventually get.
 - **First-run setup wizard** — Jira base URL, email, API token, with a link to `id.atlassian.com/manage-profile/security/api-tokens` and a working `Test connection` button. Do not assume the user knows where to get a token.
 - **Actionable error messages.** You cannot debug over ten people's shoulders. "401 from Jira — check your API token in Settings" beats a stack trace.
 - **Configurable JQL** (see above). Colleagues work on different projects.
@@ -425,7 +434,7 @@ Installed and on PATH — **do not probe for these**:
 
 | Tool | Notes |
 |---|---|
-| Node.js LTS + npm | Node 22 |
+| Node.js LTS + npm | Node 22+. Not a prerequisite for *users* — see Distribution. |
 | Git | |
 | GNU coreutils | shadowed by PowerShell aliases; irrelevant under Git Bash |
 

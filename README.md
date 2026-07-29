@@ -36,18 +36,27 @@ plugin plus reliability — nothing more, until it has been used for a while.
 ## Requirements
 
 - Windows 11 (macOS builds are possible later but not set up)
-- Node.js 22 LTS + npm, for building from source
 - A Jira **Cloud** instance and an Atlassian API token
 
-No Python, Rust, or C++ build toolchain is required, and no dependency that needs one
-will be added.
+**Node does not need to be installed.** The launcher fetches a portable copy if it
+does not find one. No Python, Rust, or C++ build toolchain is required either, and no
+dependency that needs one will be added.
 
 ## Running it
 
-Double-click **`run.cmd`**. It installs dependencies the first time, then starts the
-app. Closing that console window quits Joggl.
+Double-click **`run.cmd`**. On a machine with nothing set up it will:
 
-From a terminal, the same thing:
+1. use Node from `PATH` if there is one new enough, otherwise download a portable
+   Node into `.node\` — a 30 MB download, verified against the SHA-256 published by
+   nodejs.org, needing no administrator rights and touching nothing outside this
+   folder;
+2. `npm install` the dependencies, once;
+3. start the app.
+
+Closing that console window quits Joggl. Deleting `.node\` and `node_modules\` undoes
+everything step 1 and 2 did.
+
+From a terminal, once Node is available, the same thing:
 
 ```bash
 npm start
@@ -57,8 +66,13 @@ Either way the window can be toggled with **Ctrl+Shift+J**, and closing the wind
 hides Joggl to the tray rather than quitting it — use **Quit** in the tray menu to
 exit properly, so a running timer is not lost to a stray Alt+F4.
 
-For a real installed copy with a Start-menu entry and a desktop shortcut, build the
-Windows installer once and run it:
+### Handing it to someone else
+
+`run.cmd` is the low-ceremony route: no prerequisites, but it leaves a console window
+open and costs about 400 MB of Node and dependencies per machine.
+
+The better answer for colleagues is a real installer — one file, a Start-menu entry, no
+console, no Node:
 
 ```bash
 npm run dist

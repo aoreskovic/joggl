@@ -36,6 +36,19 @@ The log is at `logs/joggl.log`, credential-redacted. Send it along with any bug 
 
 Grouped by area. Each item says what to do and what correct looks like.
 
+### Starting it on a bare machine
+
+Not scripted — it needs a machine without Node, or at least a shell without it on PATH.
+
+| Do this | Correct result |
+|---|---|
+| On a machine with no Node, double-click `run.cmd` | It says it is fetching a portable Node, verifies the checksum, installs dependencies, and starts the app. No administrator prompt. |
+| Check what it touched | Only `.node\` and `node_modules\` inside the project. Nothing in Program Files, nothing on the system PATH. |
+| Delete `.node\` and run again | It fetches Node again and works. |
+| Run it on a machine that already has Node 20+ | No download; it goes straight to starting the app. |
+| Run it with Node 18 on PATH | It says the version is too old and fetches the portable one rather than failing. |
+| Break the network mid-download | It stops with a plain message and leaves no half-extracted `.node\`. |
+
 ### Sidebar
 
 | Do this | Correct result |

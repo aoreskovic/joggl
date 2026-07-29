@@ -5,6 +5,9 @@ legacy/
 # Dependencies
 node_modules/
 
+# Portable Node, fetched by run.cmd when there is none on PATH. Safe to delete.
+.node/
+
 # Build output
 dist/
 out/

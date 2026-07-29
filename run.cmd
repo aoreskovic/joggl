@@ -1,27 +1,15 @@
 @echo off
-REM Double-click to run Joggl from source. Installs dependencies on first use.
+REM Double-click to run Joggl. Nothing needs to be installed first — the launcher
+REM fetches a portable Node into .node\ on first use if there isn't one on PATH.
+REM
+REM The work is in scripts\launch.ps1; batch cannot verify a checksum sensibly.
 REM For an installed copy with a Start-menu entry, run: npm run dist
 
 cd /d "%~dp0"
 
-if not exist "node_modules\.bin\electron.cmd" (
-  echo Installing dependencies. This only happens once, and takes a minute...
-  echo.
-  call npm install
-  if errorlevel 1 (
-    echo.
-    echo Install failed - see the messages above.
-    pause
-    exit /b 1
-  )
-  echo.
-)
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\launch.ps1" %*
 
-echo Starting Joggl. Closing this window quits the app.
-echo.
-call "node_modules\.bin\electron.cmd" .
-
-REM Only pause on a crash, so a normal quit closes the window.
+REM Only pause on a failure, so a normal quit closes the window.
 if errorlevel 1 (
   echo.
   echo Joggl exited with an error. The log is in logs\joggl.log

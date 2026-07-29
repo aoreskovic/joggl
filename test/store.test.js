@@ -157,7 +157,17 @@ test('a truncated file is set aside and the day reads back empty, not corrupt', 
 
 test('the running timer persists and clears independently of the day log', async () => {
   await withStore(async () => {
-    const timer = { entryId: 't1', issueKey: 'PROJ-1', title: 'Work', startTs: T(9), mergeChoice: null };
+    const timer = {
+      entryId: 't1',
+      issueKey: 'PROJ-1',
+      title: 'Work',
+      startTs: T(9),
+      // The bound decideMerge fixed at start time — must survive a restart or an
+      // edited start (see app.js) could let stop absorb a block booked ahead that
+      // the original bound excluded.
+      mergeNotAfterTs: T(11),
+      mergeChoice: null,
+    };
     await saveRunningTimer(timer);
     assert.deepEqual(await getRunningTimer(), timer);
 

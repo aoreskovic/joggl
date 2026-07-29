@@ -147,6 +147,15 @@ test('a drop near midnight is pulled back so the block ends on it', () => {
   assert.equal(e.endTs - e.startTs, DEFAULT_DROP_MS, 'and keeps its full length');
 });
 
+test('a start before the day begins is pulled forward onto it', () => {
+  // The overnight rollover in app.js can advance state.selectedDate mid-drag, so
+  // dayStartTs becomes the new day while the drag's startTs still points at the
+  // old one. The entry has to stay inside the day it is filed under.
+  const e = dropEntryFor(dropped, 'e1', T(23, 30), T(24));
+  assert.equal(e.startTs, T(24), 'clamped to midnight, the new day’s first minute');
+  assert.equal(e.endTs - e.startTs, DEFAULT_DROP_MS, 'and keeps its full length');
+});
+
 test('a start later than now is allowed, so leave can be booked ahead', () => {
   // Far enough ahead that it is in the future whatever day the test runs on.
   const farStart = new Date(2099, 0, 1, 0, 0, 0, 0).getTime();

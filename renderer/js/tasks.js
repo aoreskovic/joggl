@@ -178,7 +178,12 @@ function issueRow(issue) {
   const row = document.createElement('div');
   row.className = `task-item${active ? ' is-active' : ''}`;
   row.dataset.key = issue.issueKey;
-  row.title = `${issue.issueKey} — ${issue.title}${issue.status ? ` (${issue.status})` : ''}`;
+  // The drag is otherwise invisible — nothing on the row hints at it, and this
+  // ships to colleagues nobody can talk through it. The cursor stays a pointer:
+  // clicking to start a timer is still the primary action.
+  row.title =
+    `${issue.issueKey} — ${issue.title}${issue.status ? ` (${issue.status})` : ''}\n` +
+    `Click to start a timer, or drag onto the day view to book time.`;
   row.innerHTML =
     `<span class="tt-play">${PLAY_ICON}</span>` +
     `<span class="jira-chip">${esc(issue.issueKey)}</span>` +

@@ -195,7 +195,12 @@ function handleInlineEdit(event) {
     if (entry.endTs !== null && ts >= entry.endTs) {
       return rejectInput(input, 'Start must be before the end time');
     }
-    if (ts > Date.now()) return rejectInput(input, 'Start time cannot be in the future');
+    // A start in the future is deliberately allowed here. Leave, an out-of-office
+    // block, or a meeting already in the diary is drawn by hand precisely because
+    // it has not happened, and rejecting the edit left such a block three-quarters
+    // editable: end, duration and the day-view drag all accepted it. Only a
+    // *running timer* may not start in the future — guarded in the omnibar's
+    // start-time field (app.js) and again in startTimer (timer.js).
     entry.startTs = ts;
   } else if (field === 'end') {
     const ts = hhmmToTs(input.value, state.selectedDate);

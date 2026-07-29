@@ -46,6 +46,12 @@ export const DEFAULT_DROP_MS = 30 * 60_000;
  *
  * The status is always `pending`: everything in the task list came from Jira and so
  * carries an issue key. There is no keyless path into this function.
+ *
+ * The lower clamp is not belt-and-braces. The overnight day-rollover in `app.js`
+ * can fire mid-drag: `state.selectedDate` advances to the new day while the drag's
+ * `startTs`, resolved from a grid drawn for yesterday, still points at yesterday.
+ * Without the clamp that drop would land in a day the entry is not filed under and
+ * disappear from the view that holds it.
  */
 export function dropEntryFor(issue, newId, startTs, dayStartTs, durationMs = DEFAULT_DROP_MS) {
   const latestStart = dayStartTs + 86_400_000 - durationMs;

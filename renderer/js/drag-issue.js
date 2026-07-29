@@ -162,8 +162,24 @@ function autoScroll() {
   const rect = panel.getBoundingClientRect();
   const y = drag.clientY;
   let delta = 0;
-  if (y >= rect.top && y - rect.top < EDGE_PX) delta = -EDGE_SCROLL_PX;
-  else if (y <= rect.bottom && rect.bottom - y < EDGE_PX) delta = EDGE_SCROLL_PX;
+
+  // The task list sits to the left of this panel, so testing Y alone would make
+  // dragging across it at a low Y scroll the timeline with no preview in sight.
+  // Gate on X first: at or right of the panel's left edge reads as "over the
+  // timeline's column, or having been pushed out of the window above or below it"
+  // — the panel is docked to the right, so nothing right of that edge is the task
+  // list.
+  if (drag.clientX >= rect.left) {
+    // No containment half on either branch, on purpose. The old `y >= rect.top` /
+    // `y <= rect.bottom` guards were meant to mean "the cursor is inside the
+    // panel", but combined with the edge band they made the band unreachable from
+    // outside: the moment the cursor rose above the panel's top, the up-scroll
+    // branch stopped firing (mirrored at the bottom), and pushing harder — the
+    // natural reaction — only made it worse. Anything at or past the edge, inside
+    // the window or beyond it, scrolls.
+    if (y < rect.top + EDGE_PX) delta = -EDGE_SCROLL_PX;
+    else if (y > rect.bottom - EDGE_PX) delta = EDGE_SCROLL_PX;
+  }
 
   if (delta !== 0) {
     panel.scrollTop += delta;

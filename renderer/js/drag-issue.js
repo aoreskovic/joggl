@@ -64,9 +64,19 @@ export function wireIssueDrag() {
   document.addEventListener('mouseup', onMouseUp);
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && drag) {
+    if (event.key !== 'Escape') return;
+    if (drag) {
       armSwallowOnRelease = true;
       teardown();
+    } else if (pending) {
+      // Between mousedown and the threshold there is no ghost, no preview, nothing
+      // a swallowed click would be protecting the user from — so just drop the
+      // pending gesture, without arming the swallow window. The release that
+      // follows should behave exactly like the click it already is (starting a
+      // timer, same as any other click on a task row), not be eaten. Only the
+      // pending state needs clearing, so crossing the threshold afterwards cannot
+      // still start a drag despite the Escape.
+      pending = null;
     }
   });
 

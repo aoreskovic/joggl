@@ -26,6 +26,47 @@ export function duplicateOf(entry, newId) {
   };
 }
 
+/**
+ * Whether an entry's issue may be swapped for a different one.
+ *
+ * Two refusals, both for the same underlying reason — a worklog belongs to the
+ * issue it was created on, and Jira has no way to move it:
+ *
+ *   - A **synced** entry's worklogId is only valid on its current issue. Pointing
+ *     the entry elsewhere would make the next Finish Day either PUT that id onto
+ *     an issue that has never heard of it, or post a second worklog and orphan
+ *     the first. Doing it properly means a delete plus a create, with its own
+ *     partial-failure story; until someone actually needs it, deleting the entry
+ *     (which offers to remove the Jira worklog too) and re-adding it is the
+ *     honest path, and the message says so.
+ *   - A **Jira-side** worklog is not Joggl's record to repoint at all.
+ *
+ * @returns {{ok: true} | {ok: false, reason: 'external'|'synced'}}
+ */
+export function canRetarget(entry) {
+  if (entry?.external) return { ok: false, reason: 'external' };
+  if (entry?.worklogId) return { ok: false, reason: 'synced' };
+  return { ok: true };
+}
+
+/**
+ * The same block of time, booked against a different issue.
+ *
+ * `startTs` and `endTs` are carried across untouched — that is the whole point of
+ * the operation, and it is why this is not just delete-and-redraw.
+ */
+export function retargetEntry(entry, issue) {
+  return {
+    ...entry,
+    issueKey: issue.issueKey ?? null,
+    issueId: issue.issueId ?? null,
+    title: issue.title ?? issue.issueKey ?? entry.title,
+    // Repointed, so it needs sending; keyless means it never will be.
+    status: issue.issueKey ? 'pending' : 'local',
+    errorMsg: null,
+  };
+}
+
 /** A block drawn by hand on the day view is half an hour wherever it lands. */
 export const DEFAULT_DROP_MS = 30 * 60_000;
 

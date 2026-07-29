@@ -88,7 +88,20 @@
             <button id="add-pin-btn" class="add-pin-btn">+ Pin issue</button>
           </div>
 
-          <div id="entry-list"></div>
+          <div class="task-panel day-panel">
+            <div
+              class="task-panel-hdr collapsible"
+              id="day-panel-hdr"
+              role="button"
+              tabindex="0"
+              aria-expanded="true"
+              aria-controls="entry-list"
+            >
+              <span><span class="tt-chevron" id="day-panel-chevron">▼</span>On this day</span>
+              <span class="tt-count" id="day-count">—</span>
+            </div>
+            <div id="entry-list"></div>
+          </div>
 
           <div class="task-panel">
             <div class="task-panel-hdr">

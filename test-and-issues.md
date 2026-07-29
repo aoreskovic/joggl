@@ -2,20 +2,19 @@
 
 What to test by hand, how to test it, and what is known to be broken.
 
-Joggl has 131 unit tests (`npm test`) covering the things where a silent failure loses
+Joggl has 138 unit tests (`npm test`) covering the things where a silent failure loses
 time data: the worklog timestamp formatter, merge decisions at the 30-minute boundary,
 Finish Day's partial-failure transitions, the day-log round trip, quarter-hour snapping,
-what a duplicate and a moved entry inherit, and the search box's remote-lookup loop.
+what a duplicate, a moved and a repointed entry inherit, and the search box's remote-lookup loop.
 Everything else — the whole UI — is verified against the checklist below, because the
 project deliberately has no DOM test harness and adding one would break the
 short-dependency rule in `CLAUDE.md`.
 
 That makes this file the other half of the test suite. Keep it current.
 
-**Last full pass: 2026-07-29, all 27 checklist items green**, driven by dispatching real
+**Last full pass: 2026-07-29, all 33 checklist items green**, driven by dispatching real
 mouse events into the renderer from the main process against a throwaway
-`--user-data-dir`. See *Automating the manual half* at the end for what that took and
-what it did not cover.
+`--user-data-dir`. See *The script* at the end for how, and for what it does not cover.
 
 ---
 
@@ -23,8 +22,8 @@ what it did not cover.
 
 ```
 npm start      # the app
-npm test       # 131 tests, must be 0 failures
-npm run uicheck # the checklist below, driven as a script — 27 checks, must be 0 failures
+npm test       # 138 tests, must be 0 failures
+npm run uicheck # the checklist below, driven as a script — 33 checks, must be 0 failures
 ```
 
 The log is at `logs/joggl.log`, credential-redacted. Send it along with any bug report.
@@ -46,6 +45,28 @@ Grouped by area. Each item says what to do and what correct looks like.
 | Collapse, quit the app entirely, start it again | It comes back collapsed. Expand, quit, restart — comes back expanded. |
 | Collapse, then rest the mouse on the rail | After a beat it floats open **over** the content. The content underneath must not move. |
 | Sweep the mouse quickly across the rail on the way to the entry list | The peek does not open. |
+
+### On this day
+
+| Do this | Correct result |
+|---|---|
+| Look above the Issues list | A panel headed **On this day**, open, with a count of the day's rows on the right. |
+| Click the header | It collapses to the header alone. The count stays readable — collapsed, it is the only thing saying the day has anything in it. |
+| Click it again | It reopens. |
+| Collapse it, change day, quit and restart | Still collapsed. |
+| Collapse it, then check the entries are not gone | Reopen and the rows are all still there — collapsing hides, it does not clear. |
+
+### Editing which task a block belongs to
+
+| Do this | Correct result |
+|---|---|
+| Right-click a block on the day view | **Edit task** is the first item on the menu. |
+| Click it | A dialog opens with the block's times in the title, a search box already focused, and the issue list below it. |
+| Type part of a title that is not in the loaded issues | Matches appear under **Elsewhere in Jira**, same reach as the omnibar. |
+| Pick a different issue | The block is now on that issue. **Start and end are unchanged** — check both, on the card and on the timeline. |
+| Pick the issue it is already on, or press Cancel or Escape | Nothing changes. |
+| Do it to an entry that has already synced | Refused, with a message saying to delete it — which offers to remove the Jira worklog — and add it again. A worklog cannot be moved between issues. |
+| Do it to a **Manual Jira entry** | Refused. Not Joggl's record to repoint. |
 
 ### The day view's own click
 
@@ -144,7 +165,7 @@ Every table above except the persistence rows is executed by `scripts/ui-check.m
 npm run uicheck
 ```
 
-27 checks, exits non-zero on failure. It needs **no dependency and no DevTools Protocol** —
+33 checks, exits non-zero on failure. It needs **no dependency and no DevTools Protocol** —
 the main process already holds `webContents.executeJavaScript`, which is enough to
 dispatch real `MouseEvent`s, read computed styles and element boxes, and drive the app end
 to end. `main/index.js` loads it only under `--uicheck`, which also redirects `userData` to

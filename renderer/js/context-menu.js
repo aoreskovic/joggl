@@ -10,7 +10,7 @@ import { esc } from './util.js';
 let actions = null;
 
 /**
- * @param {{restart: fn, duplicate: fn, split: fn, remove: fn}} handlers
+ * @param {{editTask: fn, restart: fn, duplicate: fn, split: fn, remove: fn}} handlers
  *        each called with the entry the menu was opened on
  */
 export function setContextActions(handlers) {
@@ -30,6 +30,7 @@ export function showContextMenu(event, entry) {
   if (!menu || !actions) return;
 
   const items = [
+    { icon: '✎', label: 'Edit task', run: () => actions.editTask(entry) },
     { icon: '⏵', label: 'Restart timer', run: () => actions.restart(entry) },
     { icon: '⧉', label: 'Duplicate', run: () => actions.duplicate(entry) },
     { icon: '✂', label: 'Split at midpoint', run: () => actions.split(entry) },

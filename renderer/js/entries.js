@@ -2,7 +2,8 @@
 // the day total.
 
 import { showContextMenu } from './context-menu.js';
-import { duplicateOf, overlappingIds } from './entry-ops.js';
+import { canRetarget, duplicateOf, overlappingIds, retargetEntry } from './entry-ops.js';
+import { createIssuePicker } from './issue-picker.js';
 import { PLAY_ICON } from './icons.js';
 import { sortEntries } from './merge.js';
 import { askModal } from './modal.js';
@@ -68,6 +69,11 @@ export function renderEntryList() {
   }
 
   list.replaceChildren(...children);
+
+  // The count has to stay readable while the panel is collapsed — that is the
+  // only thing left saying whether the day has anything in it.
+  const count = document.getElementById('day-count');
+  if (count) count.textContent = String(entries.length);
 }
 
 function note(text, kind) {
@@ -326,6 +332,52 @@ export async function duplicateEntry(id) {
     `Copied ${copy.issueKey ?? copy.title} onto ${tsToHHMM(copy.startTs)}–${tsToHHMM(copy.endTs)}. ` +
       'Drag it where it belongs.',
   );
+}
+
+/**
+ * Book the same block of time against a different issue. Times are untouched —
+ * that is the point, and it is why this is not just delete-and-redraw.
+ */
+export async function editEntryTask(id) {
+  const entry = currentEntry(id);
+  if (!entry) return;
+
+  const allowed = canRetarget(entry);
+  if (!allowed.ok) {
+    toastWarn(
+      allowed.reason === 'external'
+        ? 'This worklog was made in Jira — change it there.'
+        : `${entry.issueKey} is already logged in Jira, and a worklog cannot be moved to ` +
+          'another issue. Delete this entry (it will offer to remove the worklog too) and ' +
+          'add it again on the right issue.',
+    );
+    return;
+  }
+
+  const picked = await askModal({
+    title: `Edit task — ${tsToHHMM(entry.startTs)}–${tsToHHMM(entry.endTs)}`,
+    body: (resolve) => {
+      const wrap = document.createElement('div');
+      const lede = document.createElement('p');
+      lede.className = 'panel-lede';
+      lede.textContent = `Currently ${entry.issueKey ?? 'a local entry'} — ${entry.title}. Picking another issue keeps the time exactly as it is.`;
+      const picker = createIssuePicker({ onPick: resolve });
+      wrap.append(lede, picker.el);
+      return wrap;
+    },
+    buttons: [{ label: 'Cancel', value: null }],
+    dismissValue: null,
+    focusBody: true,
+  });
+
+  if (!picked?.issueKey) return;
+  if (picked.issueKey === entry.issueKey) return;
+
+  const next = retargetEntry(entry, picked);
+  state.entries = state.entries.map((e) => (e.id === next.id ? next : e));
+  await persistDayNow();
+  renderAll();
+  toastOk(`Moved ${tsToHHMM(next.startTs)}–${tsToHHMM(next.endTs)} to ${next.issueKey}.`);
 }
 
 export async function splitEntry(id) {

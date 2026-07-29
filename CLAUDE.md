@@ -28,7 +28,10 @@ Pure frontend logic, no SP coupling. Port as-is; refactor into modules only wher
 - Drag top/bottom handles to resize, snapping to adjacent entry boundaries
 - Live in-progress block that grows in real time and participates in overlap layout
 - Entry split-at-midpoint, restart, duplicate, delete — from a right-click menu shared
-  by the entry list and the day view
+  by the entry list and the day view. **Edit task** sits first on it: a searchable
+  picker that books the same block against a different issue, times untouched.
+- The day's entries live in a collapsible **On this day** panel above the issue list,
+  open by default, its state remembered like the sidebar's
 - Inline editing of start / end / duration / title with bidirectional recalculation
 - Merge prompt logic
 - Zoom controls, resizable panel width, configurable font size
@@ -125,8 +128,11 @@ a reason.
    starting the last task without touching the mouse is the obvious next one.
 5. **Pagination for busy issues** — `fetchDayWorklogs` asks for `maxResults=200` per
    issue and does not follow `startAt`. Fine at present volumes, wrong eventually.
-6. **Splitting a synced entry** — currently refused. It needs one worklog updated and
-   one created, with a partial-failure story; worth doing only if it is actually missed.
+6. **Splitting a synced entry, and repointing one at another issue** — both refused,
+   for the same reason: a worklogId is only valid on the issue it was created against,
+   so either needs a delete plus a create with its own partial-failure story. Until
+   someone actually misses them, deleting the entry (which offers to remove the Jira
+   worklog too) and re-adding it is the honest path, and both messages say so.
 7. **macOS build** — a GitHub Actions job with a macOS runner, no code changes.
 8. **Auto-update** — still not worth it for ten users. Revisit if handing out installers
    becomes the annoying part.

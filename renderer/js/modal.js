@@ -4,11 +4,17 @@
 let activeResolve = null;
 
 /**
- * @param {{title: string, body: Node|string, buttons: {label: string, value: any, primary?: boolean}[],
- *          dismissValue?: any}} spec
- * @returns {Promise<any>} the chosen button's `value`
+ * @param {object} spec
+ * @param {string} spec.title
+ * @param {Node|string|((resolve: (value: any) => void) => Node)} spec.body
+ *        A function is called with `resolve`, so a body that is itself the choice —
+ *        a list of issues to pick from — can settle the modal without a button.
+ * @param {{label: string, value: any, primary?: boolean}[]} spec.buttons
+ * @param {any} [spec.dismissValue]
+ * @param {boolean} [spec.focusBody] focus the body's first input rather than a button
+ * @returns {Promise<any>} the chosen button's `value`, or whatever the body resolved with
  */
-export function askModal({ title, body, buttons, dismissValue = null }) {
+export function askModal({ title, body, buttons, dismissValue = null, focusBody = false }) {
   const overlay = document.getElementById('modal-overlay');
   const titleEl = document.getElementById('modal-title');
   const bodyEl = document.getElementById('modal-body');
@@ -17,7 +23,13 @@ export function askModal({ title, body, buttons, dismissValue = null }) {
   close(dismissValue);
 
   titleEl.textContent = title;
-  bodyEl.replaceChildren(typeof body === 'string' ? document.createTextNode(body) : body);
+  const rendered =
+    typeof body === 'function'
+      ? body(close)
+      : typeof body === 'string'
+        ? document.createTextNode(body)
+        : body;
+  bodyEl.replaceChildren(rendered);
   btnsEl.replaceChildren();
 
   for (const button of buttons) {
@@ -29,7 +41,8 @@ export function askModal({ title, body, buttons, dismissValue = null }) {
   }
 
   overlay.classList.remove('hidden');
-  btnsEl.querySelector('button')?.focus();
+  if (focusBody) bodyEl.querySelector('input, textarea, select')?.focus();
+  else btnsEl.querySelector('button')?.focus();
 
   return new Promise((resolve) => {
     activeResolve = resolve;

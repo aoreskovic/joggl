@@ -682,6 +682,139 @@ async function quickEntry() {
   );
 }
 
+async function dayPanel() {
+  await check(
+    '"On this day" is a titled panel, open by default, counting the day\'s entries',
+    `await H.resetDay();
+     const hdr = H.q('#day-panel-hdr');
+     const openAtStart = !H.q('#entry-list').hidden;
+     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     // The count is every row the panel shows, Jira-side worklogs included —
+     // it answers "is there anything in this day", not "how many are mine".
+     const count = H.q('#day-count').textContent;
+     const rows = H.all('.entry-card').length;
+     await H.resetDay();
+     return JSON.stringify({
+       title: hdr.querySelector('span').textContent.replace(/[▼▶]/g, '').trim(),
+       openAtStart, count, rows,
+       expanded: hdr.getAttribute('aria-expanded'),
+     })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.title === 'On this day' && d.openAtStart === true &&
+        d.count === String(d.rows) && d.rows >= 1 && d.expanded === 'true';
+    },
+  );
+
+  await check(
+    '"On this day" collapses and reopens, and the count survives the collapse',
+    `await H.resetDay();
+     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     const hdr = H.q('#day-panel-hdr'), list = H.q('#entry-list');
+     const rows = H.all('.entry-card').length;
+     hdr.click(); await H.sleep(250);
+     const collapsed = list.hidden;
+     const countWhileShut = H.q('#day-count').textContent;
+     const ariaShut = hdr.getAttribute('aria-expanded');
+     hdr.click(); await H.sleep(250);
+     const reopened = !list.hidden;
+     await H.resetDay();
+     return JSON.stringify({ collapsed, countWhileShut, ariaShut, reopened, rows })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.collapsed === true && d.countWhileShut === String(d.rows) &&
+        d.ariaShut === 'false' && d.reopened === true;
+    },
+  );
+
+  await check(
+    'the collapsed state is remembered across a day change',
+    `await H.resetDay();
+     H.q('#day-panel-hdr').click(); await H.sleep(300);
+     H.q('#prev-day').click(); await H.sleep(700);
+     const stillShut = H.q('#entry-list').hidden;
+     H.q('#today-btn').click(); await H.sleep(700);
+     const stillShutToday = H.q('#entry-list').hidden;
+     H.q('#day-panel-hdr').click(); await H.sleep(300);
+     await H.resetDay();
+     return JSON.stringify({ stillShut, stillShutToday })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.stillShut === true && d.stillShutToday === true;
+    },
+  );
+}
+
+async function editTask() {
+  await check(
+    'Edit task is the first item on a day-view block\'s menu',
+    `await H.resetDay();
+     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     H.q('.sched-entry-block').dispatchEvent(new MouseEvent('contextmenu', {
+       bubbles: true, cancelable: true, clientX: 400, clientY: 300 }));
+     await H.sleep(250);
+     const items = H.all('.ctx-item').map(i => i.textContent.replace(/^\\W+/, ''));
+     document.body.click(); await H.sleep(150);
+     await H.resetDay();
+     return JSON.stringify(items)`,
+    (v) => JSON.parse(v)[0] === 'Edit task',
+  );
+
+  await check(
+    'Edit task swaps the issue and leaves the times exactly as they were',
+    `await H.resetDay();
+     H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     const before = H.entries()[0];
+     H.q('.sched-entry-block').dispatchEvent(new MouseEvent('contextmenu', {
+       bubbles: true, cancelable: true, clientX: 400, clientY: 300 }));
+     await H.sleep(250);
+     H.all('.ctx-item').find(i => i.textContent.includes('Edit task')).click();
+     await H.sleep(400);
+     const opened = !H.q('#modal-overlay').classList.contains('hidden');
+     const focused = document.activeElement?.tagName;
+     // Pick a different issue than the one dropped.
+     const rows = H.all('.issue-picker-results .task-dd-item');
+     const pick = rows.find(r => r.querySelector('.jira-chip').textContent !== before.key);
+     const wanted = pick?.querySelector('.jira-chip').textContent ?? null;
+     pick?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+     await H.sleep(600);
+     const after = H.entries()[0];
+     await H.resetDay();
+     return JSON.stringify({ opened, focused, wanted, before, after })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.opened && d.focused === 'INPUT' && d.wanted &&
+        d.after.key === d.wanted && d.after.key !== d.before.key &&
+        d.after.range === d.before.range;
+    },
+  );
+
+  await check(
+    'Edit task is refused on an entry already logged in Jira',
+    `await H.resetDay();
+     const at = new Date(); at.setHours(9, 0, 0, 0);
+     await window.joggl.days.save(H.todayKey(), [{
+       id: 'synced1', issueKey: 'X-1', issueId: null, title: 'Already logged',
+       startTs: at.getTime(), endTs: at.getTime() + 1800000,
+       status: 'synced', worklogId: '99999', errorMsg: null }]);
+     H.q('#today-btn').click(); await H.sleep(600);
+     H.q('.sched-entry-block[data-id="synced1"]').dispatchEvent(new MouseEvent('contextmenu', {
+       bubbles: true, cancelable: true, clientX: 400, clientY: 300 }));
+     await H.sleep(250);
+     H.all('.ctx-item').find(i => i.textContent.includes('Edit task')).click();
+     await H.sleep(400);
+     const modalOpen = !H.q('#modal-overlay').classList.contains('hidden');
+     const warned = H.all('.toast').some(t => /cannot be moved to another issue/i.test(t.textContent));
+     const unchanged = H.entries()[0]?.key;
+     await H.resetDay();
+     return JSON.stringify({ modalOpen, warned, unchanged })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.modalOpen === false && d.warned === true && d.unchanged === 'X-1';
+    },
+  );
+}
+
 async function externals() {
   await check(
     'Jira-side worklogs read back dashed, labelled and read-only',
@@ -711,7 +844,9 @@ export async function runChecks(mainWindow, app) {
     await run(HELPERS);
     await sidebar();
     await quickEntry();
+    await dayPanel();
     await dragging();
+    await editTask();
     await timeSafety();
     await externals();
   } catch (err) {

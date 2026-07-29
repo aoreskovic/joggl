@@ -6,6 +6,7 @@ import { wireDayViewDrag } from './drag-drop.js';
 import {
   deleteEntry,
   duplicateEntry,
+  editEntryTask,
   renderEntryList,
   splitEntry,
   updateTotal,
@@ -105,6 +106,7 @@ async function boot() {
   registerRenderer(updateFinishButton);
 
   setContextActions({
+    editTask: (entry) => editEntryTask(entry.id),
     restart: (entry) =>
       startTimer({ issueKey: entry.issueKey, issueId: entry.issueId, title: entry.title }),
     duplicate: (entry) => duplicateEntry(entry.id),
@@ -115,6 +117,7 @@ async function boot() {
   wireSetup();
   wireSettings();
   wireOmnibar();
+  wireDayPanel();
   wireDayNav();
   wireDayView();
   wireDayViewDrag();
@@ -170,6 +173,38 @@ function refreshExternal(date = state.selectedDate) {
   return loadExternalWorklogs(date)
     .then(() => renderAll())
     .catch(() => renderAll());
+}
+
+/**
+ * "On this day" collapses like the issue sources do, and stays that way across
+ * restarts — someone who works from the day view alone should not have to close
+ * it every morning.
+ */
+function wireDayPanel() {
+  const header = $('day-panel-hdr');
+  const list = $('entry-list');
+
+  const apply = (collapsed) => {
+    list.hidden = collapsed;
+    $('day-panel-chevron').innerHTML = collapsed ? '&#9654;' : '&#9660;';
+    header.setAttribute('aria-expanded', String(!collapsed));
+  };
+
+  apply(Boolean(state.ui.dayPanelCollapsed));
+
+  const toggle = async () => {
+    const collapsed = !list.hidden;
+    apply(collapsed);
+    await saveUi({ dayPanelCollapsed: collapsed });
+  };
+
+  header.addEventListener('click', toggle);
+  header.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggle();
+    }
+  });
 }
 
 function wireDayNav() {

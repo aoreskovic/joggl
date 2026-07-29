@@ -7,12 +7,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  canRetarget,
   clampDropStart,
   DEFAULT_DROP_MS,
   dropEntryFor,
   duplicateOf,
   movedEntry,
   overlappingIds,
+  retargetEntry,
 } from '../renderer/js/entry-ops.js';
 import { planFinishDay } from '../renderer/js/finish-day.js';
 
@@ -221,6 +223,62 @@ test('movedEntry does not mutate the entry it was given', () => {
   movedEntry(original, T(14), DAY_START);
   assert.equal(original.startTs, T(9));
   assert.equal(original.endTs, T(10));
+});
+
+// ── Booking the same block against a different issue ────────────────────────
+
+const target = { issueKey: 'OTHER-9', issueId: '20002', title: 'Something else' };
+
+test('the time is carried across untouched — that is the whole operation', () => {
+  const original = entry({ startTs: T(9, 15), endTs: T(10, 45) });
+  const moved = retargetEntry(original, target);
+
+  assert.equal(moved.startTs, T(9, 15));
+  assert.equal(moved.endTs, T(10, 45));
+  assert.equal(moved.id, original.id, 'it is the same entry, not a new one');
+});
+
+test('the issue, its id and the title all follow', () => {
+  const moved = retargetEntry(entry(), target);
+  assert.equal(moved.issueKey, 'OTHER-9');
+  assert.equal(moved.issueId, '20002');
+  assert.equal(moved.title, 'Something else');
+});
+
+test('a repointed entry needs sending, and a previous failure is cleared', () => {
+  const moved = retargetEntry(entry({ status: 'error', errorMsg: 'HTTP 500' }), target);
+  assert.equal(moved.status, 'pending');
+  assert.equal(moved.errorMsg, null);
+  assert.deepEqual(planFinishDay([moved]).toSubmit.map((e) => e.id), ['original']);
+});
+
+test('retargetEntry does not mutate the entry it was given', () => {
+  const original = entry();
+  retargetEntry(original, target);
+  assert.equal(original.issueKey, 'PROJ-1');
+  assert.equal(original.title, 'Meetings');
+});
+
+test('an entry already in Jira may not be repointed', () => {
+  // A worklogId is only valid on the issue it was created against. Repointing
+  // would make Finish Day either PUT that id onto an issue that has never heard
+  // of it, or post a second worklog and orphan the first.
+  assert.deepEqual(canRetarget(entry({ status: 'synced', worklogId: '60504' })), {
+    ok: false,
+    reason: 'synced',
+  });
+  // Even back in pending after an edit — the id is what matters, not the status.
+  assert.equal(canRetarget(entry({ status: 'pending', worklogId: '60504' })).ok, false);
+});
+
+test('a Jira-side worklog may not be repointed either', () => {
+  assert.deepEqual(canRetarget({ ...entry(), external: true }), { ok: false, reason: 'external' });
+});
+
+test('an ordinary pending or failed entry may be repointed', () => {
+  assert.deepEqual(canRetarget(entry()), { ok: true });
+  assert.deepEqual(canRetarget(entry({ status: 'error', errorMsg: 'HTTP 500' })), { ok: true });
+  assert.deepEqual(canRetarget(entry({ issueKey: null, status: 'local' })), { ok: true });
 });
 
 test('creating and moving clamp by the same rule', () => {

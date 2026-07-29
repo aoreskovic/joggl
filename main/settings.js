@@ -79,6 +79,7 @@ const UI_DEFAULTS = {
   panelWidth: 320,
   theme: 'system', // system | light | dark
   sidebarCollapsed: false,
+  dayPanelCollapsed: false, // "On this day" starts open, like the issue sources
   activeView: 'day', // day | week | month — week and month arrive in later phases
 };
 

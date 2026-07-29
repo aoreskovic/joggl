@@ -463,6 +463,36 @@ button {
   flex-shrink: 0;
 }
 
+/* ── Issue picker (inside a modal) ── */
+
+.issue-picker input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.issue-picker input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.issue-picker-results {
+  margin-top: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.issue-picker-results:empty {
+  display: none;
+}
+
 .task-dd-empty {
   padding: 10px 12px;
   font-size: 12px;
@@ -876,6 +906,30 @@ button {
   user-select: none;
   background: var(--bg-sunken);
   border-bottom: 1px solid var(--border);
+}
+
+/* The entry list is not the scrolling issue list: it sizes to its contents and
+   the panel above it does not fight the Issues panel for the leftover height. */
+.day-panel {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.day-panel #entry-list {
+  padding: 6px 0 1px;
+}
+
+.day-panel #entry-list:empty {
+  display: none;
+}
+
+.task-panel-hdr.collapsible {
+  cursor: pointer;
+  user-select: none;
+}
+
+.task-panel-hdr.collapsible:hover > span:first-child {
+  color: var(--text);
 }
 
 .task-panel-hdr > span:first-child {

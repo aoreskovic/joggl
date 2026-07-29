@@ -496,6 +496,28 @@ function showQuickEntry(cx, cy, startTs, endTs) {
     return item;
   };
 
+  // Positions the popup against its *current* size, flipping above the cursor
+  // when it would otherwise run off the bottom of the window.
+  //
+  // This must never run before the results are in the DOM. It used to be called
+  // once, from the outer requestAnimationFrame, against a popup that was still
+  // empty — renderResults('') ran a line later. The flip test then measured a
+  // ~60px empty popup, decided it fit below the cursor, and the popup went on to
+  // grow to ~250px once results arrived, past the bottom edge with no way back.
+  // So this is called only from inside renderResults, after `results` has real
+  // children — on the initial render and on every later one, since a query
+  // shrinking or growing the result count (every keystroke, and the
+  // remote-lookup callback landing after Jira answers late) can change the
+  // height enough to flip the earlier decision. A popup correctly placed for
+  // two results must not be left overflowing when five arrive.
+  const position = () => {
+    const rect = wrap.getBoundingClientRect();
+    const x = Math.min(cx, window.innerWidth - rect.width - 8);
+    const y = cy + 8 + rect.height > window.innerHeight ? cy - rect.height - 8 : cy + 8;
+    wrap.style.left = `${Math.max(8, x)}px`;
+    wrap.style.top = `${Math.max(8, y)}px`;
+  };
+
   const renderResults = (rawQuery) => {
     const query = String(rawQuery ?? '').trim();
     const local = searchIssues(rawQuery).slice(0, 8);
@@ -520,6 +542,11 @@ function showQuickEntry(cx, cy, startTs, endTs) {
     }
 
     results.replaceChildren(...children);
+
+    // Reposition now that the result set — and so the popup's height — may have
+    // just changed. See the comment on `position` for why this has to happen
+    // after content, not before.
+    if (quickEntryEl === wrap) position();
   };
 
   input.addEventListener('input', () => renderResults(input.value));
@@ -542,16 +569,12 @@ function showQuickEntry(cx, cy, startTs, endTs) {
   quickEntryEl = wrap;
   wrap.style.visibility = 'hidden';
 
-  // Position after layout so the popup can be flipped when it would fall off screen.
+  // Wait for layout, then render results (which positions itself — see
+  // `position` above) before revealing, so the user never sees it jump.
   requestAnimationFrame(() => {
-    const rect = wrap.getBoundingClientRect();
-    const x = Math.min(cx, window.innerWidth - rect.width - 8);
-    const y = cy + 8 + rect.height > window.innerHeight ? cy - rect.height - 8 : cy + 8;
-    wrap.style.left = `${Math.max(8, x)}px`;
-    wrap.style.top = `${Math.max(8, y)}px`;
+    renderResults('');
     wrap.style.visibility = '';
     input.focus();
-    renderResults('');
   });
 
   document.addEventListener('mousedown', onQuickEntryOutside, true);

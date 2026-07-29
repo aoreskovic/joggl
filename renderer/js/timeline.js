@@ -176,6 +176,53 @@ function placeBlock(el, startTs, endTs, slot, minHeightPx = 6) {
   }
 }
 
+/**
+ * The snapped timestamp a cursor position points at, or null when it falls outside
+ * the grid.
+ *
+ * getBoundingClientRect is viewport-relative and already accounts for the panel's
+ * scroll position. Adding scrollTop on top of it — as the plugin did — counted the
+ * scroll twice, so once the view had auto-scrolled to now, a click at 16:00 landed
+ * somewhere around 21:00. That is why this arithmetic exists exactly once.
+ */
+export function gridTimeAt(clientY) {
+  const grid = document.getElementById('schedule-grid');
+  if (!grid) return null;
+
+  const y = clientY - grid.getBoundingClientRect().top;
+  if (y < 0 || y > view.totalMinutes * view.pxPerMin) return null;
+
+  return snapToQuarter(view.rangeStartMs + (y / view.pxPerMin) * 60_000, state.selectedDate);
+}
+
+/**
+ * Show what a drop would create. Always full width rather than fighting for an
+ * overlap column: a preview that reflowed as it passed other blocks would jump
+ * sideways under the cursor.
+ */
+export function showDropPlaceholder(startTs, endTs) {
+  const grid = document.getElementById('schedule-grid');
+  if (!grid) return;
+
+  let el = grid.querySelector('.sched-drop-preview');
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'sched-drop-preview';
+    const label = document.createElement('div');
+    label.className = 'sched-entry-label';
+    el.appendChild(label);
+    grid.appendChild(el);
+  }
+
+  placeBlock(el, startTs, endTs, { col: 0, totalCols: 1 });
+  el.querySelector('.sched-entry-label').textContent =
+    `${tsToHHMM(startTs)} – ${tsToHHMM(endTs)}`;
+}
+
+export function hideDropPlaceholder() {
+  document.querySelector('.sched-drop-preview')?.remove();
+}
+
 function buildBlock(entry, slot) {
   const block = document.createElement('div');
   block.className = 'sched-entry-block';
@@ -371,15 +418,9 @@ function onQuickEntryOutside(event) {
 export function onGridClick(event) {
   if (event.target.closest('.sched-entry-block') || event.target.closest('.sched-handle')) return;
 
-  const grid = document.getElementById('schedule-grid');
-  // getBoundingClientRect is viewport-relative and already reflects the panel's
-  // scroll position. Adding scrollTop on top of it — as the plugin did — counted
-  // the scroll twice, so after the view auto-scrolled to now, a click at 16:00
-  // landed somewhere around 21:00.
-  const y = event.clientY - grid.getBoundingClientRect().top;
-  const clicked = view.rangeStartMs + (y / view.pxPerMin) * 60_000;
+  const startTs = gridTimeAt(event.clientY);
+  if (startTs === null) return;
 
-  const startTs = snapToQuarter(clicked, state.selectedDate);
   showQuickEntry(event.clientX, event.clientY, startTs, startTs + 30 * 60_000);
 }
 

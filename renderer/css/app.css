@@ -1138,6 +1138,17 @@ button {
   z-index: 20;
 }
 
+/* What a dropped issue would become. Dashed like the live block, but it is not an
+   entry and must never intercept the mouse that is placing it. */
+.sched-drop-preview {
+  position: absolute;
+  border: 1.5px dashed var(--accent);
+  border-radius: 3px;
+  background: var(--accent-softer);
+  pointer-events: none;
+  z-index: 15;
+}
+
 .sched-entry-label {
   font-size: var(--sched-font-size);
   font-weight: 600;

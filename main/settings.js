@@ -78,6 +78,8 @@ const UI_DEFAULTS = {
   fontSize: 9,
   panelWidth: 320,
   theme: 'system', // system | light | dark
+  sidebarCollapsed: false,
+  activeView: 'day', // day | week | month — week and month arrive in later phases
 };
 
 export async function getUiPrefs() {

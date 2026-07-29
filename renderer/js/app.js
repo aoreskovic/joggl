@@ -12,6 +12,7 @@ import {
 import { PLAY_ICON, STOP_ICON } from './icons.js';
 import { isPinned, renderPins, togglePin } from './pins.js';
 import { registerRenderer, renderAll } from './render.js';
+import { registerView, setActiveView, wireShell } from './shell.js';
 import {
   appVersion,
   isToday,
@@ -79,6 +80,19 @@ async function boot() {
   applyFontSize(state.ui.fontSize);
   $('right-panel').style.width = `${state.ui.panelWidth}px`;
   updateZoomLabel();
+
+  wireShell();
+  registerView('day', {
+    mount() {
+      $('view-day').hidden = false;
+    },
+    unmount() {
+      $('view-day').hidden = true;
+    },
+  });
+  // Hardcoded rather than restored from state.ui.activeView: week and month do not
+  // exist yet, and restoring a view that is not registered would leave a blank app.
+  setActiveView('day');
 
   registerRenderer(renderEntryList);
   registerRenderer(renderTimeline);

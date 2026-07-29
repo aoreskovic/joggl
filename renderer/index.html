@@ -13,7 +13,36 @@
     <link rel="stylesheet" href="css/app.css" />
   </head>
   <body>
-    <div class="app-layout">
+    <div class="shell">
+      <nav id="sidebar" class="sidebar">
+        <div class="sidebar-brand">
+          <span class="sidebar-brand-name">Joggl</span>
+          <button id="sidebar-toggle" class="sidebar-toggle" title="Collapse sidebar"
+                  aria-label="Collapse sidebar"></button>
+        </div>
+
+        <div class="sidebar-tabs">
+          <button class="sidebar-item" data-view="day">
+            <span class="sidebar-icon"></span><span class="sidebar-label">Day View</span>
+          </button>
+          <button class="sidebar-item" data-view="week" disabled aria-disabled="true"
+                  title="Not built yet">
+            <span class="sidebar-icon"></span><span class="sidebar-label">Week View</span>
+          </button>
+          <button class="sidebar-item" data-view="month" disabled aria-disabled="true"
+                  title="Not built yet">
+            <span class="sidebar-icon"></span><span class="sidebar-label">Month View</span>
+          </button>
+        </div>
+
+        <div class="sidebar-spacer"></div>
+
+        <button id="settings-btn" class="sidebar-item" title="Settings">
+          <span class="sidebar-icon"></span><span class="sidebar-label">Settings</span>
+        </button>
+      </nav>
+
+      <div class="app-layout" id="view-day">
       <!-- ── LEFT PANEL ── -->
       <div class="left-panel">
         <div class="omnibar">
@@ -50,7 +79,6 @@
           <div class="day-header-right">
             <span id="total-display" class="total-display">Total: 0m</span>
             <button id="finish-day-btn" class="btn-primary">Finish Day</button>
-            <button id="settings-btn" class="icon-square" title="Settings">⚙</button>
           </div>
         </div>
 
@@ -91,6 +119,7 @@
           </div>
         </div>
         <div class="schedule-grid" id="schedule-grid"></div>
+      </div>
       </div>
     </div>
 

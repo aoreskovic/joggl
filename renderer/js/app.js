@@ -24,6 +24,7 @@ import {
   loadTimer,
   loadUi,
   logToFile,
+  persistTimer,
   saveUi,
   state,
   ZOOM_LEVELS,
@@ -306,11 +307,18 @@ function wireOmnibar() {
   });
 
   const startInput = $('start-time-input');
-  startInput.addEventListener('blur', () => {
+  startInput.addEventListener('blur', async () => {
     const ts = hhmmToTs(startInput.value, state.selectedDate);
     if (state.timer) {
       if (ts !== null && ts <= Date.now()) {
         state.timer.startTs = ts;
+        // CLAUDE.md: a crash must never cost more than the current minute. Without
+        // this, a corrected start only lived in memory — a crash right after would
+        // restore the timer at its original start, and the entry written on stop
+        // would over-book. mergeNotAfterTs is deliberately left untouched here; it
+        // is fixed at the moment the timer started so editing the start afterwards
+        // cannot change what stop is allowed to absorb — see merge.js.
+        await persistTimer();
         renderAll();
       } else {
         startInput.value = tsToHHMM(state.timer.startTs);

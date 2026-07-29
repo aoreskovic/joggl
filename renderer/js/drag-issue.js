@@ -12,8 +12,13 @@ import { persistDayNow, state } from './state.js';
 import { gridTimeAt, hideDropPlaceholder, showDropPlaceholder } from './timeline.js';
 import { esc, startOfDayMs, uuid } from './util.js';
 
-/** Below this, the gesture was a click and the timer should start as always. */
-const THRESHOLD_PX = 4;
+/**
+ * Below this, the gesture was a click and the timer should start as always. Six
+ * rather than the four this started at: a click on a task row is the primary
+ * action, and a hand that slips a few pixels while pressing must not turn into a
+ * drag that swallows the click and starts nothing.
+ */
+const THRESHOLD_PX = 6;
 /** How close to the panel edge starts an auto-scroll, and how fast it goes. */
 const EDGE_PX = 24;
 const EDGE_SCROLL_PX = 8;
@@ -22,7 +27,13 @@ const SWALLOW_MS = 150;
 
 /** mousedown seen on a row, threshold not yet crossed. */
 let pending = null;
-/** A live drag: { issue, ghost, startTs, clientY, scrollFrame }. */
+/**
+ * A live drag: { issue, ghost, startTs, clientX, clientY, scrollFrame }.
+ *
+ * Both coordinates are stored because autoScroll re-resolves the drop time from
+ * them when the panel scrolls under a cursor that has not moved, and gridTimeAt
+ * bounds the drop on the grid's full rect, X included.
+ */
 let drag = null;
 let swallowUntil = 0;
 /**
@@ -95,10 +106,11 @@ function onMouseMove(event) {
   }
   if (!drag) return;
 
+  drag.clientX = event.clientX;
   drag.clientY = event.clientY;
   drag.ghost.style.left = `${event.clientX + 12}px`;
   drag.ghost.style.top = `${event.clientY + 12}px`;
-  updatePreview(event.clientY);
+  updatePreview(event.clientX, event.clientY);
 }
 
 function begin(issue) {
@@ -112,14 +124,14 @@ function begin(issue) {
   document.body.appendChild(ghost);
   document.body.classList.add('is-dragging-issue');
 
-  drag = { issue, ghost, startTs: null, clientY: 0, scrollFrame: 0 };
+  drag = { issue, ghost, startTs: null, clientX: 0, clientY: 0, scrollFrame: 0 };
   // A peek opening under the cursor would slide over the grid and eat the drop.
   setDragging(true);
   drag.scrollFrame = requestAnimationFrame(autoScroll);
 }
 
-function updatePreview(clientY) {
-  const startTs = gridTimeAt(clientY);
+function updatePreview(clientX, clientY) {
+  const startTs = gridTimeAt(clientX, clientY);
   drag.startTs = startTs;
 
   if (startTs === null) {
@@ -155,8 +167,9 @@ function autoScroll() {
 
   if (delta !== 0) {
     panel.scrollTop += delta;
-    // The grid just moved under a cursor that did not, so the preview has to follow.
-    updatePreview(y);
+    // The grid just moved under a cursor that did not, so the preview has to
+    // follow — from the stored coordinates, since there is no event here.
+    updatePreview(drag.clientX, y);
   }
 }
 

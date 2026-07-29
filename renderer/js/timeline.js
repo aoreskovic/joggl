@@ -184,12 +184,22 @@ function placeBlock(el, startTs, endTs, slot, minHeightPx = 6) {
  * scroll position. Adding scrollTop on top of it — as the plugin did — counted the
  * scroll twice, so once the view had auto-scrolled to now, a click at 16:00 landed
  * somewhere around 21:00. That is why this arithmetic exists exactly once.
+ *
+ * The bound is the full rect, horizontal included. When only `onGridClick` called
+ * this, X was already constrained by event dispatch — the listener is on the grid,
+ * so nothing outside it ever arrived. The issue drag calls it from document-level
+ * handlers where nothing constrains X, and with only the vertical test a press on a
+ * task row, a few pixels sideways, and a release still over the task list booked a
+ * 30-minute entry at whatever time that row's Y happened to map to.
  */
-export function gridTimeAt(clientY) {
+export function gridTimeAt(clientX, clientY) {
   const grid = document.getElementById('schedule-grid');
   if (!grid) return null;
 
-  const y = clientY - grid.getBoundingClientRect().top;
+  const rect = grid.getBoundingClientRect();
+  if (clientX < rect.left || clientX > rect.right) return null;
+
+  const y = clientY - rect.top;
   if (y < 0 || y > view.totalMinutes * view.pxPerMin) return null;
 
   return snapToQuarter(view.rangeStartMs + (y / view.pxPerMin) * 60_000, state.selectedDate);
@@ -418,7 +428,7 @@ function onQuickEntryOutside(event) {
 export function onGridClick(event) {
   if (event.target.closest('.sched-entry-block') || event.target.closest('.sched-handle')) return;
 
-  const startTs = gridTimeAt(event.clientY);
+  const startTs = gridTimeAt(event.clientX, event.clientY);
   if (startTs === null) return;
 
   showQuickEntry(event.clientX, event.clientY, startTs, startTs + 30 * 60_000);

@@ -230,6 +230,15 @@ Starting a timer on a task that already has entries today:
 - Gap **> 30 min** → prompt `[Merge into one]` / `[Keep separate]`
   - Merging extends the block across the gap. This is intentional and correct for `Meetings`.
 
+An entry that **starts after the timer's start is never a merge candidate**, whatever
+the gap. The 30-minute rule is a *resumption* heuristic, and a block that has not
+happened yet cannot be resumed — a block dropped onto 14:00 is leave, or a meeting
+already in the diary. Folding one in would book the whole span between: drop
+`Meetings` on 14:00, time the 10:30 standup for half an hour, and the negative gap
+reads as an overlap, producing one 10:30–14:30 entry that Finish Day submits as four
+hours. The bound is threaded through `mergeableEntries` so the decision taken at
+start and the merge applied at stop cannot disagree about the candidate set.
+
 Merging is always local. Nothing reaches Jira until Finish Day.
 
 ### Finish Day

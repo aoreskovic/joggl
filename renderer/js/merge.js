@@ -19,14 +19,22 @@ export function taskKeyOf(entry) {
  * Anything already pushed to Jira is excluded. Swallowing a synced entry into a
  * larger block would either log its minutes a second time on the next Finish Day
  * or drop the worklogId that guards against exactly that.
+ *
+ * `notAfterTs` excludes anything that starts after the timer being merged into it.
+ * A block dropped onto a later hour of the day view — leave, a meeting already in
+ * the diary — has not happened yet, and a block that has not happened cannot be
+ * resumed. Without this bound, dropping Meetings on 14:00 and then timing the
+ * 10:30 standup produced a single 10:30–14:30 entry and Finish Day submitted four
+ * hours for thirty minutes of work.
  */
-export function mergeableEntries(entries, taskKey) {
+export function mergeableEntries(entries, taskKey, notAfterTs = Infinity) {
   return (entries ?? []).filter(
     (e) =>
       e.endTs !== null &&
       e.endTs !== undefined &&
       e.status !== 'synced' &&
       !e.worklogId &&
+      e.startTs <= notAfterTs &&
       taskKeyOf(e) === taskKey,
   );
 }
@@ -40,7 +48,10 @@ export function mergeableEntries(entries, taskKey) {
  *            earliestTs: number, latestTs: number}}
  */
 export function decideMerge(entries, taskKey, startTs) {
-  const candidates = mergeableEntries(entries, taskKey);
+  // The bound is the timer's start, exactly as in applyMerge below. The two calls
+  // are minutes or hours apart — one at start, one at stop — and if they disagreed
+  // on the candidate set, the stop would absorb an entry the start never offered.
+  const candidates = mergeableEntries(entries, taskKey, startTs);
   if (candidates.length === 0) return { action: 'new' };
 
   const lastEnd = Math.max(...candidates.map((e) => e.endTs));
@@ -70,7 +81,10 @@ export function decideMerge(entries, taskKey, startTs) {
  */
 export function applyMerge(entries, newEntry) {
   const taskKey = taskKeyOf(newEntry);
-  const absorbed = mergeableEntries(entries, taskKey);
+  // newEntry.startTs is the timer's start — the same bound decideMerge used when
+  // it offered the merge. Passing anything else here (the end, say) would let the
+  // stop swallow a block booked for later in the day that was never a candidate.
+  const absorbed = mergeableEntries(entries, taskKey, newEntry.startTs);
   if (absorbed.length === 0) return [...entries, newEntry];
 
   const absorbedIds = new Set(absorbed.map((e) => e.id));

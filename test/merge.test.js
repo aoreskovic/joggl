@@ -111,6 +111,64 @@ test('a still-running entry is not a merge candidate', () => {
   assert.deepEqual(decideMerge(entries, 'issue:PROJ-1', T(10, 5)), { action: 'new' });
 });
 
+// ── Blocks booked ahead ─────────────────────────────────────────────────────
+//
+// Dropping an issue onto a later hour of the day view is the drag feature's whole
+// point, and such a block sits in the same day as the timer that starts hours
+// before it. A negative gap normally means "resumption"; here it means the block
+// has not happened yet, and merging would book the entire span up to its end.
+
+test('an entry starting after the timer is not a merge candidate', () => {
+  // Booked at 14:00–14:30 this morning; the timer starts at 10:30.
+  const entries = [entry({ id: 'ahead', startTs: T(14), endTs: T(14, 30) })];
+  assert.deepEqual(mergeableEntries(entries, 'issue:PROJ-1', T(10, 30)), []);
+  assert.deepEqual(decideMerge(entries, 'issue:PROJ-1', T(10, 30)), { action: 'new' });
+});
+
+test('a block booked ahead survives the stop that would have absorbed it', () => {
+  const entries = [entry({ id: 'ahead', startTs: T(14), endTs: T(14, 30) })];
+  const timed = entry({ id: 'new', startTs: T(10, 30), endTs: T(11) });
+
+  const result = applyMerge(entries, timed);
+
+  assert.equal(result.length, 2, 'two entries, not one four-hour block');
+  const ahead = result.find((e) => e.id === 'ahead');
+  assert.equal(ahead.startTs, T(14));
+  assert.equal(ahead.endTs, T(14, 30));
+  const worked = result.find((e) => e.id === 'new');
+  assert.equal(worked.startTs, T(10, 30));
+  assert.equal(worked.endTs, T(11));
+});
+
+test('an entry that merely ends after the timer starts is still a resumption', () => {
+  // Started at 09:00 and still on screen at 10:15 — genuinely overlapping past
+  // work, which the negative-gap rule exists for.
+  const entries = [entry({ id: 'past', startTs: T(9), endTs: T(10, 30) })];
+  assert.equal(decideMerge(entries, 'issue:PROJ-1', T(10, 15)).action, 'merge');
+
+  const result = applyMerge(entries, entry({ id: 'new', startTs: T(10, 15), endTs: T(11) }));
+  assert.equal(result.length, 1);
+  assert.equal(result[0].startTs, T(9));
+  assert.equal(result[0].endTs, T(11));
+});
+
+test('a candidate starting exactly at the timer start is still mergeable', () => {
+  const entries = [entry({ id: 'same', startTs: T(10), endTs: T(10, 15) })];
+  assert.equal(decideMerge(entries, 'issue:PROJ-1', T(10)).action, 'merge');
+});
+
+test('the future entry is excluded but an earlier one is still found', () => {
+  const entries = [
+    entry({ id: 'past', startTs: T(9), endTs: T(10) }),
+    entry({ id: 'ahead', startTs: T(14), endTs: T(14, 30) }),
+  ];
+  // The gap is measured from the past entry's end, not the booked-ahead one's.
+  const decision = decideMerge(entries, 'issue:PROJ-1', T(10, 20));
+  assert.equal(decision.action, 'merge');
+  assert.equal(decision.gapMs, 20 * 60_000);
+  assert.deepEqual(decision.candidates.map((e) => e.id), ['past']);
+});
+
 // ── Applying the merge ─────────────────────────────────────────────────────
 
 test('merging spans the gap and collapses every candidate into one entry', () => {

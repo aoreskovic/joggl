@@ -918,6 +918,9 @@ button {
   padding: 7px 12px;
   cursor: pointer;
   border-bottom: 1px solid var(--border);
+  /* A press-and-drag toward the day view must not paint a text selection across
+     the row's title on the way there. */
+  user-select: none;
 }
 
 .task-item:last-child {

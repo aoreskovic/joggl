@@ -25,6 +25,13 @@ let pending = null;
 /** A live drag: { issue, ghost, startTs, clientY, scrollFrame }. */
 let drag = null;
 let swallowUntil = 0;
+/**
+ * Set when Escape cancels a drag while the button is presumably still down. The
+ * swallow window exists to eat the click a release-over-the-row produces, so it
+ * has to be measured from that release, not from teardown — Escape and the
+ * release it precedes can be well over 150ms apart.
+ */
+let armSwallowOnRelease = false;
 
 export function wireIssueDrag() {
   const list = document.getElementById('task-list');
@@ -46,7 +53,10 @@ export function wireIssueDrag() {
   document.addEventListener('mouseup', onMouseUp);
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && drag) teardown();
+    if (event.key === 'Escape' && drag) {
+      armSwallowOnRelease = true;
+      teardown();
+    }
   });
 
   // A drag that ends over the row it began on still produces a click, and that click
@@ -63,6 +73,19 @@ export function wireIssueDrag() {
 }
 
 function onMouseMove(event) {
+  // A release that never reached us — focus stolen mid-drag, or Chromium's implicit
+  // capture swallowing a plain release outside the window — would otherwise leave
+  // `drag`/`pending` stuck live for the rest of the session. The next movement
+  // without the button held is the first evidence the gesture is over.
+  if (event.buttons === 0) {
+    if (drag) teardown();
+    pending = null;
+    // Whatever release this stands in for has already happened, unseen. Don't
+    // leave a swallow window armed for some unrelated mouseup to trigger later.
+    armSwallowOnRelease = false;
+    return;
+  }
+
   if (pending && !drag) {
     const moved =
       Math.abs(event.clientX - pending.x) >= THRESHOLD_PX ||
@@ -115,7 +138,12 @@ function updatePreview(clientY) {
  * otherwise be unreachable from a task list that sits at the bottom left.
  */
 function autoScroll() {
-  if (!drag) return;
+  if (!drag) return; // the drag is over — this is the genuine terminator.
+  drag.scrollFrame = requestAnimationFrame(autoScroll);
+
+  // #right-panel is static markup and never absent, but if it ever were, that is
+  // a reason to skip this one frame, not to stop rescheduling and silently kill
+  // auto-scroll for the rest of the drag.
   const panel = document.getElementById('right-panel');
   if (!panel) return;
 
@@ -130,18 +158,24 @@ function autoScroll() {
     // The grid just moved under a cursor that did not, so the preview has to follow.
     updatePreview(y);
   }
-
-  drag.scrollFrame = requestAnimationFrame(autoScroll);
 }
 
 async function onMouseUp() {
   if (!drag) {
+    // Escape already tore the drag down while the button was presumably still
+    // held; this release is the one the swallow window was waiting for, so it is
+    // armed only now, measured from here rather than from teardown.
+    if (armSwallowOnRelease) {
+      armSwallowOnRelease = false;
+      swallowUntil = Date.now() + SWALLOW_MS;
+    }
     pending = null;
     return;
   }
 
   const { issue, startTs } = drag;
   teardown();
+  swallowUntil = Date.now() + SWALLOW_MS;
 
   // Released somewhere the grid cannot turn into a time: cancel, quietly.
   if (startTs === null) return;
@@ -154,6 +188,11 @@ async function onMouseUp() {
   renderAll();
 }
 
+// Does not arm the swallow window itself — that has to happen at the release the
+// window exists to protect, which is not always this call: teardown() also runs
+// from Escape (button likely still down) and from a lost-mouseup detected on the
+// next mousemove (no click will follow that release at all). See the two call
+// sites that set `swallowUntil` for where it actually belongs.
 function teardown() {
   if (drag) {
     cancelAnimationFrame(drag.scrollFrame);
@@ -164,5 +203,4 @@ function teardown() {
   hideDropPlaceholder();
   document.body.classList.remove('is-dragging-issue');
   setDragging(false);
-  swallowUntil = Date.now() + SWALLOW_MS;
 }

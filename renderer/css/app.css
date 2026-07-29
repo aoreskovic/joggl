@@ -636,6 +636,22 @@ button {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  /* The row can be dragged onto the day view to move it. */
+  cursor: grab;
+  /* A press-and-drag toward the day view must not paint a text selection across
+     the row's title on the way there. */
+  user-select: none;
+}
+
+/* The inline time fields are for typing in, so they keep their own cursor and
+   their selectability — dragging deliberately does not start on them. */
+.entry-card .ie {
+  cursor: text;
+  user-select: text;
+}
+
+.entry-card .icon-btn {
+  cursor: pointer;
 }
 
 .entry-card:hover {
@@ -653,6 +669,8 @@ button {
   border-style: dashed;
   border-color: var(--external-line);
   background: transparent;
+  /* Nothing here is Joggl's to move. */
+  cursor: default;
 }
 
 .entry-card.external:hover {
@@ -1004,6 +1022,20 @@ button {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* Labels the pair beside it as a zoom. Muted, because it is a caption rather
+   than a control — clicking it does nothing. */
+.sched-zoom-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-faint);
+  margin-right: 1px;
+}
+
+.sched-zoom-icon .glyph {
+  width: 11px;
+  height: 11px;
 }
 
 .sched-zoom-btn {

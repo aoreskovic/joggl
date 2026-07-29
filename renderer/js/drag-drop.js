@@ -1,11 +1,18 @@
-// Dragging an issue out of the task list onto the day view.
+// Dragging onto the day view.
+//
+// Three sources, one gesture: an issue row from the task list, a pinned issue, or
+// an entry already logged today. The first two create a half-hour block; the
+// third moves the block it already has, keeping its length. What is being
+// dragged is settled once, at mousedown, and the rest of the gesture only cares
+// about the payload.
 //
 // Mouse events rather than HTML5 drag-and-drop: the day view's own move and resize
 // already work this way, the ghost is then ours to draw and position, and a small
 // movement threshold is what lets a single click on a task keep doing what it always
 // did, which is start a timer.
 
-import { dropEntryFor } from './entry-ops.js';
+import { clampDropStart, DEFAULT_DROP_MS, dropEntryFor, movedEntry } from './entry-ops.js';
+import { markDirty } from './entries.js';
 import { renderAll } from './render.js';
 import { setDragging } from './shell.js';
 import { persistDayNow, state } from './state.js';
@@ -25,10 +32,10 @@ const EDGE_SCROLL_PX = 8;
 /** How long after a drag a stray click is ignored. */
 const SWALLOW_MS = 150;
 
-/** mousedown seen on a row, threshold not yet crossed. */
+/** mousedown seen on a draggable row, threshold not yet crossed. */
 let pending = null;
 /**
- * A live drag: { issue, ghost, startTs, clientX, clientY, scrollFrame }.
+ * A live drag: { payload, ghost, startTs, clientX, clientY, scrollFrame }.
  *
  * Both coordinates are stored because autoScroll re-resolves the drop time from
  * them when the panel scrolls under a cursor that has not moved, and gridTimeAt
@@ -44,21 +51,71 @@ let swallowUntil = 0;
  */
 let armSwallowOnRelease = false;
 
-export function wireIssueDrag() {
-  const list = document.getElementById('task-list');
-  if (!list) return;
+// ── What each source contributes ───────────────────────────────────────────
 
-  // Delegated, because renderTaskList replaces every child on each render — per-row
-  // listeners would be rebound constantly and leak the old ones.
-  list.addEventListener('mousedown', (event) => {
-    if (event.button !== 0) return;
-    const row = event.target.closest('.task-item');
-    // The pin has its own click and is not a drag handle.
-    if (!row || event.target.closest('.tt-pin')) return;
+/** @returns {{kind, label, key, durationMs, issue?, entryId?}|null} */
+function payloadFromTaskList(target) {
+  const row = target.closest('.task-item');
+  // The pin has its own click and is not a drag handle.
+  if (!row || target.closest('.tt-pin')) return null;
 
-    const issue = state.issues.find((i) => i.issueKey === row.dataset.key);
-    if (issue) pending = { issue, x: event.clientX, y: event.clientY };
-  });
+  const issue = state.issues.find((i) => i.issueKey === row.dataset.key);
+  if (!issue) return null;
+  return { kind: 'issue', issue, label: issue.title, key: issue.issueKey, durationMs: DEFAULT_DROP_MS };
+}
+
+function payloadFromPins(target) {
+  const chip = target.closest('.pin-chip');
+  // The × unpins; it is not a drag handle.
+  if (!chip || target.closest('.pin-remove')) return null;
+
+  const pin = state.pins.find((p) => p.issueKey === chip.dataset.key);
+  if (!pin) return null;
+  // A pin stores no issueId. The worklog POST takes the key, so that is enough.
+  const issue = { issueKey: pin.issueKey, issueId: null, title: pin.title };
+  return { kind: 'issue', issue, label: pin.title, key: pin.issueKey, durationMs: DEFAULT_DROP_MS };
+}
+
+function payloadFromEntryList(target) {
+  const card = target.closest('.entry-card');
+  // The inline time fields and the row's own buttons come first — dragging must
+  // not steal a click meant for editing or deleting.
+  if (!card || target.closest('.ie') || target.closest('[data-a]')) return null;
+
+  // Only Joggl's own entries, and only finished ones: state.entries excludes the
+  // read-only Jira-side worklogs by construction, and a running entry has no end
+  // to keep the length of.
+  const entry = state.entries.find((e) => e.id === card.dataset.id);
+  if (!entry || entry.endTs === null || entry.endTs === undefined) return null;
+
+  return {
+    kind: 'entry',
+    entryId: entry.id,
+    label: entry.title,
+    key: entry.issueKey,
+    durationMs: entry.endTs - entry.startTs,
+  };
+}
+
+const SOURCES = [
+  ['task-list', payloadFromTaskList],
+  ['pin-chips', payloadFromPins],
+  ['entry-list', payloadFromEntryList],
+];
+
+export function wireDayViewDrag() {
+  for (const [id, toPayload] of SOURCES) {
+    const host = document.getElementById(id);
+    if (!host) continue;
+
+    // Delegated, because every render replaces these children — per-row listeners
+    // would be rebound constantly and leak the old ones.
+    host.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return;
+      const payload = toPayload(event.target);
+      if (payload) pending = { payload, x: event.clientX, y: event.clientY };
+    });
+  }
 
   document.addEventListener('mousemove', onMouseMove);
   document.addEventListener('mouseup', onMouseUp);
@@ -112,7 +169,7 @@ function onMouseMove(event) {
       Math.abs(event.clientX - pending.x) >= THRESHOLD_PX ||
       Math.abs(event.clientY - pending.y) >= THRESHOLD_PX;
     if (!moved) return;
-    begin(pending.issue);
+    begin(pending.payload);
   }
   if (!drag) return;
 
@@ -123,18 +180,18 @@ function onMouseMove(event) {
   updatePreview(event.clientX, event.clientY);
 }
 
-function begin(issue) {
+function begin(payload) {
   pending = null;
 
   const ghost = document.createElement('div');
   ghost.className = 'drag-ghost';
   ghost.innerHTML =
-    `<span class="jira-chip">${esc(issue.issueKey)}</span>` +
-    `<span class="drag-ghost-title">${esc(issue.title)}</span>`;
+    (payload.key ? `<span class="jira-chip">${esc(payload.key)}</span>` : '') +
+    `<span class="drag-ghost-title">${esc(payload.label)}</span>`;
   document.body.appendChild(ghost);
   document.body.classList.add('is-dragging-issue');
 
-  drag = { issue, ghost, startTs: null, clientX: 0, clientY: 0, scrollFrame: 0 };
+  drag = { payload, ghost, startTs: null, clientX: 0, clientY: 0, scrollFrame: 0 };
   // A peek opening under the cursor would slide over the grid and eat the drop.
   setDragging(true);
   drag.scrollFrame = requestAnimationFrame(autoScroll);
@@ -149,10 +206,10 @@ function updatePreview(clientX, clientY) {
     return;
   }
 
-  // Built through dropEntryFor so the preview is exactly what a drop would create,
-  // midnight pull-back included, rather than a second guess at the same rule.
-  const preview = dropEntryFor(drag.issue, 'preview', startTs, startOfDayMs(state.selectedDate));
-  showDropPlaceholder(preview.startTs, preview.endTs);
+  // Clamped through the same helper the drop uses, so the preview is exactly what
+  // committing would produce rather than a second guess at the same rule.
+  const start = clampDropStart(startTs, startOfDayMs(state.selectedDate), drag.payload.durationMs);
+  showDropPlaceholder(start, start + drag.payload.durationMs);
 }
 
 /**
@@ -212,17 +269,27 @@ async function onMouseUp() {
     return;
   }
 
-  const { issue, startTs } = drag;
+  const { payload, startTs } = drag;
   teardown();
   swallowUntil = Date.now() + SWALLOW_MS;
 
   // Released somewhere the grid cannot turn into a time: cancel, quietly.
   if (startTs === null) return;
 
-  state.entries = [
-    ...state.entries,
-    dropEntryFor(issue, uuid(), startTs, startOfDayMs(state.selectedDate)),
-  ];
+  const dayStartTs = startOfDayMs(state.selectedDate);
+
+  if (payload.kind === 'entry') {
+    const entry = state.entries.find((e) => e.id === payload.entryId);
+    // It could have been deleted, or the day changed, while the drag was running.
+    if (!entry) return;
+    const moved = movedEntry(entry, startTs, dayStartTs);
+    // A move needs syncing again for exactly the reason a block drag does.
+    markDirty(moved);
+    state.entries = state.entries.map((e) => (e.id === moved.id ? moved : e));
+  } else {
+    state.entries = [...state.entries, dropEntryFor(payload.issue, uuid(), startTs, dayStartTs)];
+  }
+
   await persistDayNow();
   renderAll();
 }

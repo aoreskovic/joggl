@@ -435,6 +435,14 @@ Never probe the environment. If something above appears missing, say so and stop
 - All network calls live in one main-process Jira client module. One place to mock, one place to debug.
 - Errors surface inline or via toast. Modals are for decisions (merge prompt, retry summary), never for information.
 - Keep the main process thin. If logic can live in the renderer without needing Node, it lives in the renderer.
+- **Bump the minor version on every commit** — `npm run bump`, `0.1.0` → `0.2.0`. The
+  version shows in the footer, so "which build are you on" has an answer without
+  asking anyone to check a commit hash.
+- **A render must never start a lookup.** Search boxes render from state and trigger
+  the remote lookup from the event that changed it. Doing it inside the render put
+  `render → lookup → callback → render` into a loop that blew the stack, and because
+  the quick-entry popup revealed itself *after* rendering its results, the whole day
+  view looked dead. `createRemoteLookup` therefore never calls back synchronously.
 
 ### Tests
 

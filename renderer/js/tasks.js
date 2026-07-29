@@ -4,12 +4,13 @@
 
 import { PLAY_ICON } from './icons.js';
 import { isPinned, togglePin } from './pins.js';
+import { createRemoteLookup } from './remote-lookup.js';
 import { renderAll } from './render.js';
 import { isToday, lookupJira, searchJira, state } from './state.js';
 import { startTimer } from './timer.js';
 import { toastErr, toastWarn } from './toast.js';
 
-import { esc, shouldLookupRemote } from './util.js';
+import { esc } from './util.js';
 
 const collapsed = new Set();
 let loading = false;
@@ -34,44 +35,21 @@ export function searchIssues(query) {
 // ── Looking beyond the loaded issues ───────────────────────────────────────
 
 /**
- * A debounced remote lookup that only ever reports results for the query the
- * user is still looking at — an earlier, slower answer arriving late would
- * otherwise repopulate the list under them.
+ * The app's remote lookup, wired to the real bridge. See remote-lookup.js for
+ * the behaviour, and for why it must never call back synchronously.
  *
  * @param {(query: string, issues: object[]) => void} onResults
  * @returns {(query: string, localCount: number) => void}
  */
-export function createRemoteLookup(onResults) {
-  let timer = null;
-  let latest = '';
-
-  return (rawQuery, localCount) => {
-    const query = String(rawQuery ?? '').trim();
-    latest = query;
-    clearTimeout(timer);
-
-    if (!shouldLookupRemote(query, localCount) || !state.settings.tokenConfigured) {
-      onResults(query, []);
-      return;
-    }
-
-    timer = setTimeout(async () => {
-      try {
-        const issues = await lookupJira(query);
-        if (query !== latest) return;
-        // Anything already in the local list is not worth repeating.
-        const known = new Set(searchIssues(query).map((i) => i.issueKey));
-        onResults(
-          query,
-          issues.filter((i) => !known.has(i.issueKey)),
-        );
-      } catch (err) {
-        if (query !== latest) return;
-        onResults(query, []);
-        toastErr(`Jira lookup failed — ${err.message}`);
-      }
-    }, 300);
-  };
+export function createIssueLookup(onResults) {
+  return createRemoteLookup({
+    lookup: (query) => lookupJira(query),
+    onResults,
+    isEnabled: () => Boolean(state.settings.tokenConfigured),
+    // Anything already in the local list is not worth repeating.
+    knownKeys: (query) => new Set(searchIssues(query).map((i) => i.issueKey)),
+    onError: (message) => toastErr(`Jira lookup failed — ${message}`),
+  });
 }
 
 export async function loadIssues() {

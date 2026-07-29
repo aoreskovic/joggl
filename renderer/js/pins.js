@@ -32,7 +32,9 @@ export function renderPins() {
       const active = state.timer?.issueKey === pin.issueKey;
       const chip = document.createElement('div');
       chip.className = `pin-chip${active ? ' active' : ''}`;
-      chip.title = `${pin.issueKey} — ${pin.title}`;
+      // How the drag gesture identifies which pin was grabbed.
+      chip.dataset.key = pin.issueKey;
+      chip.title = `${pin.issueKey} — ${pin.title}\nClick to start a timer, or drag onto the day view`;
       chip.innerHTML = `<span>${esc(pin.issueKey)}</span>`;
 
       const remove = document.createElement('button');

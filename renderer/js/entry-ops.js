@@ -30,6 +30,29 @@ export function duplicateOf(entry, newId) {
 export const DEFAULT_DROP_MS = 30 * 60_000;
 
 /**
+ * Keep a dropped block inside the day it is filed under, without changing how
+ * long it is. Shared by every drop so creating and moving cannot disagree about
+ * what happens at the edges of the day — see dropEntryFor for the reasoning.
+ */
+export function clampDropStart(startTs, dayStartTs, durationMs) {
+  const latestStart = dayStartTs + 86_400_000 - durationMs;
+  return Math.min(Math.max(startTs, dayStartTs), latestStart);
+}
+
+/**
+ * An existing entry moved to a new start, keeping its length.
+ *
+ * Status and worklogId are deliberately untouched: whether the move makes the
+ * entry need syncing again is markDirty's call, exactly as it is for a drag of
+ * the block itself.
+ */
+export function movedEntry(entry, startTs, dayStartTs) {
+  const durationMs = entry.endTs - entry.startTs;
+  const start = clampDropStart(startTs, dayStartTs, durationMs);
+  return { ...entry, startTs: start, endTs: start + durationMs };
+}
+
+/**
  * The entry created by dropping an issue onto the day view.
  *
  * `startTs` arrives already snapped to a quarter hour, so the only adjustment made
@@ -54,8 +77,7 @@ export const DEFAULT_DROP_MS = 30 * 60_000;
  * disappear from the view that holds it.
  */
 export function dropEntryFor(issue, newId, startTs, dayStartTs, durationMs = DEFAULT_DROP_MS) {
-  const latestStart = dayStartTs + 86_400_000 - durationMs;
-  const start = Math.min(Math.max(startTs, dayStartTs), latestStart);
+  const start = clampDropStart(startTs, dayStartTs, durationMs);
 
   return {
     id: newId,

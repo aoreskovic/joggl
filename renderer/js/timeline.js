@@ -9,7 +9,7 @@ import { showContextMenu } from './context-menu.js';
 import { markDirty } from './entries.js';
 import { renderAll } from './render.js';
 import { isToday, persistDayNow, pxPerMin, state, visibleEntries } from './state.js';
-import { createRemoteLookup, searchIssues } from './tasks.js';
+import { createIssueLookup, searchIssues } from './tasks.js';
 import { toastWarn } from './toast.js';
 import {
   dateKey,
@@ -488,7 +488,7 @@ function showQuickEntry(cx, cy, startTs, endTs) {
   // Same reach as the omnibar: the loaded issues are only what the JQL sources
   // returned, so anything Done or assigned elsewhere has to come from Jira.
   let remote = { query: '', issues: [] };
-  const lookupRemote = createRemoteLookup((query, issues) => {
+  const lookupRemote = createIssueLookup((query, issues) => {
     remote = { query, issues };
     if (quickEntryEl === wrap) renderResults(input.value);
   });
@@ -528,12 +528,13 @@ function showQuickEntry(cx, cy, startTs, endTs) {
     wrap.style.top = `${Math.max(8, y)}px`;
   };
 
+  // Renders only — see the omnibar's showDropdown for why asking Jira from inside
+  // a render is what wedged this popup shut.
   const renderResults = (rawQuery) => {
     const query = String(rawQuery ?? '').trim();
     const local = searchIssues(rawQuery).slice(0, 8);
     const fromJira = remote.query === query ? remote.issues : [];
 
-    lookupRemote(query, local.length);
     results.classList.toggle('expanded', local.length + fromJira.length <= 2);
 
     const children = local.map(issueRow);
@@ -559,7 +560,12 @@ function showQuickEntry(cx, cy, startTs, endTs) {
     if (quickEntryEl === wrap) position();
   };
 
-  input.addEventListener('input', () => renderResults(input.value));
+  const refreshResults = (rawQuery) => {
+    lookupRemote(String(rawQuery ?? '').trim(), searchIssues(rawQuery).slice(0, 8).length);
+    renderResults(rawQuery);
+  };
+
+  input.addEventListener('input', () => refreshResults(input.value));
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') return hideQuickEntry();
     if (event.key !== 'Enter') return;
@@ -581,10 +587,18 @@ function showQuickEntry(cx, cy, startTs, endTs) {
 
   // Wait for layout, then render results (which positions itself — see
   // `position` above) before revealing, so the user never sees it jump.
+  //
+  // The reveal is in a finally because it once was not: a bug in the result
+  // render threw here, and the popup stayed hidden and unfocused for the rest of
+  // the session, which read as "clicking the day view does nothing at all". A
+  // popup showing an empty list beats an invisible one.
   requestAnimationFrame(() => {
-    renderResults('');
-    wrap.style.visibility = '';
-    input.focus();
+    try {
+      refreshResults('');
+    } finally {
+      wrap.style.visibility = '';
+      input.focus();
+    }
   });
 
   document.addEventListener('mousedown', onQuickEntryOutside, true);

@@ -90,6 +90,7 @@ function buildEntryCard(entry, isOverlapping) {
   card.className =
     'entry-card' + (flagOverlap ? ' overlapping' : '') + (external ? ' external' : '');
   card.dataset.id = entry.id;
+  if (!external) card.title = 'Drag onto the day view to move this entry';
 
   card.innerHTML =
     '<div class="entry-name">' +

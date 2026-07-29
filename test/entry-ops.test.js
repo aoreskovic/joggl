@@ -6,7 +6,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DEFAULT_DROP_MS, dropEntryFor, duplicateOf, overlappingIds } from '../renderer/js/entry-ops.js';
+import {
+  clampDropStart,
+  DEFAULT_DROP_MS,
+  dropEntryFor,
+  duplicateOf,
+  movedEntry,
+  overlappingIds,
+} from '../renderer/js/entry-ops.js';
 import { planFinishDay } from '../renderer/js/finish-day.js';
 
 const T = (h, m = 0) => new Date(2026, 6, 28, h, m, 0, 0).getTime();
@@ -173,4 +180,56 @@ test('dropEntryFor does not mutate the issue it was given', () => {
   const issue = { ...dropped };
   dropEntryFor(issue, 'e1', T(9), DAY_START);
   assert.deepEqual(issue, dropped);
+});
+
+// ── Moving an entry by dragging its row onto the day view ───────────────────
+
+test('a moved entry keeps its length and its identity', () => {
+  const original = entry({ startTs: T(9), endTs: T(10, 30) });
+  const moved = movedEntry(original, T(14), DAY_START);
+
+  assert.equal(moved.startTs, T(14));
+  assert.equal(moved.endTs, T(15, 30), 'ninety minutes, wherever it lands');
+  assert.equal(moved.id, original.id);
+  assert.equal(moved.issueKey, 'PROJ-1');
+});
+
+test('a move leaves the sync state alone — that is markDirty’s call', () => {
+  const synced = entry({ status: 'synced', worklogId: '60504' });
+  const moved = movedEntry(synced, T(14), DAY_START);
+
+  assert.equal(moved.status, 'synced');
+  assert.equal(moved.worklogId, '60504', 'losing this would post a duplicate worklog');
+});
+
+test('a move near midnight is pulled back rather than shortened', () => {
+  const original = entry({ startTs: T(9), endTs: T(11) }); // two hours
+  const moved = movedEntry(original, T(23, 30), DAY_START);
+
+  assert.equal(moved.endTs, DAY_START + 86_400_000, 'ends exactly at midnight');
+  assert.equal(moved.endTs - moved.startTs, 2 * 3_600_000, 'and is still two hours');
+});
+
+test('a move before the day starts is pulled forward onto it', () => {
+  const moved = movedEntry(entry({ startTs: T(9), endTs: T(10) }), T(-2), DAY_START);
+  assert.equal(moved.startTs, DAY_START);
+  assert.equal(moved.endTs - moved.startTs, 3_600_000);
+});
+
+test('movedEntry does not mutate the entry it was given', () => {
+  const original = entry({ startTs: T(9), endTs: T(10) });
+  movedEntry(original, T(14), DAY_START);
+  assert.equal(original.startTs, T(9));
+  assert.equal(original.endTs, T(10));
+});
+
+test('creating and moving clamp by the same rule', () => {
+  // One helper, so a drop from the task list and a drop of an existing row can
+  // never disagree about what happens at the end of the day.
+  const created = dropEntryFor(dropped, 'e1', T(23, 50), DAY_START);
+  const moved = movedEntry(entry({ startTs: T(9), endTs: T(9, 30) }), T(23, 50), DAY_START);
+  assert.equal(created.startTs, moved.startTs);
+
+  assert.equal(clampDropStart(T(23, 50), DAY_START, DEFAULT_DROP_MS), T(23, 30));
+  assert.equal(clampDropStart(T(10), DAY_START, DEFAULT_DROP_MS), T(10), 'mid-day is untouched');
 });

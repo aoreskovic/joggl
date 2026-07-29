@@ -1,6 +1,6 @@
 {
   "name": "joggl",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Desktop time tracker with a Toggl-like timeline that logs worklogs to Jira Cloud",
   "license": "MIT",
   "private": true,
@@ -11,7 +11,8 @@
     "test": "node --test \"test/**/*.test.js\"",
     "pack": "electron-builder --win --dir",
     "dist": "electron-builder --win",
-    "icon": "node scripts/make-icon.mjs assets/icon.png"
+    "icon": "node scripts/make-icon.mjs assets/icon.png",
+    "bump": "npm version minor --no-git-tag-version"
   },
   "repository": {
     "type": "git",
@@ -20,7 +21,13 @@
   "build": {
     "appId": "com.aoreskovic.joggl",
     "productName": "Joggl",
-    "files": ["main/**/*", "preload/**/*", "renderer/**/*", "assets/**/*", "package.json"],
+    "files": [
+      "main/**/*",
+      "preload/**/*",
+      "renderer/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
     "win": {
       "target": "nsis",
       "icon": "assets/icon.png"

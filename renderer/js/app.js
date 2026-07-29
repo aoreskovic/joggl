@@ -2,7 +2,7 @@
 // connects the DOM to it.
 
 import { hideContextMenu, setContextActions } from './context-menu.js';
-import { wireIssueDrag } from './drag-issue.js';
+import { wireDayViewDrag } from './drag-drop.js';
 import {
   deleteEntry,
   duplicateEntry,
@@ -10,7 +10,7 @@ import {
   splitEntry,
   updateTotal,
 } from './entries.js';
-import { PLAY_ICON, STOP_ICON } from './icons.js';
+import { PLAY_ICON, STOP_ICON, ZOOM_ICON } from './icons.js';
 import { isPinned, renderPins, togglePin } from './pins.js';
 import { registerRenderer, renderAll } from './render.js';
 import { registerView, setActiveView, wireShell } from './shell.js';
@@ -38,7 +38,7 @@ import {
   wireSetup,
 } from './settings-ui.js';
 import { finishDay, updateFinishButton } from './sync.js';
-import { createRemoteLookup, loadIssues, renderTaskList, searchIssues } from './tasks.js';
+import { createIssueLookup, loadIssues, renderTaskList, searchIssues } from './tasks.js';
 import {
   hideQuickEntry,
   onGridClick,
@@ -117,7 +117,7 @@ async function boot() {
   wireOmnibar();
   wireDayNav();
   wireDayView();
-  wireIssueDrag();
+  wireDayViewDrag();
   wirePinPicker();
   wireGlobal();
 
@@ -224,7 +224,7 @@ function wireOmnibar() {
 
   // Results from Jira for a query that is still on screen.
   let remote = { query: '', issues: [] };
-  const lookupRemote = createRemoteLookup((query, issues) => {
+  const lookupRemote = createIssueLookup((query, issues) => {
     remote = { query, issues };
     if (document.activeElement === input) showDropdown();
   });
@@ -249,12 +249,12 @@ function wireOmnibar() {
     return item;
   };
 
+  // Renders only. Asking Jira from in here is what closed the loop that blew the
+  // stack — the lookup's callback re-enters this function.
   const showDropdown = () => {
     const query = input.value.trim();
     const local = searchIssues(input.value);
     const fromJira = remote.query === query ? remote.issues : [];
-
-    lookupRemote(query, local.length);
 
     // Once the list is down to a couple of candidates there is room to show the
     // whole summary. Truncating "Axiom Water Bottle Mechanical De…" is only
@@ -291,12 +291,18 @@ function wireOmnibar() {
     dropdown.classList.remove('hidden');
   };
 
+  // The one place a lookup is started: from what the user did, not from a render.
+  const refreshDropdown = () => {
+    lookupRemote(input.value.trim(), searchIssues(input.value).length);
+    showDropdown();
+  };
+
   input.addEventListener('input', () => {
     pickedIssue = null;
-    showDropdown();
+    refreshDropdown();
   });
   input.addEventListener('focus', () => {
-    if (!state.timer) showDropdown();
+    if (!state.timer) refreshDropdown();
   });
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
@@ -384,6 +390,8 @@ function updateZoomLabel() {
 }
 
 function wireDayView() {
+  $('zoom-icon').innerHTML = ZOOM_ICON;
+
   $('zoom-in').addEventListener('click', async () => {
     if (state.ui.zoomIdx >= ZOOM_LEVELS.length - 1) return;
     await saveUi({ zoomIdx: state.ui.zoomIdx + 1 });

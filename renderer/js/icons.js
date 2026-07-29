@@ -38,3 +38,11 @@ export const SETTINGS_ICON = svg(
 
 // Points left. Collapsed, CSS rotates it rather than swapping in a second icon.
 export const CHEVRON_ICON = svg('<path d="M7.4 1.6 8.6 2.8 5.4 6l3.2 3.2-1.2 1.2L3 6Z" />');
+
+// A magnifier, to say that the − and + beside it are a zoom and not a stepper.
+// Ring drawn as two circles with the inner one punched out by evenodd, since
+// everything here is filled rather than stroked.
+export const ZOOM_ICON = svg(
+  '<path fill-rule="evenodd" d="M5 .8a4.2 4.2 0 1 0 0 8.4A4.2 4.2 0 0 0 5 .8Zm0 1.4a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6Z" />' +
+    '<path d="m8.1 7.1 3.1 3.1-1 1-3.1-3.1Z" />',
+);

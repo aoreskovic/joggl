@@ -12,6 +12,7 @@ import {
   DEFAULT_DROP_MS,
   dropEntryFor,
   duplicateOf,
+  flaggedOverlaps,
   movedEntry,
   overlappingIds,
   retargetEntry,
@@ -125,6 +126,32 @@ test('a running entry is not counted as overlapping anything', () => {
     entry({ id: 'live', startTs: T(10), endTs: null }),
   ]);
   assert.equal(ids.size, 0);
+});
+
+test('a Jira-side row is detected but never flagged — there is nothing there to fix', () => {
+  const ids = flaggedOverlaps([
+    entry({ id: 'mine', startTs: T(9), endTs: T(11) }),
+    entry({ id: 'jira', startTs: T(10), endTs: T(12), external: true }),
+  ]);
+  assert.deepEqual([...ids], ['mine'], 'the clash is real, but only one row can act on it');
+});
+
+test('two Jira-side rows clashing with each other flag nothing at all', () => {
+  const ids = flaggedOverlaps([
+    entry({ id: 'a', startTs: T(9), endTs: T(11), external: true }),
+    entry({ id: 'b', startTs: T(10), endTs: T(12), external: true }),
+  ]);
+  assert.equal(ids.size, 0, 'so the count above the list stays silent rather than saying 0');
+});
+
+test('the count and the outlines cannot disagree: both read the same set', () => {
+  const ids = flaggedOverlaps([
+    entry({ id: 'a', startTs: T(9), endTs: T(11) }),
+    entry({ id: 'b', startTs: T(10), endTs: T(12) }),
+    entry({ id: 'clear', startTs: T(14), endTs: T(15) }),
+  ]);
+  assert.deepEqual([...ids].sort(), ['a', 'b']);
+  assert.equal(ids.size, 2, 'reads as "2 entries overlap"');
 });
 
 // ── What a drop onto the day view creates ───────────────────────────────────

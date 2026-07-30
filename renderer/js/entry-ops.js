@@ -163,6 +163,23 @@ export function dropEntryFor(issue, newId, startTs, dayStartTs, durationMs = DEF
   };
 }
 
+/**
+ * Ids of the entries a clash is worth flagging on.
+ *
+ * A Jira-side row takes part in the detection — a local entry clashing with one is
+ * a real clash — but is never flagged itself: the flag invites a fix, and there is
+ * nothing there to fix. One helper rather than the same condition in the card and
+ * in the count above the list, which is how those two came to disagree.
+ */
+export function flaggedOverlaps(entries) {
+  const ids = overlappingIds(entries);
+  const byId = new Map((entries ?? []).map((e) => [e.id, e]));
+  for (const id of [...ids]) {
+    if (byId.get(id)?.external === true) ids.delete(id);
+  }
+  return ids;
+}
+
 /** Ids of entries whose time ranges overlap. Allowed, but usually a mistake. */
 export function overlappingIds(entries) {
   const ids = new Set();

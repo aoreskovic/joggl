@@ -64,9 +64,31 @@ let win = null;
 
 const run = (js) => win.webContents.executeJavaScript(js);
 
+/**
+ * How long a single check may take before it is called hung.
+ *
+ * A page script that wedges the renderer — an accidental loop, a promise nothing
+ * resolves — leaves `executeJavaScript` pending for ever, and since the summary is
+ * only printed at the end, a run like that reports nothing at all. Failing the one
+ * check and carrying on says which one it was.
+ *
+ * Generous on purpose. Every day change fires a Jira read, and a check that steps
+ * through a week of them waits on the network far longer than it waits on the DOM;
+ * a tighter bound failed five checks that were merely slow. A genuine wedge never
+ * answers, so it is caught whatever the number.
+ */
+const CHECK_TIMEOUT_MS = 120000;
+
 async function check(name, js, expectation) {
+  // Named as it starts, not as it finishes, so a hang names itself in the terminal.
+  process.stdout.write(`  … ${name}\n`);
   try {
-    const raw = await run(`(async () => { ${js} })()`);
+    const raw = await Promise.race([
+      run(`(async () => { ${js} })()`),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`no answer in ${CHECK_TIMEOUT_MS}ms`)), CHECK_TIMEOUT_MS),
+      ),
+    ]);
     const value = typeof raw === 'string' ? raw : JSON.stringify(raw);
     results.push({ name, ok: expectation(raw), value });
   } catch (err) {
@@ -213,12 +235,29 @@ window.H = {
    * empty day. Step back until a day has no rows of either kind. Under --uicheck
    * the store is a temp directory, so only Jira-side rows can be in the way.
    */
-  async findEmptyDay(maxBack = 45) {
+  async findEmptyDay(maxBack = 21) {
+    // Remembered across checks: every step back is a Jira read for that day, and
+    // searching twice for the same answer floods the request the rest of the run is
+    // waiting on. Stepping is only ever backwards, so what was empty stays empty.
+    const steps = H._emptyDaySteps ?? null;
     H.q('#today-btn').click();
     await H.sleep(300);
     await H.settle();
+
+    if (steps !== null) {
+      for (let i = 0; i < steps; i++) {
+        H.q('#prev-day').click();
+        await H.sleep(300);
+      }
+      await H.settle();
+      return H.q('#current-date-label').textContent;
+    }
+
     for (let i = 0; i <= maxBack; i++) {
-      if (H.all('.entry-card').length === 0) return H.q('#current-date-label').textContent;
+      if (H.all('.entry-card').length === 0) {
+        H._emptyDaySteps = i;
+        return H.q('#current-date-label').textContent;
+      }
       H.q('#prev-day').click();
       await H.sleep(300);
       await H.settle();
@@ -1188,6 +1227,174 @@ async function keyboard() {
   );
 }
 
+async function dateJump() {
+  // On the focused element, not on a selector: a calendar cell is replaced on every
+  // cursor move, and `:focus` stops matching when the window is not foreground.
+  const press = (key) => `
+     document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {
+       key: ${JSON.stringify(key)}, bubbles: true, cancelable: true }));`;
+  /** dd.mm.yyyy, the form the day header writes. */
+  const asLabel = (key) => {
+    const [y, m, d] = key.split('-');
+    return `${d}.${m}.${y}`;
+  };
+  const shift = (key, days) => {
+    const [y, m, d] = key.split('-').map(Number);
+    const at = new Date(y, m - 1, d);
+    at.setDate(at.getDate() + days);
+    const p = (n) => String(n).padStart(2, '0');
+    return `${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())}`;
+  };
+
+  await check(
+    'the date label opens a calendar, and clicking a day jumps to it',
+    `await H.resetDay();
+     const before = H.q('#current-date-label').textContent;
+     H.click(H.q('#current-date-label')); await H.sleep(400);
+     const opened = !H.q('#modal-overlay').classList.contains('hidden');
+     const month = H.q('.date-picker-month')?.textContent ?? null;
+     const cells = H.all('.date-cell').length;
+     const onCell = document.activeElement?.classList.contains('date-cell') ?? false;
+     const marks = { today: H.all('.date-cell.is-today').length,
+                     selected: H.all('.date-cell.is-selected').length };
+     // One tab stop for forty-two cells, or Tab inside the dialog is unusable.
+     const tabStops = H.all('.date-cell').filter(c => c.tabIndex === 0).length;
+     const key = H.todayKey();
+     const blocked = H.all('.date-cell').filter(c => c.disabled).map(c => c.dataset.key);
+     const onlyFutureBlocked = blocked.length > 0 && blocked.every(k => k > key);
+     const first = H.all('.date-cell:not(.outside)')[0];
+     const wanted = first.dataset.key;
+     H.click(first); await H.sleep(800);
+     const closed = H.q('#modal-overlay').classList.contains('hidden');
+     const label = H.q('#current-date-label').textContent;
+     await H.resetDay();
+     return JSON.stringify({ before, opened, month, cells, onCell, marks, tabStops,
+                             onlyFutureBlocked, wanted, closed, label })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.opened && /\s\d{4}$/.test(d.month) && d.cells === 42 && d.onCell &&
+        d.marks.today === 1 && d.marks.selected === 1 && d.tabStops === 1 &&
+        d.onlyFutureBlocked && d.closed && d.label.includes(asLabel(d.wanted));
+    },
+  );
+
+  await check(
+    'arrows move the calendar a day and a week, Page Up a month, Enter takes it',
+    `await H.resetDay();
+     H.click(H.q('#current-date-label')); await H.sleep(400);
+     const cursor = () => H.q('.date-cell[tabindex="0"]').dataset.key;
+     const start = cursor();
+     const startMonth = H.q('.date-picker-month').textContent;
+     ${press('ArrowLeft')}
+     await H.sleep(150);
+     const left = cursor();
+     ${press('ArrowUp')}
+     await H.sleep(150);
+     const up = cursor();
+     ${press('PageUp')}
+     await H.sleep(200);
+     const month = H.q('.date-picker-month').textContent;
+     const stillOnCell = document.activeElement?.classList.contains('date-cell') ?? false;
+     const chosen = cursor();
+     document.activeElement.click();
+     await H.sleep(800);
+     const label = H.q('#current-date-label').textContent;
+     await H.resetDay();
+     return JSON.stringify({ start, left, up, startMonth, month, stillOnCell, chosen, label })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.left === shift(d.start, -1) && d.up === shift(d.left, -7) &&
+        d.month !== d.startMonth && d.stillOnCell && d.label.includes(asLabel(d.chosen));
+    },
+  );
+
+  await check(
+    'Page Up and Page Down step a week, stop at today, and stay out of the text',
+    `await H.resetDay();
+     const label = () => H.q('#current-date-label').textContent;
+     const start = label();
+     document.body.focus();
+     ${press('PageUp')}
+     await H.sleep(900);
+     const back = label();
+     ${press('PageDown')}
+     await H.sleep(900);
+     const forward = label();
+     // Already on today: a week forward has to land on today, not tomorrow.
+     ${press('PageDown')}
+     await H.sleep(900);
+     const clamped = label();
+     const nextDisabled = H.q('#next-day').disabled;
+     const i = H.q('#task-input'); i.value = ''; i.focus();
+     ${press('PageUp')}
+     await H.sleep(600);
+     const whileTyping = label();
+     i.blur();
+     await H.resetDay();
+     return JSON.stringify({ start, back, forward, clamped, nextDisabled, whileTyping })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.back !== d.start && d.forward === d.start && d.clamped === d.start &&
+        d.nextDisabled && d.whileTyping === d.start;
+    },
+  );
+}
+
+async function overlapNotice() {
+  await check(
+    'overlaps are counted once above the list, not repeated on every row',
+    `const at = new Date(); at.setHours(9, 0, 0, 0);
+     const e = (id, fromMin, toMin) => ({
+       id, issueKey: 'X-' + id, issueId: null, title: 'Entry ' + id,
+       startTs: at.getTime() + fromMin * 60000, endTs: at.getTime() + toMin * 60000,
+       status: 'pending', worklogId: null, comment: null, errorMsg: null });
+     await window.joggl.days.save(H.todayKey(), [e('a', 0, 60), e('b', 30, 90), e('clear', 180, 210)]);
+     H.q('#today-btn').click(); await H.sleep(300); await H.settle();
+     const warn = H.all('.entry-list-warn').map(w => w.textContent);
+     const flagged = H.all('.entry-card.overlapping').map(c => c.dataset.id).sort();
+     // The sentence that used to sit on every clashing row.
+     const perRow = H.all('.entry-card .entry-err-row')
+       .filter(r => /overlap/i.test(r.textContent)).length;
+     // Above the rows it counts, not under them.
+     const first = H.q('#entry-list').firstElementChild?.className ?? null;
+     await H.resetDay();
+     return JSON.stringify({ warn, flagged, perRow, first })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.warn.length === 1 && /^⚠ 2 entries overlap$/.test(d.warn[0]) &&
+        JSON.stringify(d.flagged) === JSON.stringify(['a', 'b']) && d.perRow === 0 &&
+        d.first === 'entry-list-warn';
+    },
+  );
+
+  await check(
+    'a clash with a Jira-side row counts once, and only the row that can be fixed is outlined',
+    `H.q('#today-btn').click(); await H.sleep(300); await H.settle();
+     const ext = H.q('.entry-card.external');
+     if (!ext) return JSON.stringify({ skip: true });
+     const extId = ext.dataset.id;
+     const [h, m] = ext.querySelector('[data-f="start"]').value.split(':').map(Number);
+     const at = new Date(); at.setHours(h, m, 0, 0);
+     // Straddling its start overlaps it whatever its length turns out to be.
+     await window.joggl.days.save(H.todayKey(), [{
+       id: 'clash', issueKey: 'X-9', issueId: null, title: 'Mine',
+       startTs: at.getTime() - 600000, endTs: at.getTime() + 600000,
+       status: 'pending', worklogId: null, comment: null, errorMsg: null }]);
+     H.q('#today-btn').click(); await H.sleep(300); await H.settle();
+     const warn = H.all('.entry-list-warn').map(w => w.textContent);
+     const mine = H.q('.entry-card[data-id="clash"]')?.classList.contains('overlapping') ?? null;
+     const jira = H.q('.entry-card[data-id="' + extId + '"]')?.classList.contains('overlapping') ?? null;
+     await H.resetDay();
+     return JSON.stringify({ warn, mine, jira })`,
+    (v) => {
+      const d = JSON.parse(v);
+      if (d.skip) return 'skipped';
+      return d.warn.length === 1 && /overlap/.test(d.warn[0]) && d.mine === true &&
+        d.jira === false;
+    },
+  );
+}
+
 async function emptyStates() {
   await check(
     'an empty day says how to add time in both places, and the hint takes no clicks',
@@ -1625,6 +1832,8 @@ export async function runChecks(mainWindow, app) {
     await dragging();
     await editTask();
     await keyboard();
+    await dateJump();
+    await overlapNotice();
     await emptyStates();
     await workDescription();
     await noOpEdits();

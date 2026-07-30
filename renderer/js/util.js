@@ -34,6 +34,67 @@ export function addDays(key, n) {
   return dateKey(d.getTime());
 }
 
+/**
+ * The same day n months away, clamped into the month it lands in.
+ *
+ * Without the clamp, 31 March minus a month is 31 February, which Date rolls
+ * forward to 2 or 3 March — so stepping back a month from the 31st would skip
+ * February entirely and land in the month it started from.
+ */
+export function addMonths(key, n) {
+  const d = startOfDay(key);
+  const wanted = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + n);
+  const lastOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(wanted, lastOfMonth));
+  return dateKey(d.getTime());
+}
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+/** How a month is named above a calendar grid. */
+export function monthLabel(key) {
+  const d = startOfDay(key);
+  return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+/** Monday first — the app writes dates as dd.mm.yyyy, so the week starts there too. */
+export const WEEKDAY_INITIALS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
+
+/**
+ * Six weeks of day keys covering the month `anchorKey` falls in.
+ *
+ * Always six, never as many as the month needs: a grid that changes height as the
+ * months are stepped moves the day under the cursor out from under it.
+ *
+ * @returns {{key: string, inMonth: boolean}[][]}
+ */
+export function monthGrid(anchorKey) {
+  const anchor = startOfDay(anchorKey);
+  const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+  // getDay() counts from Sunday; shift so Monday is 0.
+  const lead = (first.getDay() + 6) % 7;
+
+  const weeks = [];
+  for (let w = 0; w < 6; w++) {
+    const week = [];
+    for (let d = 0; d < 7; d++) {
+      const day = new Date(first);
+      day.setDate(1 - lead + w * 7 + d);
+      week.push({
+        key: dateKey(day.getTime()),
+        inMonth: day.getMonth() === anchor.getMonth(),
+      });
+    }
+    weeks.push(week);
+  }
+  return weeks;
+}
+
 /** Local midnight for a YYYY-MM-DD key. */
 export function startOfDay(key) {
   const [y, m, d] = key.split('-').map(Number);

@@ -2,6 +2,7 @@
 // connects the DOM to it.
 
 import { hideContextMenu, setContextActions } from './context-menu.js';
+import { pickDate } from './date-picker.js';
 import { wireDayViewDrag } from './drag-drop.js';
 import {
   deleteEntry,
@@ -220,6 +221,10 @@ function wireDayNav() {
     if (state.selectedDate < todayKey()) selectDate(addDays(state.selectedDate, 1));
   });
   $('today-btn').addEventListener('click', () => selectDate(todayKey()));
+  $('current-date-label').addEventListener('click', async () => {
+    const picked = await pickDate(state.selectedDate);
+    if (picked && picked !== state.selectedDate) selectDate(picked);
+  });
   $('finish-day-btn').addEventListener('click', async () => {
     await finishDay();
     // Newly created worklogs are now claimed by local entries; re-reading keeps
@@ -636,7 +641,14 @@ function wireGlobal() {
     // Bare keys only when not typing, or they would land in the text.
     if (typing || event.ctrlKey || event.metaKey || event.altKey) return;
 
-    if (event.key === 't' || event.key === 'T') {
+    if (event.key === 'PageUp' || event.key === 'PageDown') {
+      // A week, since [ and ] already do a day and the date label does a month.
+      event.preventDefault();
+      const target = addDays(state.selectedDate, event.key === 'PageUp' ? -7 : 7);
+      // Forward past today lands on today rather than doing nothing — the same
+      // clamp the calendar applies, for the same reason.
+      selectDate(target > todayKey() ? todayKey() : target);
+    } else if (event.key === 't' || event.key === 'T') {
       event.preventDefault();
       $('today-btn').click();
     } else if (event.key === '[') {

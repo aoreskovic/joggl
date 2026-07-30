@@ -80,7 +80,7 @@ been exercised end to end, not just written.
 | Finish Day | Confirmed against real Jira — worklog `60504` on `EHW-70` |
 | Jira-side worklogs | Time logged in the Jira web UI is read back and counted |
 | Logging | `logs/joggl.log`, credential-redacted |
-| Tests | 189 passing, `npm test`; 57 UI checks, `npm run uicheck` |
+| Tests | 201 passing, `npm test`; 62 UI checks, `npm run uicheck` |
 | Shell | Collapsible sidebar with a view registry; week and month tabs present but disabled |
 | Drag to day view | An issue dragged from the task list becomes a 30-minute pending entry |
 | Keyboard | Every list arrow-navigable, every menu and dialog reachable — see below |
@@ -182,6 +182,8 @@ three, which is why the rule is enforced in the helper and not left to each call
 | `Ctrl+L` | anywhere | Focus the omnibar and select its text |
 | `Ctrl+Enter` | anywhere | Start the highlighted or typed issue; with an empty box, resume the day's most recent entry; while running, stop |
 | `T` `[` `]` | anywhere, not while typing | Today, previous day, next day |
+| `PageUp` `PageDown` | anywhere, not while typing | A week back or forward. Forward past today lands on today |
+| `PageUp` `PageDown` | inside the calendar | A month, since `↑` `↓` already move a week and nothing else there changes the month |
 | `↑` `↓` `Home` `End` | any list | Move the highlight, wrapping at both ends |
 | `Enter` | any list | Run the highlighted row, or fall back to that list's own Enter |
 | `Enter`, `Shift+F10`, Menu key | a focused row | Open its context menu. Shift+F10 needs no code — the browser dispatches `contextmenu` on the focused element, so `anchorFor` only has to notice the event carries no coordinates and anchor to the row instead |
@@ -531,6 +533,17 @@ Never probe the environment. If something above appears missing, say so and stop
   `render → lookup → callback → render` into a loop that blew the stack, and because
   the quick-entry popup revealed itself *after* rendering its results, the whole day
   view looked dead. `createRemoteLookup` therefore never calls back synchronously.
+- **A warning is worth saying once.** Every clashing row used to carry a sentence
+  saying it overlapped; with three of them the list was mostly warning text repeating
+  what each row's coloured outline already said. One line above the list counts them,
+  and `flaggedOverlaps` is the single source both read — the outline and the count
+  cannot disagree about how many there are. A Jira-side row takes part in the
+  detection but is never flagged: the flag invites a fix and there is nothing there
+  to fix.
+- **The calendar only looks backwards.** The timer runs on today and `next-day` stops
+  there, so a future day is not one this app has anything to say about. Those cells
+  are disabled rather than missing, because a month with holes in it reads as broken,
+  and every cursor move is clamped so focus can never land on one.
 - **An empty state names the gesture.** Both ways of putting time on a day — dragging a
   row from the issue list, clicking an hour on the grid — leave no trace in the UI, so an
   empty day says so in both places. The grid's hint is `pointer-events: none`, or it would
@@ -606,6 +619,12 @@ Five more, learned from flakes rather than from wrong results:
 - **An empty-state check cannot use today.** Clearing the store does not clear the day —
   time booked in the Jira web UI still renders. `H.findEmptyDay()` steps back until it
   finds a day with no rows of either kind, and skips rather than lying if there is none.
+- **Every day change fires a Jira read**, so a check that steps through a week waits on
+  the network far longer than on the DOM. `check()` names each check as it *starts* and
+  gives it two minutes — a run that only prints at the end tells you nothing about where
+  it wedged, and a tighter bound fails checks that are merely slow. `findEmptyDay`
+  remembers how far back it went, because searching twice floods the request everything
+  after it is queued behind.
 
 What this cannot reach, and what therefore stays manual: anything crossing a process
 restart, and anything that writes to Jira — **never run Finish Day against a live site

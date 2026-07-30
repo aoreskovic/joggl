@@ -2,20 +2,20 @@
 
 What to test by hand, how to test it, and what is known to be broken.
 
-Joggl has 189 unit tests (`npm test`) covering the things where a silent failure loses
+Joggl has 201 unit tests (`npm test`) covering the things where a silent failure loses
 time data: the worklog timestamp formatter, merge decisions at the 30-minute boundary,
 Finish Day's partial-failure transitions, the day-log round trip, quarter-hour snapping,
 what a duplicate, a moved and a repointed entry inherit,
 when a touch counts as an edit, weekend detection, pin labelling, the ADF a worklog
-comment becomes and back again, the search box's remote-lookup loop, and arrow-key
-navigation over a list of results.
+comment becomes and back again, the search box's remote-lookup loop, arrow-key
+navigation over a list of results, and the calendar grid behind "Jump to a date".
 Everything else — the whole UI — is verified against the checklist below, because the
 project deliberately has no DOM test harness and adding one would break the
 short-dependency rule in `CLAUDE.md`.
 
 That makes this file the other half of the test suite. Keep it current.
 
-**Last full pass: 2026-07-30, all 56 checklist items green**, driven by dispatching real
+**Last full pass: 2026-07-30, all 62 checklist items green**, driven by dispatching real
 mouse events into the renderer from the main process against a throwaway
 `--user-data-dir`. See *The script* at the end for how, and for what it does not cover.
 
@@ -132,6 +132,34 @@ The point of these is that **nothing** should end up offered for a re-sync.
 | Scroll the timeline, then click an empty hour | A quick-entry popup opens **visibly**, focused, titled with that hour and the half hour after it, and sitting fully inside the window. |
 | Type in it, then press Escape | It closes and nothing is created. |
 | Click an empty hour, then click elsewhere | It closes. A second click on the grid opens it again — a popup that closed itself must not eat the next click. |
+
+### Jumping to a date
+
+Stepping a day at a time is fine for yesterday and useless for last month — June from
+July was about fifty clicks.
+
+| Do this | Correct result |
+|---|---|
+| Click the date in the day header | A month grid opens, the shown day highlighted and already focused. |
+| Look at the grid | Always six weeks, so stepping months never resizes it. Monday first. Days either side of the month are greyed, not blank. |
+| Look for tomorrow | Every day after today is disabled — the timer runs on today and `next-day` stops there. |
+| Click a day | The dialog closes and the day header, entry list and day view all move to it. |
+| Press `‹` or `›`, or Page Up and Page Down | A month at a time. `›` is disabled once the next month has not started. |
+| Arrow around the grid | Left and right a day, up and down a week, Home and End the ends of the month. Moving past the edge of the month brings the next one into view. |
+| Tab inside the dialog | One stop for the whole grid, not forty-two. |
+| Press Escape | Closes, day unchanged, focus back on the date label. |
+| Press Page Up and Page Down with the dialog closed | A week back and forward. Forward past today lands on today. |
+| Press Page Up with the caret in the omnibar | The day does not move. |
+| Step back a month from the 31st | Lands on the last day of the shorter month, never back in the month it started from. |
+
+### Counting overlaps
+
+| Do this | Correct result |
+|---|---|
+| Make two entries overlap | **One** line above the list: `⚠ 2 entries overlap`. Both rows keep their outline. Neither carries a sentence of its own. |
+| Overlap a **Manual Jira entry** with one of yours | `⚠ 1 entry overlaps another`. Only your row is outlined — the Jira one is not yours to fix. |
+| Separate them again | The line goes. |
+| Give an entry a sync error while it also overlaps | The error still shows on its own row. That one is specific to it. |
 
 ### The keyboard
 

@@ -578,11 +578,99 @@ button {
   cursor: not-allowed;
 }
 
+/* A button, not a label: it opens the calendar. Styled as text so the day header
+   still reads as a heading rather than a row of three controls. */
 #current-date-label {
   font-weight: 700;
   font-size: 13px;
   min-width: 160px;
   text-align: center;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+#current-date-label:hover,
+#current-date-label:focus-visible {
+  border-color: var(--border-strong);
+  color: var(--accent);
+}
+
+/* ── Jump to a date ── */
+
+.date-picker {
+  width: 268px;
+}
+
+.date-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.date-picker-month {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.date-picker-week,
+.date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.date-picker-week span {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-faint);
+  padding-bottom: 4px;
+}
+
+.date-cell {
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.date-cell:hover:not(:disabled) {
+  background: var(--accent-softer);
+  border-color: var(--accent);
+}
+
+/* The days either side of the month are shown rather than blanked — a grid with
+   holes in it reads as broken — but they must not compete with the month itself. */
+.date-cell.outside {
+  color: var(--text-faint);
+}
+
+.date-cell:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.date-cell.is-today {
+  font-weight: 700;
+  border-color: var(--border-strong);
+}
+
+.date-cell.is-selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
 }
 
 .day-header-right {
@@ -1006,6 +1094,15 @@ button {
   font-size: 11px;
   color: var(--danger);
   padding: 1px 2px;
+}
+
+/* One line for the day's clashes, above the rows it counts. Deliberately quieter
+   than .entry-err-row: an overlap is allowed, and each clashing row is already
+   outlined in --warn, so this only has to say how many there are. */
+.entry-list-warn {
+  font-size: 11px;
+  color: var(--warn);
+  padding: 2px 4px 4px;
 }
 
 /* ── Task source list ── */

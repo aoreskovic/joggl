@@ -55,7 +55,10 @@ export function askModal({ title, body, buttons, dismissValue = null, focusBody 
   // <body> when the modal closes and the next Tab starts from the top of the app.
   returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
-  if (focusBody) bodyEl.querySelector('input, textarea, select')?.focus();
+  // `[data-autofocus]` first: a body whose own content is the choice — a calendar
+  // grid — has no input to land on, and the cell that should take focus is the one
+  // it marked, not the first of forty-two.
+  if (focusBody) bodyEl.querySelector('[data-autofocus], input, textarea, select')?.focus();
   else btnsEl.querySelector('button')?.focus();
 
   return new Promise((resolve) => {
@@ -78,7 +81,12 @@ function trapTab(event) {
   const overlay = document.getElementById('modal-overlay');
   if (!overlay || overlay.classList.contains('hidden')) return;
 
-  const stops = [...overlay.querySelectorAll(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+  // `tabIndex >= 0` as well as visible: a roving list sets every row but one to -1,
+  // and `button:not([disabled])` would otherwise make all of them Tab stops — the
+  // calendar grid alone would be forty-two presses of Tab.
+  const stops = [...overlay.querySelectorAll(FOCUSABLE)].filter(
+    (el) => el.offsetParent !== null && el.tabIndex >= 0,
+  );
   if (stops.length === 0) return;
 
   const first = stops[0];

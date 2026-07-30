@@ -5,7 +5,7 @@ import { showContextMenu } from './context-menu.js';
 import {
   canRetarget,
   duplicateOf,
-  overlappingIds,
+  flaggedOverlaps,
   retargetEntry,
   sameComment,
   sameTimes,
@@ -74,7 +74,11 @@ export function renderEntryList() {
       );
     }
   } else {
-    const overlaps = overlappingIds(entries);
+    const overlaps = flaggedOverlaps(entries);
+    // One line for the whole day rather than a sentence on every clashing row. With
+    // three rows overlapping, the list was mostly warning text saying what the
+    // coloured border on each of them already said.
+    if (overlaps.size > 0) children.push(overlapNote(overlaps.size));
     children.push(
       ...sortEntries(entries).map((entry) => buildEntryCard(entry, overlaps.has(entry.id))),
     );
@@ -115,6 +119,20 @@ function note(text, kind) {
   const el = document.createElement('div');
   el.className = `timeline-empty${kind ? ` ${kind}` : ''}`;
   el.textContent = text;
+  return el;
+}
+
+/**
+ * One "n entries overlap" above the list. A single flagged row means it clashes
+ * with a Jira-side one, which is not flagged itself — so say what it clashes with
+ * rather than leaving a bare "1 entry overlaps" pointing at nothing.
+ */
+function overlapNote(count) {
+  const el = document.createElement('div');
+  el.className = 'entry-list-warn';
+  el.textContent =
+    count === 1 ? '⚠ 1 entry overlaps another' : `⚠ ${count} entries overlap`;
+  el.title = 'Allowed, but usually a mistake. The rows themselves are outlined.';
   return el;
 }
 
@@ -168,9 +186,8 @@ function buildEntryCard(entry, isOverlapping) {
       ? ''
       : `<button class="icon-btn del" data-a="delete" data-id="${esc(entry.id)}" title="Delete">🗑</button>`) +
     '</div>' +
-    (flagOverlap
-      ? '<div class="entry-err-row">⚠ Overlaps another entry — allowed, but usually a mistake.</div>'
-      : '') +
+    // No overlap sentence here: the outline says it, and one line above the list
+    // counts them. An errorMsg is different — it is specific to this row.
     (entry.errorMsg ? `<div class="entry-err-row">⚠ ${esc(entry.errorMsg)}</div>` : '');
 
   // Joggl's own entries stay editable after syncing — the edit rewrites the

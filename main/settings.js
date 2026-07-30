@@ -75,7 +75,7 @@ export async function savePins(pins) {
 
 const UI_DEFAULTS = {
   zoomIdx: 2,
-  fontSize: 9,
+  fontSize: 12,
   panelWidth: 320,
   theme: 'system', // system | light | dark
   sidebarCollapsed: false,

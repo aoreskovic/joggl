@@ -2169,6 +2169,67 @@ async function displayPrefs() {
   );
 
   await check(
+    'the day view text runs 10 to 16, defaults to 12, and reaches the hour labels too',
+    `await H.resetDay();
+     H.q('#settings-btn').click(); await H.sleep(300);
+     const sel = H.q('#cfg-fontsize');
+     const offered = H.all('#cfg-fontsize option').map(o => Number(o.value));
+     const current = sel.value;
+     const read = () => getComputedStyle(document.documentElement)
+       .getPropertyValue('--sched-font-size').trim();
+     sel.value = '16'; sel.dispatchEvent(new Event('change'));
+     await H.sleep(350);
+     const big = read();
+     // The hour gutter used to be pinned at 9px whatever this said, which is the
+     // smallest text on screen and the first to go on a high-DPI display.
+     const bigHour = getComputedStyle(H.q('.sched-hour-label')).fontSize;
+     sel.value = '10'; sel.dispatchEvent(new Event('change'));
+     await H.sleep(350);
+     const small = read();
+     const smallHour = getComputedStyle(H.q('.sched-hour-label')).fontSize;
+     sel.value = '12'; sel.dispatchEvent(new Event('change'));
+     await H.sleep(350);
+     H.q('#close-settings').click(); await H.sleep(200);
+     await H.resetDay();
+     return JSON.stringify({ offered, current, big, bigHour, small, smallHour })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return JSON.stringify(d.offered) === JSON.stringify([10, 12, 14, 16]) &&
+        d.current === '12' && d.big === '16px' && d.small === '10px' &&
+        // A step below the entry text, capped at 12 so it still fits the 40px gutter.
+        d.bigHour === '12px' && d.smallHour === '9px';
+    },
+  );
+
+  await check(
+    'the delete control is a drawn icon, not an emoji',
+    `await H.resetDay();
+     const at = new Date(); at.setHours(9, 0, 0, 0);
+     await window.joggl.days.save(H.todayKey(), [{
+       id: 'del', issueKey: 'X-1', issueId: null, title: 'Some task',
+       startTs: at.getTime(), endTs: at.getTime() + 1800000,
+       status: 'pending', worklogId: null, comment: null, errorMsg: null }]);
+     await window.__jogglTest.reloadDay();
+     // 🗑 arrives at whatever size and weight the system font feels like, and the
+     // ribs it draws collapse into grey mush at this size.
+     const row = H.q('.entry-card[data-id="del"] [data-a="delete"]');
+     const rowSvg = !!row.querySelector('svg.glyph');
+     const rowText = row.textContent.trim();
+     H.q('.entry-card[data-id="del"]').dispatchEvent(new MouseEvent('contextmenu', {
+       bubbles: true, cancelable: true, clientX: 420, clientY: 300 }));
+     await H.sleep(250);
+     const menuItem = H.all('.ctx-item').find(i => /delete/i.test(i.textContent));
+     const menuSvg = !!menuItem.querySelector('.ctx-icon svg.glyph');
+     document.body.click(); await H.sleep(150);
+     await H.resetDay();
+     return JSON.stringify({ rowSvg, rowText, menuSvg })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.rowSvg === true && d.rowText === '' && d.menuSvg === true;
+    },
+  );
+
+  await check(
     'a pin shows its key and full title, and the setting switches that',
     `await H.resetDay();
      H.q('#add-pin-btn').click(); await H.sleep(250);

@@ -36,6 +36,19 @@ export const SETTINGS_ICON = svg(
     '<rect x="1" y="8.7" width="10" height="1.2" rx=".6" /><circle cx="8.4" cy="9.3" r="1.7" />',
 );
 
+// A bin, and deliberately a solid one.
+//
+// This was 🗑 — an emoji, so it arrived at whatever size and weight the system font
+// felt like, and the ribs it draws down the body collapse into grey mush at 14 px.
+// The user's words were that it was unclear what it even was. Drawn instead: a lid,
+// a handle and a tapered body, no ribs, at the same optical weight as the play
+// triangle it sits beside.
+export const DELETE_ICON = svg(
+  '<rect x="4.6" y=".9" width="2.8" height="1.3" rx=".5" />' +
+    '<rect x="1.5" y="2.6" width="9" height="1.4" rx=".7" />' +
+    '<path d="M2.8 4.9h6.4l-.62 5.3a1.1 1.1 0 0 1-1.1.97H4.52a1.1 1.1 0 0 1-1.1-.97Z" />',
+);
+
 // An "i" rather than a "?": a question mark small enough to sit inside a 14 px ring
 // turns to mush, and an unringed one means hand-rolling a curve that only looks
 // right at one size. A ring, a dot and a bar are three primitives and read at any.

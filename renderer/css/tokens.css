@@ -55,7 +55,7 @@
   --font: system-ui, "Segoe UI", Roboto, sans-serif;
   --font-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
 
-  --sched-font-size: 9px;
+  --sched-font-size: 12px;
 }
 
 @media (prefers-color-scheme: dark) {

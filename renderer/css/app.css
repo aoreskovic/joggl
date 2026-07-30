@@ -1371,8 +1371,13 @@ button {
 
 .sched-hour-label {
   display: inline-block;
-  width: 36px;
-  font-size: 9px;
+  width: 38px;
+  /* Follows "Day view text" too — it was pinned at 9px, which is the smallest thing
+     on screen and the first to go on a high-DPI display. A step below the entry
+     labels because the hour gutter is chrome, and capped at 12px because the gutter
+     is 40px wide and that width is pinned in the drag maths (GUTTER_PX in
+     timeline.js), so the label cannot be allowed to outgrow it. */
+  font-size: min(12px, calc(var(--sched-font-size) - 1px));
   color: var(--text-muted);
   padding: 1px 3px;
   user-select: none;
@@ -1587,6 +1592,17 @@ button {
   font-size: 12px;
   flex-shrink: 0;
   color: var(--text-muted);
+  /* A drawn icon has to sit on the same line as the text glyphs beside it. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Slightly smaller than the 14px the row buttons use: the menu's text glyphs are
+   12px, and a drawn icon at 14 next to them reads as a mistake. */
+.ctx-icon .glyph {
+  width: 12px;
+  height: 12px;
 }
 
 .ctx-item.danger .ctx-icon {

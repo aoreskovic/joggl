@@ -10,6 +10,7 @@
 // the rows focusable is enough — see `.entry-card` and `.sched-entry-block`. Such
 // an event carries no useful coordinates, which is what `anchorFor` is for.
 
+import { DELETE_ICON } from './icons.js';
 import { createRowNav } from './keynav.js';
 import { esc } from './util.js';
 
@@ -73,7 +74,9 @@ export function showContextMenu(event, entry) {
     { icon: '⏵', label: 'Restart timer', run: () => actions.restart(entry) },
     { icon: '⧉', label: 'Duplicate', run: () => actions.duplicate(entry) },
     { icon: '✂', label: 'Split at midpoint', run: () => actions.split(entry) },
-    { icon: '🗑', label: 'Delete', danger: true, run: () => actions.remove(entry) },
+    // Drawn rather than 🗑, for the reason given over DELETE_ICON: the emoji's ribs
+    // turn to mush at this size. The others are geometric glyphs, which do not.
+    { svg: DELETE_ICON, label: 'Delete', danger: true, run: () => actions.remove(entry) },
   ];
 
   const choose = (item) => {
@@ -90,7 +93,11 @@ export function showContextMenu(event, entry) {
     const el = document.createElement('div');
     el.className = `ctx-item${item.danger ? ' danger' : ''}`;
     el.setAttribute('role', 'menuitem');
-    el.innerHTML = `<span class="ctx-icon">${esc(item.icon)}</span><span>${esc(item.label)}</span>`;
+    // `item.svg` is only ever one of our own constants from icons.js — never
+    // anything that came from Jira or from the user — so it goes in unescaped.
+    // Everything else still does, which is why they are separate fields.
+    const glyph = item.svg ?? esc(item.icon);
+    el.innerHTML = `<span class="ctx-icon">${glyph}</span><span>${esc(item.label)}</span>`;
     el.addEventListener('click', () => choose(item));
     menu.appendChild(el);
   }

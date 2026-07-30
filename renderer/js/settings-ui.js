@@ -15,7 +15,7 @@ import {
 import { loadIssues } from './tasks.js';
 import { toastErr, toastOk } from './toast.js';
 
-import { esc, isWeekend } from './util.js';
+import { DEFAULT_FONT_SIZE, esc, isWeekend, nearestFontSize } from './util.js';
 
 const DEFAULT_SOURCES = [
   {
@@ -41,7 +41,10 @@ export function applyTheme(theme) {
 }
 
 export function applyFontSize(px) {
-  document.documentElement.style.setProperty('--sched-font-size', `${px}px`);
+  document.documentElement.style.setProperty(
+    '--sched-font-size',
+    `${nearestFontSize(px)}px`,
+  );
 }
 
 /**
@@ -117,7 +120,9 @@ export function openSettings() {
     : 'No token stored yet — Joggl cannot reach Jira until you add one.';
 
   document.getElementById('cfg-theme').value = state.ui.theme ?? 'system';
-  document.getElementById('cfg-fontsize').value = String(state.ui.fontSize ?? 9);
+  document.getElementById('cfg-fontsize').value = String(
+    nearestFontSize(state.ui.fontSize ?? DEFAULT_FONT_SIZE),
+  );
   document.getElementById('cfg-pin-label').value = state.ui.pinLabel ?? 'keyname';
   document.getElementById('cfg-weekend-tint').checked = state.ui.weekendTint !== false;
 

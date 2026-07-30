@@ -13,7 +13,7 @@ import {
 } from './entry-ops.js';
 import { createIssuePicker } from './issue-picker.js';
 import { wireRovingList } from './keynav.js';
-import { PLAY_ICON } from './icons.js';
+import { DELETE_ICON, PLAY_ICON } from './icons.js';
 import { sortEntries } from './merge.js';
 import { askModal } from './modal.js';
 import { renderAll } from './render.js';
@@ -222,7 +222,7 @@ function buildEntryCard(entry, isOverlapping) {
     `<button class="icon-btn" data-a="restart" data-id="${esc(entry.id)}" title="Restart timer on this issue">${PLAY_ICON}</button>` +
     (external
       ? ''
-      : `<button class="icon-btn del" data-a="delete" data-id="${esc(entry.id)}" title="Delete">🗑</button>`) +
+      : `<button class="icon-btn del" data-a="delete" data-id="${esc(entry.id)}" title="Delete">${DELETE_ICON}</button>`) +
     '</div>' +
     // No overlap sentence here: the outline says it, and one line above the list
     // counts them. An errorMsg is different — it is specific to this row.

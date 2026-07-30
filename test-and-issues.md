@@ -2,7 +2,7 @@
 
 What to test by hand, how to test it, and what is known to be broken.
 
-Joggl has 222 unit tests (`npm test`) covering the things where a silent failure loses
+Joggl has 227 unit tests (`npm test`) covering the things where a silent failure loses
 time data: the worklog timestamp formatter, merge decisions at the 30-minute boundary,
 Finish Day's partial-failure transitions, the day-log round trip, quarter-hour snapping,
 what a duplicate, a moved and a repointed entry inherit,
@@ -128,6 +128,10 @@ The point of these is that **nothing** should end up offered for a re-sync.
 | Step to a Saturday or Sunday | The day view column is faintly reddish. The rest of the window is unchanged, and hour labels stay legible. |
 | Step to a weekday | No tint. |
 | Settings → untick Tint weekends, go back to a Saturday | No tint. Tick it again and it returns. |
+| Open Settings → Day view text | The choices are 10, 12, 14 and 16 px, and 12 is selected on a fresh install. The old range was 8–12, unreadable on a high-DPI screen even at the top. |
+| Pick 16 | Both the block labels **and** the hour numbers down the left grow. The hour numbers stop at 12 px — the gutter is 40 px and that width is pinned in the drag maths. |
+| Upgrade from a build that stored 8, 9 or 11 | The select shows the nearest size still offered rather than going blank. |
+| Look at the delete control on a row, and at Delete on the right-click menu | A drawn bin at the same weight as the ▶ beside it. It used to be 🗑, whose ribs turn to mush at this size. |
 
 ### The day view's own click
 

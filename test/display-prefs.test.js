@@ -4,7 +4,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isWeekend, pinLabelParts } from '../renderer/js/util.js';
+import {
+  DEFAULT_FONT_SIZE,
+  FONT_SIZES,
+  isWeekend,
+  nearestFontSize,
+  pinLabelParts,
+} from '../renderer/js/util.js';
 
 // ── Weekends ────────────────────────────────────────────────────────────────
 
@@ -64,4 +70,38 @@ test('a pin with no stored title still says something', () => {
     key: 'GEN-1',
     title: null,
   });
+});
+
+// ── Day view text size ──────────────────────────────────────────────────────
+//
+// The range was 8 to 12, which is too small to read on a high-DPI screen even at
+// the top of it. It is now 10 to 16, and a size saved under the old range has to
+// land somewhere sensible rather than leaving the select blank.
+
+test('the sizes on offer are the ones the settings panel lists', () => {
+  assert.deepEqual(FONT_SIZES, [10, 12, 14, 16]);
+  assert.equal(DEFAULT_FONT_SIZE, 12);
+  assert.ok(FONT_SIZES.includes(DEFAULT_FONT_SIZE), 'the default must be selectable');
+});
+
+test('a size saved under the old range snaps to the nearest one still offered', () => {
+  assert.equal(nearestFontSize(8), 10);
+  assert.equal(nearestFontSize(9), 10);
+  assert.equal(nearestFontSize(11), 10, 'a tie goes to the first, which is the smaller');
+  assert.equal(nearestFontSize(12), 12);
+});
+
+test('a size already on offer is left alone', () => {
+  for (const size of FONT_SIZES) assert.equal(nearestFontSize(size), size);
+});
+
+test('anything out of range is clamped rather than passed through', () => {
+  assert.equal(nearestFontSize(2), 10);
+  assert.equal(nearestFontSize(40), 16);
+});
+
+test('a missing or unparseable size falls back to the default', () => {
+  assert.equal(nearestFontSize(undefined), DEFAULT_FONT_SIZE);
+  assert.equal(nearestFontSize(null), DEFAULT_FONT_SIZE, 'Number(null) is 0, not NaN — so this would silently be 10 without the guard');
+  assert.equal(nearestFontSize('huge'), DEFAULT_FONT_SIZE);
 });

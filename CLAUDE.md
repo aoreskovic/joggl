@@ -37,6 +37,19 @@ Pure frontend logic, no SP coupling. Port as-is; refactor into modules only wher
 - Settings for the two things people read differently: pin labels (key and title by
   default, since a title alone does not identify a `Meetings` issue when every project
   has one) and a faint tint on Saturday and Sunday in the day view
+- **Day view text is 10 / 12 / 14 / 16 px, defaulting to 12.** The ported range was
+  8–12, which is unreadable on a high-DPI screen even at the top of it. A size stored
+  under the old range snaps to the nearest one still offered — `nearestFontSize` in
+  `util.js` — because a `<select>` whose value matches no option renders blank. The
+  hour gutter follows the same setting but a step behind and capped at 12 px: the
+  gutter is 40 px wide and that width is pinned in the drag maths (`GUTTER_PX` in
+  `timeline.js`, `left: 40px` in the CSS), so the label may not outgrow it
+- **No emoji as icons.** They arrive at whatever size and weight the system font
+  chooses. `🗑` was the last one on an entry, and its ribs collapsed into grey mush —
+  `DELETE_ICON` is drawn instead, at the weight of the play triangle beside it. A
+  context-menu item carries either `icon` (a text glyph, escaped) or `svg` (one of our
+  own constants, not escaped); the two are separate fields so the escaping rule stays
+  obvious. `📌` on an issue row is the one emoji left
 - Inline editing of start / end / duration / title with bidirectional recalculation
 - Merge prompt logic
 - Zoom controls, resizable panel width, configurable font size
@@ -80,7 +93,7 @@ been exercised end to end, not just written.
 | Finish Day | Confirmed against real Jira — worklog `60504` on `EHW-70` |
 | Jira-side worklogs | Time logged in the Jira web UI is read back and counted |
 | Logging | `logs/joggl.log`, credential-redacted |
-| Tests | 222 passing, `npm test`; 75 UI checks, `npm run uicheck` |
+| Tests | 227 passing, `npm test`; 76 UI checks, `npm run uicheck` (or `:fast`) |
 | Shell | Collapsible sidebar with a view registry; week and month tabs present but disabled |
 | Drag to day view | An issue dragged from the task list becomes a 30-minute pending entry |
 | Keyboard | Every list arrow-navigable, every menu and dialog reachable — see below |

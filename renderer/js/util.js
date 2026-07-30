@@ -147,6 +147,28 @@ export function pinLabelParts(pin, mode = 'keyname') {
   return { key: pin.issueKey, title: pin.title || null };
 }
 
+/**
+ * The day view text sizes on offer, and the one a stored value maps to.
+ *
+ * The range used to be 8 to 12, which is unreadable on a high-DPI screen even at the
+ * top of it. Anyone who saved 8, 9 or 11 back then still has it in their prefs, and a
+ * `<select>` whose value matches no option renders blank — so a stored size snaps to
+ * the nearest one still offered rather than silently emptying the control.
+ */
+export const FONT_SIZES = [10, 12, 14, 16];
+export const DEFAULT_FONT_SIZE = 12;
+
+export function nearestFontSize(px) {
+  // `Number(null)` and `Number('')` are both 0, not NaN, so a missing size would
+  // otherwise snap to the smallest on offer instead of falling back to the default.
+  if (px === null || px === undefined || px === '') return DEFAULT_FONT_SIZE;
+  const wanted = Number(px);
+  if (!Number.isFinite(wanted)) return DEFAULT_FONT_SIZE;
+  return FONT_SIZES.reduce((best, size) =>
+    Math.abs(size - wanted) < Math.abs(best - wanted) ? size : best,
+  );
+}
+
 export function formatDateLabel(key) {
   const d = startOfDay(key);
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

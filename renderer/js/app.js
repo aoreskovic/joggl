@@ -6,6 +6,7 @@ import { wireDayViewDrag } from './drag-drop.js';
 import {
   deleteEntry,
   duplicateEntry,
+  editEntryComment,
   editEntryTask,
   renderEntryList,
   splitEntry,
@@ -108,6 +109,7 @@ async function boot() {
 
   setContextActions({
     editTask: (entry) => editEntryTask(entry.id),
+    editComment: (entry) => editEntryComment(entry.id),
     restart: (entry) =>
       startTimer({ issueKey: entry.issueKey, issueId: entry.issueId, title: entry.title }),
     duplicate: (entry) => duplicateEntry(entry.id),

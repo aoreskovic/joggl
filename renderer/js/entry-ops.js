@@ -22,6 +22,8 @@ export function duplicateOf(entry, newId) {
     endTs: entry.endTs,
     status: entry.issueKey ? 'pending' : 'local',
     worklogId: null,
+    // The same work, so the same description. Only the worklog is not inherited.
+    comment: entry.comment ?? null,
     errorMsg: null,
   };
 }
@@ -38,6 +40,19 @@ export function duplicateOf(entry, newId) {
  */
 export function sameTimes(a, b) {
   return a?.startTs === b?.startTs && (a?.endTs ?? null) === (b?.endTs ?? null);
+}
+
+/**
+ * Whether two snapshots carry the same Work Description.
+ *
+ * Its own predicate rather than a clause inside `sameTimes`, because a comment
+ * edit changes no time at all: routing it through the times guard would see
+ * nothing changed and skip the re-sync, leaving the new description on screen and
+ * never in Jira. Empty and absent are the same thing, so opening the dialog and
+ * closing it without typing is not a change either.
+ */
+export function sameComment(a, b) {
+  return (a?.comment || '') === (b?.comment || '');
 }
 
 /**
@@ -143,6 +158,7 @@ export function dropEntryFor(issue, newId, startTs, dayStartTs, durationMs = DEF
     endTs: start + durationMs,
     status: 'pending',
     worklogId: null,
+    comment: null,
     errorMsg: null,
   };
 }

@@ -2,19 +2,19 @@
 
 What to test by hand, how to test it, and what is known to be broken.
 
-Joggl has 153 unit tests (`npm test`) covering the things where a silent failure loses
+Joggl has 177 unit tests (`npm test`) covering the things where a silent failure loses
 time data: the worklog timestamp formatter, merge decisions at the 30-minute boundary,
 Finish Day's partial-failure transitions, the day-log round trip, quarter-hour snapping,
-what a duplicate, a moved and a repointed entry
-inherit, when a touch counts as an edit, weekend detection, pin labelling, and the
-search box's remote-lookup loop.
+what a duplicate, a moved and a repointed entry inherit,
+when a touch counts as an edit, weekend detection, pin labelling, the ADF a worklog
+comment becomes and back again, and the search box's remote-lookup loop.
 Everything else — the whole UI — is verified against the checklist below, because the
 project deliberately has no DOM test harness and adding one would break the
 short-dependency rule in `CLAUDE.md`.
 
 That makes this file the other half of the test suite. Keep it current.
 
-**Last full pass: 2026-07-30, all 39 checklist items green**, driven by dispatching real
+**Last full pass: 2026-07-30, all 46 checklist items green**, driven by dispatching real
 mouse events into the renderer from the main process against a throwaway
 `--user-data-dir`. See *The script* at the end for how, and for what it does not cover.
 
@@ -24,8 +24,8 @@ mouse events into the renderer from the main process against a throwaway
 
 ```
 npm start      # the app
-npm test       # 153 tests, must be 0 failures
-npm run uicheck # the checklist below, driven as a script — 39 checks, must be 0 failures
+npm test       # 177 tests, must be 0 failures
+npm run uicheck # the checklist below, driven as a script — 46 checks, must be 0 failures
 ```
 
 The log is at `logs/joggl.log`, credential-redacted. Send it along with any bug report.
@@ -82,6 +82,25 @@ Not scripted — it needs a machine without Node, or at least a shell without it
 | Pick the issue it is already on, or press Cancel or Escape | Nothing changes. |
 | Do it to an entry that has already synced | Refused, with a message saying to delete it — which offers to remove the Jira worklog — and add it again. A worklog cannot be moved between issues. |
 | Do it to a **Manual Jira entry** | Refused. Not Joggl's record to repoint. |
+
+### Work description
+
+Jira's own name for the worklog comment. Plain text by design — offering bold without
+offering the rest would promise something the field cannot keep.
+
+| Do this | Correct result |
+|---|---|
+| Right-click a block, or an "On this day" row | **Work description** is the second item, under Edit task. |
+| Click it | A dialog opens with the block's times in the title and a textarea already focused, pre-filled with whatever is there. |
+| Type something and Save | It appears after the task name, separated by `·`, in grey italics. The task name keeps its own tone. |
+| Press Ctrl+Enter instead of clicking Save | Same thing. Plain Enter must insert a newline, not save. |
+| Write a very long description | It clips with `…` **before** the start–stop times. The times never move and the task name stays readable. |
+| Write two lines, then look at the row | Shown on one line; the tooltip and the dialog keep the line break. |
+| Add a description to an already-synced entry | It turns `● pending`. Finish Day then rewrites that one worklog. |
+| Open the dialog and close it without typing | Still `✓ synced` — opening it is not an edit. |
+| Clear the text of a synced entry and Save | It turns `● pending`, and the next Finish Day removes the description in Jira. |
+| Right-click a **Manual Jira entry** | Refused, saying to change it in Jira. |
+| Log a description in the Jira UI, then Refresh in Joggl | It shows on that read-only row, same grey italics. |
 
 ### Touching an entry without changing it
 
@@ -211,7 +230,7 @@ Every table above except the persistence rows is executed by `scripts/ui-check.m
 npm run uicheck
 ```
 
-39 checks, exits non-zero on failure. It needs **no dependency and no DevTools Protocol** —
+46 checks, exits non-zero on failure. It needs **no dependency and no DevTools Protocol** —
 the main process already holds `webContents.executeJavaScript`, which is enough to
 dispatch real `MouseEvent`s, read computed styles and element boxes, and drive the app end
 to end. `main/index.js` loads it only under `--uicheck`, which also redirects `userData` to
@@ -239,5 +258,13 @@ panel's scrollTop change", which no amount of reading catches and this catches i
 |---|---|
 | Crosses a process restart | the three Persistence rows |
 | Writes to Jira | Finish Day on a future block; rewriting a synced entry's worklog |
+| Needs a bare machine | the whole *Starting it on a bare machine* section |
 
 Never run Finish Day against a live site from a script.
+
+The Work Description round trip **was** checked by hand on 2026-07-30, on one disposable
+worklog on `GEN-149` that was deleted afterwards: created with two lines, Jira stored
+exactly the document Joggl builds and it flattened back identically; clearing it stored
+`content: []`, which reads back as no description; setting it again worked. Repeat that
+if the ADF ever changes — it is the only way to prove Jira accepts the document, which
+no unit test can.

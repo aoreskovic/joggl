@@ -1,6 +1,7 @@
 // The one and only place Joggl talks to Jira. Main process, Node's global fetch.
 // One place to mock, one place to debug.
 
+import { adfToText, emptyAdfComment, toAdfComment } from './adf.js';
 import { formatWorklogStarted, worklogSeconds } from './time.js';
 
 const API = '/rest/api/3';
@@ -363,24 +364,27 @@ export async function lookupIssues(creds, query, { limit = 8 } = {}) {
  *
  * @returns {Promise<{worklogId: string, timeSpentSeconds: number}>}
  */
-export async function submitWorklog(creds, { issueIdOrKey, startTs, endTs }) {
+export async function submitWorklog(creds, { issueIdOrKey, startTs, endTs, comment }) {
   if (!issueIdOrKey) throw new JiraError('Cannot submit a worklog without an issue key.');
   const durationMs = endTs - startTs;
   if (!(durationMs > 0)) {
     throw new JiraError(`Entry has no positive duration (${durationMs} ms) — fix it before syncing.`);
   }
 
+  const body = {
+    started: formatWorklogStarted(startTs),
+    timeSpentSeconds: worklogSeconds(durationMs),
+  };
+  // Jira's Work Description. Omitted entirely when there is none: a worklog created
+  // with an empty paragraph reads as a blank description rather than no description.
+  const adf = toAdfComment(comment);
+  if (adf) body.comment = adf;
+
   const data = await request(
     creds,
     'POST',
     `${API}/issue/${encodeURIComponent(issueIdOrKey)}/worklog`,
-    {
-      body: {
-        started: formatWorklogStarted(startTs),
-        timeSpentSeconds: worklogSeconds(durationMs),
-      },
-      context: `worklog on ${issueIdOrKey}`,
-    },
+    { body, context: `worklog on ${issueIdOrKey}` },
   );
 
   if (!data?.id) {
@@ -398,7 +402,7 @@ export async function submitWorklog(creds, { issueIdOrKey, startTs, endTs }) {
  * Editing an entry Joggl already synced rewrites its worklog in place. Posting a
  * second one and hoping nobody notices is how a day ends up double-booked.
  */
-export async function updateWorklog(creds, { issueIdOrKey, worklogId, startTs, endTs }) {
+export async function updateWorklog(creds, { issueIdOrKey, worklogId, startTs, endTs, comment }) {
   if (!worklogId) throw new JiraError('Cannot update a worklog without its id.');
   const durationMs = endTs - startTs;
   if (!(durationMs > 0)) {
@@ -413,6 +417,10 @@ export async function updateWorklog(creds, { issueIdOrKey, worklogId, startTs, e
       body: {
         started: formatWorklogStarted(startTs),
         timeSpentSeconds: worklogSeconds(durationMs),
+        // Always sent, unlike on create: the entry is the record of what Jira
+        // should hold, and omitting the field would leave a description the user
+        // has just deleted sitting in Jira with nothing on screen to show for it.
+        comment: toAdfComment(comment) ?? emptyAdfComment(),
       },
       context: `worklog ${worklogId} on ${issueIdOrKey}`,
     },
@@ -485,6 +493,8 @@ export async function fetchDayWorklogs(creds, { date, dayStartTs, dayEndTs }) {
         title: issue.title,
         startTs,
         endTs: startTs + (worklog.timeSpentSeconds ?? 0) * 1000,
+        // Flattened, so a description written in the Jira UI is visible here too.
+        comment: adfToText(worklog.comment),
       });
     }
   }

@@ -29,6 +29,9 @@ function normaliseEntry(raw) {
     endTs,
     status: STATUSES.has(raw.status) ? raw.status : 'pending',
     worklogId: raw.worklogId ? String(raw.worklogId) : null,
+    // Jira's Work Description. Held as plain text; the ADF it becomes is built at
+    // the Jira boundary, in main/jira/adf.js.
+    comment: raw.comment ? String(raw.comment) : null,
     errorMsg: raw.errorMsg ? String(raw.errorMsg) : null,
   };
 }

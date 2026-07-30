@@ -161,6 +161,19 @@ window.H = {
     await H.settle();
   },
   firstTask() { return H.q('.task-item'); },
+  /**
+   * Unpin everything through the × on each chip.
+   *
+   * Not window.joggl.pins.save([]) — that writes the store but leaves state.pins
+   * as it was, so the chips stay on screen and the next check counts them.
+   */
+  async clearPins() {
+    let guard = 0;
+    while (H.q('.pin-remove') && guard++ < 20) {
+      H.q('.pin-remove').click();
+      await H.sleep(120);
+    }
+  },
   // A timer stopped under ten seconds old is discarded on purpose; back-date it.
   //
   // Clamped into today, because the field resolves HH:MM against the *selected
@@ -663,6 +676,7 @@ async function timeSafety() {
   await check(
     'a pinned issue can be dragged onto the day view',
     `await H.resetDay();
+     await H.clearPins();
      H.q('#add-pin-btn').click(); await H.sleep(250);
      const inp = H.q('#pin-search-input');
      inp.value = H.all('.task-item')[0].querySelector('.task-dd-title').textContent.slice(0, 12);
@@ -674,7 +688,7 @@ async function timeSafety() {
      const chips = H.all('.pin-chip').length;
      if (chips) { await H.dragToHour(H.q('.pin-chip'), '16:00'); await H.sleep(600); }
      const ranges = H.entries().map(e => e.range);
-     await window.joggl.pins.save([]);
+     await H.clearPins();
      await H.resetDay();
      return JSON.stringify({ chips, ranges })`,
     (v) => {
@@ -857,6 +871,188 @@ async function editTask() {
   );
 }
 
+async function workDescription() {
+  const openMenuOn = (selector) => `
+     H.q(${JSON.stringify(selector)}).dispatchEvent(new MouseEvent('contextmenu', {
+       bubbles: true, cancelable: true, clientX: 420, clientY: 300 }));
+     await H.sleep(250);`;
+
+  await check(
+    'Work description sits second on the menu, from a block and from a row',
+    `await H.resetDay();
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     ${openMenuOn('.sched-entry-block')}
+     const fromBlock = H.all('.ctx-item').map(i => i.textContent.replace(/^\\W+/, ''));
+     document.body.click(); await H.sleep(150);
+     ${openMenuOn('.entry-card')}
+     const fromRow = H.all('.ctx-item').map(i => i.textContent.replace(/^\\W+/, ''));
+     document.body.click(); await H.sleep(150);
+     await H.resetDay();
+     return JSON.stringify({ fromBlock, fromRow })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.fromBlock[1] === 'Work description' && d.fromRow[1] === 'Work description';
+    },
+  );
+
+  await check(
+    'the dialog opens focused, and saving shows the text after the task name',
+    `await H.resetDay();
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     ${openMenuOn('.sched-entry-block')}
+     H.all('.ctx-item').find(i => i.textContent.includes('Work description')).click();
+     await H.sleep(400);
+     const focused = document.activeElement?.tagName;
+     const field = H.q('.comment-field');
+     const wasEmpty = field?.value === '';
+     field.value = 'reviewed the power section';
+     H.q('#modal-buttons .btn-primary').click();
+     await H.sleep(600);
+     const card = H.q('.entry-card:not(.external)');
+     const shown = card.querySelector('.entry-comment')?.textContent ?? null;
+     const afterTitle = card.querySelector('.entry-title')?.compareDocumentPosition(
+       card.querySelector('.entry-comment')) & Node.DOCUMENT_POSITION_FOLLOWING;
+     const sep = !!card.querySelector('.entry-comment-sep');
+     const status = card.querySelector('.status-badge').textContent;
+     await H.resetDay();
+     return JSON.stringify({ focused, wasEmpty, shown, afterTitle: !!afterTitle, sep, status })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.focused === 'TEXTAREA' && d.wasEmpty && d.shown === 'reviewed the power section' &&
+        d.afterTitle && d.sep && d.status.includes('pending');
+    },
+  );
+
+  await check(
+    'the description is greyer than the task name, and not just a different colour',
+    `await H.resetDay();
+     const at = new Date(); at.setHours(9, 0, 0, 0);
+     await window.joggl.days.save(H.todayKey(), [{
+       id: 'c1', issueKey: 'X-1', issueId: null, title: 'Some task',
+       startTs: at.getTime(), endTs: at.getTime() + 1800000,
+       status: 'pending', worklogId: null, comment: 'what I did', errorMsg: null }]);
+     H.q('#today-btn').click(); await H.sleep(300); await H.settle();
+     const card = H.q('.entry-card[data-id="c1"]');
+     const t = getComputedStyle(card.querySelector('.entry-title'));
+     const c = getComputedStyle(card.querySelector('.entry-comment'));
+     // Copied to plain strings *before* resetDay. A CSSStyleDeclaration is live:
+     // read it after the element is detached and every property comes back "".
+     const out = { titleColor: t.color, commentColor: c.color,
+                   titleStyle: t.fontStyle, commentStyle: c.fontStyle };
+     await H.resetDay();
+     return JSON.stringify(out)`,
+    (v) => {
+      const d = JSON.parse(v);
+      // Colour alone would not survive greyscale, so italics has to differ too.
+      return d.titleColor !== d.commentColor && d.commentStyle === 'italic' &&
+        d.titleStyle === 'normal';
+    },
+  );
+
+  await check(
+    'a long description clips with an ellipsis before it reaches the times',
+    `await H.resetDay();
+     const at = new Date(); at.setHours(9, 0, 0, 0);
+     await window.joggl.days.save(H.todayKey(), [{
+       id: 'c2', issueKey: 'X-1', issueId: null, title: 'Some task',
+       startTs: at.getTime(), endTs: at.getTime() + 1800000,
+       status: 'pending', worklogId: null,
+       comment: 'a deliberately very long work description that goes on well past the '
+              + 'width of the row and must be clipped rather than pushing the times about',
+       errorMsg: null }]);
+     H.q('#today-btn').click(); await H.sleep(600);
+     const card = H.q('.entry-card[data-id="c2"]');
+     const el = card.querySelector('.entry-comment');
+     const times = card.querySelector('.time-range');
+     const r = el.getBoundingClientRect(), tr = times.getBoundingClientRect();
+     const out = { clipped: el.scrollWidth > el.clientWidth,
+                   ellipsis: getComputedStyle(el).textOverflow,
+                   endsBeforeTimes: Math.round(r.right) <= Math.round(tr.left),
+                   titleIntact: card.querySelector('.entry-title').textContent === 'Some task',
+                   timesVisible: tr.width > 0 };
+     await H.resetDay();
+     return JSON.stringify(out)`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.clipped && d.ellipsis === 'ellipsis' && d.endsBeforeTimes && d.titleIntact &&
+        d.timesVisible;
+    },
+  );
+
+  await check(
+    'changing only the description marks a synced entry for re-sync',
+    `await H.resetDay();
+     const at = new Date(); at.setHours(9, 0, 0, 0);
+     await window.joggl.days.save(H.todayKey(), [{
+       id: 'c3', issueKey: 'X-1', issueId: null, title: 'Already logged',
+       startTs: at.getTime(), endTs: at.getTime() + 1800000,
+       status: 'synced', worklogId: '99999', comment: 'first go', errorMsg: null }]);
+     H.q('#today-btn').click(); await H.sleep(600);
+     ${openMenuOn('.entry-card[data-id="c3"]')}
+     H.all('.ctx-item').find(i => i.textContent.includes('Work description')).click();
+     await H.sleep(400);
+     H.q('.comment-field').value = 'second go';
+     H.q('#modal-buttons .btn-primary').click();
+     await H.sleep(600);
+     const card = H.q('.entry-card[data-id="c3"]');
+     const out = { status: card.querySelector('.status-badge').textContent,
+                   shown: card.querySelector('.entry-comment')?.textContent };
+     await H.resetDay();
+     return JSON.stringify(out)`,
+    (v) => {
+      const d = JSON.parse(v);
+      // The times did not move, so only the comment guard can have caught this.
+      return d.status.includes('pending') && d.shown === 'second go';
+    },
+  );
+
+  await check(
+    'opening the dialog and closing it unchanged leaves a synced entry alone',
+    `await H.resetDay();
+     const at = new Date(); at.setHours(9, 0, 0, 0);
+     await window.joggl.days.save(H.todayKey(), [{
+       id: 'c4', issueKey: 'X-1', issueId: null, title: 'Already logged',
+       startTs: at.getTime(), endTs: at.getTime() + 1800000,
+       status: 'synced', worklogId: '99999', comment: 'unchanged', errorMsg: null }]);
+     H.q('#today-btn').click(); await H.sleep(600);
+     ${openMenuOn('.entry-card[data-id="c4"]')}
+     H.all('.ctx-item').find(i => i.textContent.includes('Work description')).click();
+     await H.sleep(400);
+     const prefilled = H.q('.comment-field').value;
+     H.q('#modal-buttons .btn-primary').click();
+     await H.sleep(500);
+     const status = H.q('.entry-card[data-id="c4"] .status-badge').textContent;
+     await H.resetDay();
+     return JSON.stringify({ prefilled, status })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.prefilled === 'unchanged' && d.status.includes('synced');
+    },
+  );
+
+  await check(
+    'a Jira-side worklog refuses, and says where to change it',
+    `await H.resetDay();
+     H.q('#refresh-tasks-btn').click(); await H.sleep(4000);
+     const ext = H.q('.entry-card.external');
+     if (!ext) return 'SKIP no Jira-side worklog today';
+     ext.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true,
+       clientX: 420, clientY: 300 }));
+     await H.sleep(250);
+     H.all('.ctx-item').find(i => i.textContent.includes('Work description')).click();
+     await H.sleep(400);
+     const opened = !H.q('#modal-overlay').classList.contains('hidden');
+     const warned = H.all('.toast').some(t => /made in Jira/i.test(t.textContent));
+     await H.resetDay();
+     return JSON.stringify({ opened, warned })`,
+    (v) => {
+      if (typeof v === 'string' && v.startsWith('SKIP')) return 'skipped';
+      const d = JSON.parse(v);
+      return d.opened === false && d.warned === true;
+    },
+  );
+}
+
 async function noOpEdits() {
   await check(
     'clicking a synced block leaves it synced — no re-sync offered',
@@ -1015,7 +1211,7 @@ async function displayPrefs() {
      await set('key');   const asKey = read();
      await set('keyname');
 
-     await window.joggl.pins.save([]);
+     await H.clearPins();
      await H.resetDay();
      return JSON.stringify({ wanted, asDefault, asName, asKey })`,
     (v) => {
@@ -1059,6 +1255,7 @@ export async function runChecks(mainWindow, app) {
     await dayPanel();
     await dragging();
     await editTask();
+    await workDescription();
     await noOpEdits();
     await displayPrefs();
     await timeSafety();

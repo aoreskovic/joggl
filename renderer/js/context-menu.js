@@ -10,7 +10,8 @@ import { esc } from './util.js';
 let actions = null;
 
 /**
- * @param {{editTask: fn, restart: fn, duplicate: fn, split: fn, remove: fn}} handlers
+ * @param {{editTask: fn, editComment: fn, restart: fn, duplicate: fn, split: fn,
+ *          remove: fn}} handlers
  *        each called with the entry the menu was opened on
  */
 export function setContextActions(handlers) {
@@ -31,6 +32,9 @@ export function showContextMenu(event, entry) {
 
   const items = [
     { icon: '✎', label: 'Edit task', run: () => actions.editTask(entry) },
+    // Jira's own name for the field, so it is recognisable to anyone who fills it
+    // in through the Jira UI — which, on this site, is everyone.
+    { icon: '≡', label: 'Work description', run: () => actions.editComment(entry) },
     { icon: '⏵', label: 'Restart timer', run: () => actions.restart(entry) },
     { icon: '⧉', label: 'Duplicate', run: () => actions.duplicate(entry) },
     { icon: '✂', label: 'Split at midpoint', run: () => actions.split(entry) },

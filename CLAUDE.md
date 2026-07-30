@@ -30,6 +30,8 @@ Pure frontend logic, no SP coupling. Port as-is; refactor into modules only wher
 - Entry split-at-midpoint, restart, duplicate, delete — from a right-click menu shared
   by the entry list and the day view. **Edit task** sits first on it: a searchable
   picker that books the same block against a different issue, times untouched.
+  **Work description** sits second: Jira's own name for the worklog comment, plain
+  text, shown after the task name in grey italics and clipped before the times.
 - The day's entries live in a collapsible **On this day** panel above the issue list,
   open by default, its state remembered like the sidebar's
 - Settings for the two things people read differently: pin labels (key and title by
@@ -96,8 +98,11 @@ a reason.
    Day or discard the id that prevents exactly that. Synced entries are frozen against
    merging, though not against editing — see below.
 
-3. **No worklog `comment`.** The plugin sent `comment: title` as a string, which v3
-   rejects — it wants ADF. Nothing is sent, per gotcha 5.
+3. **Worklog comments are Jira's Work Description, built as ADF.** The plugin sent
+   `comment: title` as a string, which v3 rejects. `main/jira/adf.js` builds the
+   minimal document instead and flattens what comes back, so a description written in
+   the Jira UI is visible here and one written here is visible there. Plain text only
+   — see gotcha 5.
 
 4. **Editing a synced entry rewrites its worklog.** The entry keeps its `worklogId` and
    returns to `pending`; Finish Day then issues `PUT .../worklog/{id}` instead of a
@@ -200,6 +205,7 @@ Rules:
       "endTs": 1753693200000,      // null while running
       "status": "pending",         // pending | synced | error | local
       "worklogId": null,           // set after successful POST; guards re-submit
+      "comment": null,             // Jira Work Description, plain text; ADF at the boundary
       "errorMsg": null
     }
   ]
@@ -361,7 +367,22 @@ people's entries — one on this site has 660.
 
 `Date.prototype.toISOString()` produces the rejected form. Write a dedicated formatter and unit-test it. **This is the single most likely cause of a silent Finish Day failure.**
 
-**5. Worklog `comment` in API v3 is Atlassian Document Format, not a string.** Not needed for v1. If comments are added later, either build ADF or use `/rest/api/2/` for that one call, which accepts plain text.
+**5. Worklog `comment` in API v3 is Atlassian Document Format, not a string.** This is
+Jira's **Work Description**, and colleagues fill it in: of 391 real comments sampled on
+this site, every worklog had one. So it is built rather than skipped, in
+`main/jira/adf.js`, and `/rest/api/2/` is deliberately *not* used for the one call —
+mixing API versions for a single field is worse than twelve lines of ADF.
+
+Joggl writes plain text only, as one paragraph with `hardBreak` between lines. The
+reader has to cope with what the Jira UI produces, and those same 391 comments say what
+that is: `paragraph`/`text` almost always, plus `hardBreak`, a `link` mark, and a
+handful of multi-paragraph docs. So `adfToText` walks the tree collecting text and
+ignores what it does not know, rather than matching on an expected shape — formatting
+Joggl cannot offer still shows its words instead of vanishing.
+
+On **create** the field is omitted when there is no text; on **update** it is always
+sent, because omitting it would leave a description the user has just deleted sitting in
+Jira with nothing on screen to account for it.
 
 ### Task sources
 

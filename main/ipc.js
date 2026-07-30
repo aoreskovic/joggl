@@ -83,11 +83,11 @@ const handlers = {
 
   // One worklog per call. The Finish Day loop, its ordering and its partial-failure
   // bookkeeping live in the renderer, where they need no Node APIs.
-  'jira:submitWorklog': async ({ issueIdOrKey, startTs, endTs } = {}) =>
-    jira.submitWorklog(await resolveCreds(), { issueIdOrKey, startTs, endTs }),
+  'jira:submitWorklog': async ({ issueIdOrKey, startTs, endTs, comment } = {}) =>
+    jira.submitWorklog(await resolveCreds(), { issueIdOrKey, startTs, endTs, comment }),
 
-  'jira:updateWorklog': async ({ issueIdOrKey, worklogId, startTs, endTs } = {}) =>
-    jira.updateWorklog(await resolveCreds(), { issueIdOrKey, worklogId, startTs, endTs }),
+  'jira:updateWorklog': async ({ issueIdOrKey, worklogId, startTs, endTs, comment } = {}) =>
+    jira.updateWorklog(await resolveCreds(), { issueIdOrKey, worklogId, startTs, endTs, comment }),
 
   'jira:deleteWorklog': async ({ issueIdOrKey, worklogId } = {}) =>
     jira.deleteWorklog(await resolveCreds(), { issueIdOrKey, worklogId }),

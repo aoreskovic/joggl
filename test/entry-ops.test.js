@@ -15,6 +15,8 @@ import {
   movedEntry,
   overlappingIds,
   retargetEntry,
+  sameComment,
+  sameTimes,
 } from '../renderer/js/entry-ops.js';
 import { planFinishDay } from '../renderer/js/finish-day.js';
 
@@ -279,6 +281,47 @@ test('an ordinary pending or failed entry may be repointed', () => {
   assert.deepEqual(canRetarget(entry()), { ok: true });
   assert.deepEqual(canRetarget(entry({ status: 'error', errorMsg: 'HTTP 500' })), { ok: true });
   assert.deepEqual(canRetarget(entry({ issueKey: null, status: 'local' })), { ok: true });
+});
+
+// ── The Work Description travels with the work ──────────────────────────────
+
+test('a duplicate keeps the description — it is the same work', () => {
+  const copy = duplicateOf(entry({ comment: 'paired with Marko' }), 'copy');
+  assert.equal(copy.comment, 'paired with Marko');
+  assert.equal(copy.worklogId, null, 'but still not the worklog');
+});
+
+test('a duplicate of an entry without one gets null, not undefined', () => {
+  // undefined would serialise away and read back as a missing key.
+  const { comment, ...bare } = entry();
+  assert.equal(duplicateOf(bare, 'copy').comment, null);
+});
+
+test('moving and repointing carry the description across', () => {
+  const original = entry({ comment: 'reviewed the schematic' });
+  assert.equal(movedEntry(original, T(14), DAY_START).comment, 'reviewed the schematic');
+  assert.equal(retargetEntry(original, target).comment, 'reviewed the schematic');
+});
+
+test('a block dropped from the task list starts with nothing said about it', () => {
+  assert.equal(dropEntryFor(dropped, 'e1', T(9), DAY_START).comment, null);
+});
+
+test('an unchanged description is not an edit', () => {
+  // Opening the dialog and closing it must not offer a re-sync, for the same
+  // reason clicking a block must not.
+  const e = entry({ comment: 'as before' });
+  assert.equal(sameComment(e, { comment: 'as before' }), true);
+  assert.equal(sameComment(entry({ comment: null }), { comment: '' }), true, 'empty is absent');
+  assert.equal(sameComment(entry({ comment: null }), {}), true);
+});
+
+test('a changed description is an edit, even though no time moved', () => {
+  const e = entry({ comment: 'as before' });
+  assert.equal(sameComment(e, { comment: 'something else' }), false);
+  assert.equal(sameComment(e, { comment: null }), false, 'clearing it counts');
+  // And the times guard cannot see it, which is why the two are separate.
+  assert.equal(sameTimes(e, { startTs: e.startTs, endTs: e.endTs }), true);
 });
 
 test('creating and moving clamp by the same rule', () => {

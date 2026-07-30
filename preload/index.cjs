@@ -35,10 +35,10 @@ contextBridge.exposeInMainWorld('joggl', {
   jira: {
     search: (jql, maxResults) => call('jira:search', { jql, maxResults }),
     lookup: (query, limit) => call('jira:lookup', { query, limit }),
-    submitWorklog: (issueIdOrKey, startTs, endTs) =>
-      call('jira:submitWorklog', { issueIdOrKey, startTs, endTs }),
-    updateWorklog: (issueIdOrKey, worklogId, startTs, endTs) =>
-      call('jira:updateWorklog', { issueIdOrKey, worklogId, startTs, endTs }),
+    submitWorklog: (issueIdOrKey, startTs, endTs, comment) =>
+      call('jira:submitWorklog', { issueIdOrKey, startTs, endTs, comment }),
+    updateWorklog: (issueIdOrKey, worklogId, startTs, endTs, comment) =>
+      call('jira:updateWorklog', { issueIdOrKey, worklogId, startTs, endTs, comment }),
     deleteWorklog: (issueIdOrKey, worklogId) =>
       call('jira:deleteWorklog', { issueIdOrKey, worklogId }),
     dayWorklogs: (date, dayStartTs, dayEndTs) =>

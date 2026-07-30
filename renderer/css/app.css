@@ -787,6 +787,51 @@ button {
   text-overflow: ellipsis;
   font-size: 13px;
   font-weight: 500;
+  /* The task name yields only after the description has: which issue this is
+     matters more than what was written about it. */
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* Jira's Work Description, reading on from the title. Three separate signals that
+   it is not part of the name — a separator, a grey tone and italics — so the
+   distinction holds in greyscale and does not rest on colour alone. */
+.entry-comment-sep {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  user-select: none;
+}
+
+.entry-comment {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+/* .entry-name is flex: 1 and .time-range flex-shrink: 0, so the ellipsis lands
+   before the times without any width arithmetic here. */
+.comment-field {
+  width: 100%;
+  min-height: 88px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.comment-field:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .entry-jira {

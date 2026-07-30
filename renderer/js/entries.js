@@ -7,6 +7,7 @@ import {
   duplicateOf,
   overlappingIds,
   retargetEntry,
+  sameComment,
   sameTimes,
 } from './entry-ops.js';
 import { createIssuePicker } from './issue-picker.js';
@@ -82,6 +83,11 @@ export function renderEntryList() {
   if (count) count.textContent = String(entries.length);
 }
 
+/** A multi-line description has to sit on the row's single line. */
+function oneLine(text) {
+  return String(text ?? '').replace(/\s*\n+\s*/g, ' ').trim();
+}
+
 function note(text, kind) {
   const el = document.createElement('div');
   el.className = `timeline-empty${kind ? ` ${kind}` : ''}`;
@@ -109,6 +115,14 @@ function buildEntryCard(entry, isOverlapping) {
     '<div class="entry-name-row">' +
     (entry.issueKey ? `<span class="entry-jira">${esc(entry.issueKey)}</span>` : '') +
     `<span class="entry-title" title="${esc(entry.title)}">${esc(entry.title)}</span>` +
+    // The Work Description reads on from the title, and has to be unmistakably not
+    // part of it: a separator, a grey tone and italics, so the distinction survives
+    // greyscale rather than resting on colour alone. It takes the leftover width and
+    // clips, so it can never push the times about.
+    (entry.comment
+      ? `<span class="entry-comment-sep" aria-hidden="true">·</span>` +
+        `<span class="entry-comment" title="${esc(entry.comment)}">${esc(oneLine(entry.comment))}</span>`
+      : '') +
     '</div>' +
     (external
       ? '<div class="entry-sub" title="Logged straight into Jira, not by Joggl. ' +
@@ -391,6 +405,68 @@ export async function editEntryTask(id) {
   await persistDayNow();
   renderAll();
   toastOk(`Moved ${tsToHHMM(next.startTs)}–${tsToHHMM(next.endTs)} to ${next.issueKey}.`);
+}
+
+/**
+ * Jira's Work Description for this block of time.
+ *
+ * Plain text only, deliberately: Joggl writes the smallest legal ADF document, and
+ * offering bold without offering the rest would set an expectation the field cannot
+ * meet. Unlike Edit task this is *not* refused on a synced entry — rewriting the
+ * description of an existing worklog is exactly what PUT .../worklog/{id} is for.
+ */
+export async function editEntryComment(id) {
+  const entry = currentEntry(id);
+  if (!entry) return;
+
+  if (isExternal(entry)) {
+    toastWarn('This worklog was made in Jira — change its description there.');
+    return;
+  }
+
+  const wrap = document.createElement('div');
+  const lede = document.createElement('p');
+  lede.className = 'panel-lede';
+  lede.textContent =
+    `What was this time spent on? Jira shows it as the worklog's Work Description on ` +
+    `${entry.issueKey ?? 'this entry'}.`;
+
+  const field = document.createElement('textarea');
+  field.className = 'comment-field';
+  field.rows = 4;
+  field.placeholder = 'Plain text — no formatting';
+  field.value = entry.comment ?? '';
+  wrap.append(lede, field);
+
+  // Enter has to keep inserting newlines in a textarea, so the shortcut is Ctrl+Enter.
+  field.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      document.querySelector('#modal-buttons .btn-primary')?.click();
+    }
+  });
+
+  const answer = await askModal({
+    title: `Work description — ${tsToHHMM(entry.startTs)}–${tsToHHMM(entry.endTs)}`,
+    body: wrap,
+    buttons: [
+      { label: 'Cancel', value: null },
+      { label: 'Save', value: 'save', primary: true },
+    ],
+    dismissValue: null,
+    focusBody: true,
+  });
+  if (answer !== 'save') return;
+
+  const next = { ...entry, comment: field.value.trim() || null };
+  // Opening the dialog and closing it unchanged is not an edit, for the same reason
+  // clicking a block is not a move.
+  if (sameComment(next, entry)) return;
+
+  Object.assign(entry, next);
+  markDirty(entry);
+  await persistDayNow();
+  renderAll();
 }
 
 export async function splitEntry(id) {

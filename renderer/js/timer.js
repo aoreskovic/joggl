@@ -133,6 +133,9 @@ export async function stopTimer({ save = true } = {}) {
       endTs,
       status: timer.issueKey ? 'pending' : 'local',
       worklogId: null,
+      // A timed block starts with no Work Description; it is added afterwards from
+      // the right-click menu, once there is something to say about it.
+      comment: null,
       errorMsg: null,
     };
 

@@ -248,6 +248,10 @@ function buildBlock(entry, slot) {
   label.textContent = (entry.issueKey ? `${entry.issueKey} ` : '') + entry.title;
   block.appendChild(label);
 
+  // A block is 280px wide at best, so the description lives in the tooltip rather
+  // than competing with the title for room.
+  block.title = [entry.title, entry.comment].filter(Boolean).join('\n');
+
   if (!entry.external) {
     for (const edge of ['top', 'bot']) {
       const handle = document.createElement('div');

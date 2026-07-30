@@ -139,8 +139,8 @@ export function lookupJira(query, limit) {
 export function submitWorklog(entry) {
   const target = entry.issueId ?? entry.issueKey;
   return entry.worklogId
-    ? api.jira.updateWorklog(target, entry.worklogId, entry.startTs, entry.endTs)
-    : api.jira.submitWorklog(target, entry.startTs, entry.endTs);
+    ? api.jira.updateWorklog(target, entry.worklogId, entry.startTs, entry.endTs, entry.comment)
+    : api.jira.submitWorklog(target, entry.startTs, entry.endTs, entry.comment);
 }
 
 export function deleteWorklog(entry) {

@@ -110,6 +110,11 @@ export function applyMerge(entries, newEntry, notAfterTs = newEntry.startTs) {
     startTs: Math.min(...absorbed.map((e) => e.startTs), newEntry.startTs),
     endTs: ends.length ? Math.max(...ends) : null,
     status: newEntry.issueKey || base.issueKey ? 'pending' : 'local',
+    // First description wins rather than the two being joined: resuming a timer on
+    // the same issue repeatedly would otherwise append the same sentence each time.
+    // The new entry's is preferred because it is the more recent statement of what
+    // the block is, and a timer started from the omnibar carries none at all.
+    comment: newEntry.comment || base.comment || null,
     errorMsg: null,
     worklogId: null,
   };

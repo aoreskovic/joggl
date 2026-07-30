@@ -32,6 +32,7 @@ const sampleEntries = [
     endTs: T(10, 30),
     status: 'synced',
     worklogId: '90210',
+    comment: 'reviewed the power section with Marko',
     errorMsg: null,
   },
   {
@@ -43,6 +44,7 @@ const sampleEntries = [
     endTs: T(12, 45),
     status: 'local',
     worklogId: null,
+    comment: null,
     errorMsg: null,
   },
   {
@@ -54,6 +56,7 @@ const sampleEntries = [
     endTs: T(15),
     status: 'error',
     worklogId: null,
+    comment: 'first line\nsecond line',
     errorMsg: 'HTTP 401',
   },
 ];
@@ -121,6 +124,28 @@ test('a running entry round-trips with endTs still null', async () => {
     const [entry] = (await getDay('2026-07-28')).entries;
     assert.equal(entry.endTs, null);
     assert.equal(entry.status, 'pending');
+  });
+});
+
+test('a Work Description round-trips, newlines and all', async () => {
+  await withStore(async () => {
+    await saveDay('2026-07-28', sampleEntries);
+    const { entries } = await getDay('2026-07-28');
+    assert.equal(entries[0].comment, 'reviewed the power section with Marko');
+    assert.equal(entries[2].comment, 'first line\nsecond line');
+    assert.equal(entries[1].comment, null, 'no description stays null, not ""');
+  });
+});
+
+test('an entry saved before comments existed reads back with a null one', async () => {
+  await withStore(async () => {
+    // Day logs written by an earlier build have no `comment` key at all. Reading
+    // one must not produce `undefined`, which would serialise away on the next save.
+    const { comment, ...withoutComment } = sampleEntries[0];
+    await saveDay('2026-07-28', [withoutComment]);
+    const [entry] = (await getDay('2026-07-28')).entries;
+    assert.equal(entry.comment, null);
+    assert.ok('comment' in entry);
   });
 });
 

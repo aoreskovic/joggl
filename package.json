@@ -1,6 +1,6 @@
 {
   "name": "joggl",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Desktop time tracker with a Toggl-like timeline that logs worklogs to Jira Cloud",
   "license": "MIT",
   "private": true,
@@ -13,7 +13,8 @@
     "dist": "electron-builder --win",
     "icon": "node scripts/make-icon.mjs assets/icon.png",
     "bump": "npm version minor --no-git-tag-version",
-    "uicheck": "electron . --uicheck"
+    "uicheck": "electron . --uicheck",
+    "uicheck:fast": "electron . --uicheck --uicheck-fast"
   },
   "repository": {
     "type": "git",

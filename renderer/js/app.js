@@ -134,6 +134,7 @@ async function boot() {
   wireHelp();
   wirePinPicker();
   wireGlobal();
+  installTestHook();
 
   await selectDate(todayKey());
   await restoreTimer(await loadTimer());
@@ -158,6 +159,43 @@ async function boot() {
 
   if (needsSetup()) openSetup();
   else await loadIssues();
+}
+
+/**
+ * A handle for `npm run uicheck`, and for nothing else.
+ *
+ * The harness drives the app through `webContents.executeJavaScript`, and with no
+ * signal for "the work finished", every wait it made was a fixed sleep sized for the
+ * worst case — which is where five and a half minutes of a twenty-minute run went.
+ *
+ * Three fields, no IPC and no preload change: this is renderer-local, and the harness
+ * already runs arbitrary JS here, so the narrow allowlist in `CLAUDE.md` is untouched.
+ */
+function installTestHook() {
+  window.__jogglTest = {
+    /** Bumped on every repaint, for the checks that care that one happened. */
+    renders: 0,
+
+    /** Settles exactly when the Jira read in flight lands, or at once if none is. */
+    whenIdle: () => externalPending ?? Promise.resolve(),
+
+    /**
+     * Re-read the day log and repaint, **without** touching Jira.
+     *
+     * Deliberately not `selectDate`: that goes through `loadDay`, which clears the
+     * Jira-side rows because they belong to the day being left. Reloading through it
+     * would wipe every read-only row, and the checks that need one would lose their
+     * premise. Nothing here writes to Jira, so the rows on screen are still true.
+     */
+    async reloadDay() {
+      const day = await window.joggl.days.get(state.selectedDate);
+      state.entries = day.entries;
+      renderAll();
+    },
+  };
+  registerRenderer(() => {
+    window.__jogglTest.renders++;
+  });
 }
 
 // ── Day selection ──────────────────────────────────────────────────────────
@@ -186,10 +224,23 @@ async function selectDate(date) {
   refreshExternal(date);
 }
 
+/**
+ * The read that is in flight, or null.
+ *
+ * Held rather than dropped so something can wait for it. Nothing in the app needs
+ * that — every caller here is fire-and-forget — but the UI check does, and the
+ * alternative is what it used to do: sleep for a second and a half and hope.
+ */
+let externalPending = null;
+
 function refreshExternal(date = state.selectedDate) {
-  return loadExternalWorklogs(date)
+  externalPending = loadExternalWorklogs(date)
     .then(() => renderAll())
-    .catch(() => renderAll());
+    .catch(() => renderAll())
+    .finally(() => {
+      externalPending = null;
+    });
+  return externalPending;
 }
 
 /**

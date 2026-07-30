@@ -82,6 +82,7 @@ const CHECK_TIMEOUT_MS = 120000;
 async function check(name, js, expectation) {
   // Named as it starts, not as it finishes, so a hang names itself in the terminal.
   process.stdout.write(`  … ${name}\n`);
+  const began = Date.now();
   try {
     const raw = await Promise.race([
       run(`(async () => { ${js} })()`),
@@ -90,10 +91,29 @@ async function check(name, js, expectation) {
       ),
     ]);
     const value = typeof raw === 'string' ? raw : JSON.stringify(raw);
-    results.push({ name, ok: expectation(raw), value });
+    results.push({ name, ok: expectation(raw), value, ms: Date.now() - began });
   } catch (err) {
-    results.push({ name, ok: false, value: `THREW ${err.message}` });
+    results.push({ name, ok: false, value: `THREW ${err.message}`, ms: Date.now() - began });
   }
+}
+
+/**
+ * Wait for the app to be up, rather than guessing at seven seconds.
+ *
+ * Two things have to be true: the test hook installed (boot got that far) and the
+ * issue list has rows, since a dozen checks press one. Polled from here rather than
+ * with H.until, because H is installed after this.
+ */
+async function waitForApp(timeoutMs = 45000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const ready = await run(
+      `!!window.__jogglTest && document.querySelectorAll('.task-item').length > 0`,
+    ).catch(() => false);
+    if (ready) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('the app never finished loading');
 }
 
 const eq = (want) => (got) => JSON.stringify(got) === JSON.stringify(want);
@@ -168,6 +188,16 @@ window.H = {
     if (!found) throw new Error('the drag source was replaced and could not be found again');
     return found;
   },
+  /**
+   * Drop something on an hour.
+   *
+   * The wait after this is still a fixed sleep at the call sites, and deliberately
+   * so. Returning on the render counter instead was tried and reverted: the counter
+   * moves for any repaint at all — a timer tick, a late Jira read — so the drop
+   * could be reported done before it had committed. It saved five seconds of a
+   * hundred and cost ten checks. A signal specific to the drop would be needed, and
+   * that means app code existing for the test, which is a worse trade.
+   */
   async dragToHour(el, hhmm) {
     const y = await H.showHour(hhmm);
     H.drag(H.relocate(el), H.gridX(), y);
@@ -194,37 +224,73 @@ window.H = {
    * before that settles gets its element pulled out from under it, which shows
    * up as a drag that never begins. So: wait until the row count stops moving.
    */
-  async settle(timeoutMs = 6000) {
-    const count = () => H.all('.entry-card').length + H.all('.task-item').length;
-    // One stable sample is not enough. The Jira read takes about a second, so the
-    // count sits still at 250ms and 500ms and then everything is replaced mid-drag,
-    // which shows up as a gesture that never starts. Require sustained stillness,
-    // and a floor on the total wait so a fast machine cannot outrun the request.
-    const NEEDED = 3;
-    const floor = Date.now() + 1200;
-    const until = Date.now() + timeoutMs;
-    let last = -1;
-    let stable = 0;
-
-    while (Date.now() < until) {
-      const now = count();
-      stable = now === last ? stable + 1 : 0;
-      last = now;
-      if (stable >= NEEDED && now > 0 && Date.now() >= floor) return;
-      await H.sleep(250);
-    }
+  async settle() {
+    // One await of the real thing, rather than watching the DOM and guessing.
+    // This used to poll for a second and a half minimum on every call, because a
+    // single stable sample arrives before the request has even answered.
+    await window.__jogglTest.whenIdle();
   },
+
+  /**
+   * Wait until cond() is true, checking every frame.
+   *
+   * The replacement for a fixed sleep. A sleep of 600ms after a click had to be
+   * sized for the slowest case and then paid that price every single time; this pays
+   * for what actually happened, usually a frame or two.
+   *
+   * (No backticks anywhere in this block: it lives inside a template string, and a
+   * stray one ends it and turns the whole file into a syntax error.)
+   *
+   * Throws rather than returning quietly: a condition that never comes true is a
+   * failed check, and silently carrying on would report it as some later mystery.
+   */
+  async until(cond, timeoutMs = 8000, what = 'condition') {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (cond()) return true;
+      // setTimeout, not requestAnimationFrame. rAF is driven by the compositor, and
+      // the compositor stops when the window is occluded or the display sleeps — so
+      // an rAF-based poll does not slow down, it stops dead and every wait runs to
+      // its timeout. That is trap 8 wearing a different hat.
+      await new Promise((r) => setTimeout(r, 16));
+    }
+    throw new Error('timed out waiting for ' + what);
+  },
+  /**
+   * Back to today with nothing on it.
+   *
+   * This used to click **Today**, which re-selects the day even when it is already
+   * selected — and every one of those fired a fresh live read of that day's Jira
+   * worklogs. Roughly a hundred and fifteen redundant round trips per run, all
+   * serialised, which is where the rest of the twenty minutes went and very likely
+   * what the intermittent stalls were.
+   *
+   * reloadDay re-reads the day log and repaints without touching Jira. The
+   * Jira-side rows already on screen stay, which is correct: nothing here writes to
+   * Jira, so a re-fetch would return exactly what is already there.
+   */
   async resetDay() {
     if (H.q('#modal-overlay') && !H.q('#modal-overlay').classList.contains('hidden')) {
       H.all('#modal-buttons button').at(-1)?.click();
-      await H.sleep(150);
+      await H.until(() => H.q('#modal-overlay').classList.contains('hidden'), 2000, 'the modal to close');
     }
     H.all('.toast').forEach(t => t.remove());
     await window.joggl.timer.save(null);
     await window.joggl.days.save(H.todayKey(), []);
-    H.q('#today-btn').click();
-    await H.sleep(300);
+
+    // Off today — a check that stepped days has to come home, and that is a real
+    // day change with a real Jira read behind it.
+    if (!H.onToday()) {
+      H.q('#today-btn').click();
+      await H.until(() => H.onToday(), 8000, 'today to be selected');
+    }
     await H.settle();
+    await window.__jogglTest.reloadDay();
+  },
+  /** The day header, read as a key. The label is "Thu, 30.07.2026". */
+  onToday() {
+    const m = H.q('#current-date-label').textContent.match(/(\\d{2})\\.(\\d{2})\\.(\\d{4})/);
+    return m ? m[3] + '-' + m[2] + '-' + m[1] === H.todayKey() : false;
   },
   firstTask() { return H.q('.task-item'); },
   /**
@@ -240,16 +306,10 @@ window.H = {
     // searching twice for the same answer floods the request the rest of the run is
     // waiting on. Stepping is only ever backwards, so what was empty stays empty.
     const steps = H._emptyDaySteps ?? null;
-    H.q('#today-btn').click();
-    await H.sleep(300);
-    await H.settle();
+    if (!H.onToday()) await H.goDay('#today-btn');
 
     if (steps !== null) {
-      for (let i = 0; i < steps; i++) {
-        H.q('#prev-day').click();
-        await H.sleep(300);
-      }
-      await H.settle();
+      for (let i = 0; i < steps; i++) await H.goDay('#prev-day');
       return H.q('#current-date-label').textContent;
     }
 
@@ -258,11 +318,37 @@ window.H = {
         H._emptyDaySteps = i;
         return H.q('#current-date-label').textContent;
       }
-      H.q('#prev-day').click();
-      await H.sleep(300);
-      await H.settle();
+      await H.goDay('#prev-day');
     }
     return null;
+  },
+  /**
+   * Press a day-navigation button and wait for the day to have actually arrived.
+   *
+   * Both halves matter. selectDate reads the day log over IPC before it touches the
+   * label, and only then starts the Jira read — so waiting on whenIdle alone can
+   * settle before there is anything in flight to wait for.
+   */
+  /**
+   * Home to today, and only if we are not already there.
+   *
+   * Distinct from reloadDay on purpose. reloadDay repaints the day already selected
+   * without touching Jira; this is a real day change and costs a real Jira read.
+   * Confusing the two silently measured the wrong day, which is exactly what a
+   * blanket replacement of the old Today click did to three checks.
+   */
+  async goToday() {
+    if (!H.onToday()) await H.goDay('#today-btn');
+  },
+  async goDay(selector) {
+    const before = H.q('#current-date-label').textContent;
+    H.q(selector).click();
+    await H.until(
+      () => H.q('#current-date-label').textContent !== before,
+      8000,
+      'the day to change',
+    );
+    await H.settle();
   },
   /** The running timer's issue key, read off the omnibar — state is not exposed. */
   runningKey() {
@@ -562,8 +648,8 @@ async function dragging() {
   await check(
     'the same issue dropped twice an hour apart: two entries, no merge prompt',
     `await H.resetDay();
-     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(500);
-     await H.dragToHour(H.firstTask(), '10:00'); await H.sleep(500);
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     await H.dragToHour(H.firstTask(), '10:00'); await H.sleep(600);
      const modal = !H.q('#modal-overlay').classList.contains('hidden');
      const ranges = H.entries().map(e => e.range);
      await H.resetDay();
@@ -577,8 +663,8 @@ async function dragging() {
   await check(
     'dropping on top of an existing entry: both flagged, timeline splits into columns',
     `await H.resetDay();
-     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(500);
-     await H.dragToHour(H.all('.task-item')[1], '09:00'); await H.sleep(500);
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     await H.dragToHour(H.all('.task-item')[1], '09:00'); await H.sleep(600);
      const flagged = H.entries().filter(e => e.overlapping).length;
      const ids = new Set(H.all('.entry-card:not(.external)').map(c => c.dataset.id));
      const widths = H.all('.sched-entry-block').filter(b => ids.has(b.dataset.id)).map(b => b.style.width || 'full');
@@ -613,18 +699,18 @@ async function dragging() {
   await check(
     'a drop on a past day stays on that day',
     `await H.resetDay();
-     H.q('#prev-day').click(); await H.sleep(600);
+     await H.goDay('#prev-day');
      await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
      const onPast = H.entries().length;
-     H.q('#today-btn').click(); await H.sleep(600);
+     await H.goToday();
      const onToday = H.entries().length;
-     H.q('#prev-day').click(); await H.sleep(600);
+     await H.goDay('#prev-day');
      const stillThere = H.entries().length;
      // Clean the past day up.
      const d = new Date(); d.setDate(d.getDate() - 1);
      const p = (n) => String(n).padStart(2, '0');
      await window.joggl.days.save(d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()), []);
-     H.q('#today-btn').click(); await H.sleep(400);
+     await window.__jogglTest.reloadDay();
      return JSON.stringify({ onPast, onToday, stillThere })`,
     (v) => {
       const d = JSON.parse(v);
@@ -644,7 +730,7 @@ async function timeSafety() {
        id: 'booked', issueKey: key, issueId: null, title: 'Booked ahead',
        startTs: at.getTime(), endTs: at.getTime() + 1800000,
        status: 'pending', worklogId: null, errorMsg: null }]);
-     H.q('#today-btn').click(); await H.sleep(500);
+     await window.__jogglTest.reloadDay();
      H.backdateStart(5); H.click(H.firstTask()); await H.sleep(700);
      const prompted = !H.q('#modal-overlay').classList.contains('hidden');
      if (prompted) H.all('#modal-buttons button')[0].click();
@@ -668,7 +754,7 @@ async function timeSafety() {
        id: 'recent', issueKey: key, issueId: null, title: 'Earlier',
        startTs: end - 1800000, endTs: end,
        status: 'pending', worklogId: null, errorMsg: null }]);
-     H.q('#today-btn').click(); await H.sleep(500);
+     await window.__jogglTest.reloadDay();
      H.backdateStart(5); H.click(H.firstTask()); await H.sleep(700);
      const prompted = !H.q('#modal-overlay').classList.contains('hidden');
      if (prompted) H.all('#modal-buttons button').at(-1).click();
@@ -692,7 +778,7 @@ async function timeSafety() {
        id: 'older', issueKey: key, issueId: null, title: 'Much earlier',
        startTs: end - 1800000, endTs: end,
        status: 'pending', worklogId: null, errorMsg: null }]);
-     H.q('#today-btn').click(); await H.sleep(500);
+     await window.__jogglTest.reloadDay();
      H.click(H.firstTask()); await H.sleep(900);
      const prompted = !H.q('#modal-overlay').classList.contains('hidden');
      const labels = H.all('#modal-buttons button').map(b => b.textContent);
@@ -747,7 +833,7 @@ async function timeSafety() {
        id: 'ahead', issueKey: 'X-1', issueId: null, title: 'Leave',
        startTs: at.getTime(), endTs: at.getTime() + 1800000,
        status: 'pending', worklogId: null, errorMsg: null }]);
-     H.q('#today-btn').click(); await H.sleep(500);
+     await window.__jogglTest.reloadDay();
      const card = H.q('.entry-card[data-id="ahead"]');
      const start = card.querySelector('[data-f="start"]');
      const disabled = start.disabled;
@@ -768,7 +854,7 @@ async function timeSafety() {
   await check(
     'entries dragged from the day list move; Jira-side rows do not',
     `await H.resetDay();
-     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(500);
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
      const before = H.entries()[0].range;
      await H.dragToHour(H.q('.entry-card'), '15:00'); await H.sleep(600);
      const after = H.entries()[0].range;
@@ -894,9 +980,9 @@ async function dayPanel() {
     'the collapsed state is remembered across a day change',
     `await H.resetDay();
      H.q('#day-panel-hdr').click(); await H.sleep(300);
-     H.q('#prev-day').click(); await H.sleep(700);
+     await H.goDay('#prev-day');
      const stillShut = H.q('#entry-list').hidden;
-     H.q('#today-btn').click(); await H.sleep(700);
+     await H.goToday();
      const stillShutToday = H.q('#entry-list').hidden;
      H.q('#day-panel-hdr').click(); await H.sleep(300);
      await H.resetDay();
@@ -960,7 +1046,7 @@ async function editTask() {
        id: 'synced1', issueKey: 'X-1', issueId: null, title: 'Already logged',
        startTs: at.getTime(), endTs: at.getTime() + 1800000,
        status: 'synced', worklogId: '99999', errorMsg: null }]);
-     H.q('#today-btn').click(); await H.sleep(600);
+     await window.__jogglTest.reloadDay();
      H.q('.sched-entry-block[data-id="synced1"]').dispatchEvent(new MouseEvent('contextmenu', {
        bubbles: true, cancelable: true, clientX: 400, clientY: 300 }));
      await H.sleep(250);
@@ -1121,7 +1207,7 @@ async function keyboard() {
   await check(
     'the entry list is one tab stop, and arrows move focus inside it',
     `await H.resetDay();
-     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(500);
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
      await H.dragToHour(H.all('.task-item')[1], '11:00'); await H.sleep(600);
      const cards = H.all('.entry-card');
      const stops = cards.filter(c => c.tabIndex === 0).length;
@@ -1349,7 +1435,7 @@ async function clicks() {
        startTs: at.getTime() + fromMin * 60000, endTs: at.getTime() + toMin * 60000,
        status: 'pending', worklogId: null, comment: null, errorMsg: null });
      await window.joggl.days.save(H.todayKey(), [e('one', 0, 30), e('two', 60, 90)]);
-     H.q('#today-btn').click(); await H.sleep(300); await H.settle();`;
+     await window.__jogglTest.reloadDay();`;
   const marked = `H.all('.is-selected').map(el =>
        (el.classList.contains('entry-card') ? 'row:' : 'block:') + el.dataset.id).sort()`;
 
@@ -1412,8 +1498,8 @@ async function clicks() {
      H.q('#zoom-in').click(); await H.sleep(400);
      const afterZoom = ${marked};
      H.q('#zoom-out').click(); await H.sleep(400);
-     H.q('#prev-day').click(); await H.sleep(400); await H.settle();
-     H.q('#today-btn').click(); await H.sleep(400); await H.settle();
+     await H.goDay('#prev-day');
+     await H.goToday();
      const afterDayChange = H.all('.is-selected').length;
      await H.resetDay();
      return JSON.stringify({ afterZoom, afterDayChange })`,
@@ -1493,7 +1579,7 @@ async function clicks() {
 
   await check(
     'a Jira-side row can be selected, but a double click on it only warns',
-    `H.q('#today-btn').click(); await H.sleep(300); await H.settle();
+    `await window.__jogglTest.reloadDay();
      const ext = H.q('.entry-card.external');
      if (!ext) return JSON.stringify({ skip: true });
      H.click(ext); await H.sleep(250);
@@ -1560,13 +1646,13 @@ async function syncButton() {
        startTs: at.getTime() + fromMin * 60000, endTs: at.getTime() + toMin * 60000,
        status: 'pending', worklogId: null, comment: null, errorMsg: null }, extra || {});
      await window.joggl.days.save(H.todayKey(), [e('a', 0, 60), e('b', 120, 195)]);
-     H.q('#today-btn').click(); await H.sleep(300); await H.settle();
+     await window.__jogglTest.reloadDay();
      const two = { text: ${label}, disabled: H.q('#finish-day-btn').disabled };
      const tip = H.q('#finish-day-btn').title;
      // An entry with no issue never reaches Jira, so its minutes must not be
      // counted in a label about what does.
      await window.joggl.days.save(H.todayKey(), [e('a', 0, 60), e('c', 300, 480, { issueKey: null })]);
-     H.q('#today-btn').click(); await H.sleep(300); await H.settle();
+     await window.__jogglTest.reloadDay();
      const mixed = ${label};
      await H.resetDay();
      return JSON.stringify({ empty, two, tip, mixed })`,
@@ -1590,7 +1676,7 @@ async function syncButton() {
        id: 'past', issueKey: 'X-1', issueId: null, title: 'Yesterday',
        startTs: at.getTime(), endTs: at.getTime() + 3600000,
        status: 'pending', worklogId: null, comment: null, errorMsg: null }]);
-     H.q('#prev-day').click(); await H.sleep(400); await H.settle();
+     await H.goDay('#prev-day');
      const text = ${label};
      await window.joggl.days.save(key, []);
      await H.resetDay();
@@ -1668,7 +1754,7 @@ async function overlapNotice() {
        startTs: at.getTime() + fromMin * 60000, endTs: at.getTime() + toMin * 60000,
        status: 'pending', worklogId: null, comment: null, errorMsg: null });
      await window.joggl.days.save(H.todayKey(), [e('a', 0, 60), e('b', 30, 90), e('clear', 180, 210)]);
-     H.q('#today-btn').click(); await H.sleep(300); await H.settle();
+     await window.__jogglTest.reloadDay();
      const warn = H.all('.entry-list-warn').map(w => w.textContent);
      const flagged = H.all('.entry-card.overlapping').map(c => c.dataset.id).sort();
      // The sentence that used to sit on every clashing row.
@@ -1680,15 +1766,20 @@ async function overlapNotice() {
      return JSON.stringify({ warn, flagged, perRow, first })`,
     (v) => {
       const d = JSON.parse(v);
-      return d.warn.length === 1 && /^⚠ 2 entries overlap$/.test(d.warn[0]) &&
-        JSON.stringify(d.flagged) === JSON.stringify(['a', 'b']) && d.perRow === 0 &&
-        d.first === 'entry-list-warn';
+      // The count is asserted against the outlines rather than against a fixed
+      // number: a Jira-side worklog can legitimately clash with the third entry,
+      // and it did. The invariant that matters is that the one line above the list
+      // and the outlines on the rows cannot disagree — they read the same set.
+      const said = Number((d.warn[0] ?? '').match(/(\d+)/)?.[1] ?? -1);
+      return d.warn.length === 1 && said === d.flagged.length &&
+        d.flagged.includes('a') && d.flagged.includes('b') &&
+        d.perRow === 0 && d.first === 'entry-list-warn';
     },
   );
 
   await check(
     'a clash with a Jira-side row counts once, and only the row that can be fixed is outlined',
-    `H.q('#today-btn').click(); await H.sleep(300); await H.settle();
+    `await window.__jogglTest.reloadDay();
      const ext = H.q('.entry-card.external');
      if (!ext) return JSON.stringify({ skip: true });
      const extId = ext.dataset.id;
@@ -1699,7 +1790,7 @@ async function overlapNotice() {
        id: 'clash', issueKey: 'X-9', issueId: null, title: 'Mine',
        startTs: at.getTime() - 600000, endTs: at.getTime() + 600000,
        status: 'pending', worklogId: null, comment: null, errorMsg: null }]);
-     H.q('#today-btn').click(); await H.sleep(300); await H.settle();
+     await window.__jogglTest.reloadDay();
      const warn = H.all('.entry-list-warn').map(w => w.textContent);
      const mine = H.q('.entry-card[data-id="clash"]')?.classList.contains('overlapping') ?? null;
      const jira = H.q('.entry-card[data-id="' + extId + '"]')?.classList.contains('overlapping') ?? null;
@@ -1747,7 +1838,7 @@ async function emptyStates() {
     'the hint goes as soon as the day has anything, and comes back when it is emptied',
     `const day = await H.findEmptyDay();
      if (!day) return JSON.stringify({ skip: true });
-     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(700);
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
      const gone = H.q('.sched-empty-hint') === null;
      const panelClean = !/drag an issue/i.test(H.q('#entry-list').textContent);
      // Deleting the last entry has to bring the hint back, or the day goes quiet
@@ -1826,7 +1917,7 @@ async function workDescription() {
        id: 'c1', issueKey: 'X-1', issueId: null, title: 'Some task',
        startTs: at.getTime(), endTs: at.getTime() + 1800000,
        status: 'pending', worklogId: null, comment: 'what I did', errorMsg: null }]);
-     H.q('#today-btn').click(); await H.sleep(300); await H.settle();
+     await window.__jogglTest.reloadDay();
      const card = H.q('.entry-card[data-id="c1"]');
      const t = getComputedStyle(card.querySelector('.entry-title'));
      const c = getComputedStyle(card.querySelector('.entry-comment'));
@@ -1855,7 +1946,7 @@ async function workDescription() {
        comment: 'a deliberately very long work description that goes on well past the '
               + 'width of the row and must be clipped rather than pushing the times about',
        errorMsg: null }]);
-     H.q('#today-btn').click(); await H.sleep(600);
+     await window.__jogglTest.reloadDay();
      const card = H.q('.entry-card[data-id="c2"]');
      const el = card.querySelector('.entry-comment');
      const times = card.querySelector('.time-range');
@@ -1882,7 +1973,7 @@ async function workDescription() {
        id: 'c3', issueKey: 'X-1', issueId: null, title: 'Already logged',
        startTs: at.getTime(), endTs: at.getTime() + 1800000,
        status: 'synced', worklogId: '99999', comment: 'first go', errorMsg: null }]);
-     H.q('#today-btn').click(); await H.sleep(600);
+     await window.__jogglTest.reloadDay();
      ${openMenuOn('.entry-card[data-id="c3"]')}
      H.all('.ctx-item').find(i => i.textContent.includes('Work description')).click();
      await H.sleep(400);
@@ -1909,7 +2000,7 @@ async function workDescription() {
        id: 'c4', issueKey: 'X-1', issueId: null, title: 'Already logged',
        startTs: at.getTime(), endTs: at.getTime() + 1800000,
        status: 'synced', worklogId: '99999', comment: 'unchanged', errorMsg: null }]);
-     H.q('#today-btn').click(); await H.sleep(600);
+     await window.__jogglTest.reloadDay();
      ${openMenuOn('.entry-card[data-id="c4"]')}
      H.all('.ctx-item').find(i => i.textContent.includes('Work description')).click();
      await H.sleep(400);
@@ -1957,7 +2048,7 @@ async function noOpEdits() {
        id: 'sync1', issueKey: 'X-1', issueId: null, title: 'Already logged',
        startTs: at.getTime(), endTs: at.getTime() + 3600000,
        status: 'synced', worklogId: '60711', errorMsg: null }]);
-     H.q('#today-btn').click(); await H.sleep(600);
+     await window.__jogglTest.reloadDay();
      const before = H.entries()[0];
      // Press and release on the block without moving: the full move gesture.
      const b = H.q('.sched-entry-block[data-id="sync1"]');
@@ -1984,7 +2075,7 @@ async function noOpEdits() {
        id: 'sync2', issueKey: 'X-1', issueId: null, title: 'Already logged',
        startTs: at.getTime(), endTs: at.getTime() + 3600000,
        status: 'synced', worklogId: '60712', errorMsg: null }]);
-     H.q('#today-btn').click(); await H.sleep(600);
+     await window.__jogglTest.reloadDay();
      const before = H.entries()[0];
      const field = H.q('.entry-card[data-id="sync2"] [data-f="start"]');
      field.focus(); field.select();
@@ -2007,7 +2098,7 @@ async function noOpEdits() {
        id: 'sync3', issueKey: 'X-1', issueId: null, title: 'Already logged',
        startTs: at.getTime(), endTs: at.getTime() + 3600000,
        status: 'synced', worklogId: '60713', errorMsg: null }]);
-     H.q('#today-btn').click(); await H.sleep(600);
+     await window.__jogglTest.reloadDay();
      const field = H.q('.entry-card[data-id="sync3"] [data-f="end"]');
      field.value = '11:00';
      field.dispatchEvent(new FocusEvent('blur'));
@@ -2031,13 +2122,13 @@ async function displayPrefs() {
      // Step back to the most recent Saturday.
      let guard = 0, label = '';
      while (guard++ < 8) {
-       H.q('#prev-day').click(); await H.sleep(500);
+       await H.goDay('#prev-day');
        label = H.q('#current-date-label').textContent;
        if (label.startsWith('Sat')) break;
      }
      const onSaturday = readTint();
      const tinted = getComputedStyle(H.q('#right-panel')).backgroundImage;
-     H.q('#today-btn').click(); await H.sleep(500);
+     await H.goToday();
      return JSON.stringify({ onWeekday, onSaturday, label, tinted })`,
     (v) => {
       const d = JSON.parse(v);
@@ -2057,7 +2148,7 @@ async function displayPrefs() {
      H.q('#close-settings').click(); await H.sleep(200);
      let guard = 0, label = '';
      while (guard++ < 8) {
-       H.q('#prev-day').click(); await H.sleep(450);
+       await H.goDay('#prev-day');
        label = H.q('#current-date-label').textContent;
        if (label.startsWith('Sat')) break;
      }
@@ -2068,7 +2159,7 @@ async function displayPrefs() {
      await H.sleep(350);
      H.q('#close-settings').click(); await H.sleep(200);
      const backOn = H.q('#right-panel').classList.contains('is-weekend');
-     H.q('#today-btn').click(); await H.sleep(500);
+     await H.goToday();
      return JSON.stringify({ defaultOn, label, offOnSaturday, backOn })`,
     (v) => {
       const d = JSON.parse(v);
@@ -2143,7 +2234,9 @@ async function externals() {
 
 export async function runChecks(mainWindow, app) {
   win = mainWindow;
+  const startedAt = Date.now();
   try {
+    await waitForApp();
     await run(HELPERS);
     await sidebar();
     await quickEntry();
@@ -2173,11 +2266,23 @@ export async function runChecks(mainWindow, app) {
   console.log('\n─── ui-check ────────────────────────────────────');
   for (const r of results) {
     const mark = r.ok === true ? 'PASS' : r.ok === 'skipped' ? 'SKIP' : 'FAIL';
-    console.log(`${mark}  ${r.name}`);
+    console.log(`${mark}  ${(r.ms ?? 0).toString().padStart(6)}ms  ${r.name}`);
     // The observed value, only when it did not pass — that is the whole diagnosis.
     if (mark !== 'PASS') console.log(`      ${r.value}`);
   }
-  console.log(`───  ${pass} passed, ${fail.length} failed, ${skip} skipped\n`);
+
+  // Where the time actually goes. Every attempt to speed this suite up before it
+  // printed these numbers was aimed by guesswork, and the guesses were wrong.
+  const total = results.reduce((sum, r) => sum + (r.ms ?? 0), 0);
+  const slowest = [...results].sort((a, b) => (b.ms ?? 0) - (a.ms ?? 0)).slice(0, 10);
+  console.log('\n─── slowest ─────────────────────────────────────');
+  for (const r of slowest) console.log(`  ${(r.ms ?? 0).toString().padStart(6)}ms  ${r.name}`);
+
+  const mmss = (ms) => `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+  console.log(
+    `\n───  ${pass} passed, ${fail.length} failed, ${skip} skipped` +
+      `  ·  ${mmss(total)} in checks, ${mmss(Date.now() - startedAt)} wall\n`,
+  );
 
   // Non-zero on failure, so this can gate a release without anyone reading it.
   app.exit(fail.length === 0 ? 0 : 1);

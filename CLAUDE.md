@@ -649,6 +649,25 @@ the whole app end to end.
 npm run uicheck
 ```
 
+There are two modes. `npm run uicheck` drives the app against the **live** Jira and is
+the one that must pass before a commit. `npm run uicheck:fast` swaps the whole Jira
+client for `main/jira/fake.js` — same exports, same post-parse shapes, fixtures instead
+of `fetch` — so it needs no network and no credentials, which is what makes it runnable
+after every edit. `main/ipc.js` picks the module in one line, which is the payoff for
+the rule that every network call lives in one place.
+
+**The two must report the same counts.** That is the only thing keeping the fake
+honest; a fixture that has drifted shows up as a check that passes in one and fails in
+the other. The fake also books two worklogs on today and none on any other day, so the
+checks that need a Jira-side row always run and `findEmptyDay` always succeeds — against
+a live site both depend on what happened to be booked that week.
+
+A run takes about two minutes. It used to take ten to twenty, and the difference was
+almost entirely waiting: `H.settle` had a 1.2-second floor, and `H.resetDay` clicked
+**Today** even when today was already selected, so each of some hundred and fifteen
+calls fired a fresh live read of that day's worklogs. Both are gone — see *the hook*
+below.
+
 That runs `scripts/ui-check.mjs`, which walks every table in `test-and-issues.md` and
 exits non-zero on failure. `main/index.js` loads it only under `--uicheck`, which also
 redirects `userData` to a temp directory — a run can never touch a real day log, and it
@@ -699,9 +718,41 @@ Five more, learned from flakes rather than from wrong results:
   gives it two minutes — a run that only prints at the end tells you nothing about where
   it wedged, and a tighter bound fails checks that are merely slow. `findEmptyDay`
   remembers how far back it went, because searching twice floods the request everything
-  after it is queued behind. **A full run now stalls occasionally for exactly this
-  reason** — a different check times out each time, never with a wrong value. See *A run
-  occasionally stalls* in `test-and-issues.md` before believing a timeout.
+  after it is queued behind.
+
+### The hook, and why there are no sleeps left in the waiting
+
+`webContents.executeJavaScript` returns a promise, so the page can hand back a promise
+that settles when the work is actually done. `renderer/js/app.js` installs
+`window.__jogglTest` for exactly that — three fields, renderer-local, **no IPC channel
+and no preload change**, so the narrow allowlist is untouched:
+
+| | |
+|---|---|
+| `whenIdle()` | settles when the Jira read in flight lands, at once if none is. `H.settle()` is one await of it, where it used to poll the DOM for 1.2 seconds minimum |
+| `reloadDay()` | re-read the day log and repaint **without touching Jira** |
+| `renders` | a counter, for the checks that care a repaint happened |
+
+`reloadDay` exists because `loadDay` clears `state.externalEntries` on purpose — they
+belong to the day being left. Reloading through the day picker would therefore wipe
+every Jira-side row, and the checks that need one would lose their premise. Nothing in
+a run writes to Jira, so the rows already on screen are still true.
+
+Three things learned dragging this out of the harness:
+
+1. **`reloadDay` is not `goToday`.** A blanket replacement of the old Today click
+   silently measured the wrong day in three checks, because some of those clicks meant
+   *navigate home* rather than *repaint*. `H.goToday()` is the one that costs a Jira
+   read; `H.goDay()` waits for the label to actually change first, because `selectDate`
+   reads the day log over IPC before it starts the fetch, so `whenIdle` alone can settle
+   before there is anything in flight.
+2. **`H.until` polls on a timer, not `requestAnimationFrame`.** rAF is driven by the
+   compositor, which stops dead when the window is occluded or the display sleeps — so
+   an rAF poll does not slow down, it hangs until its timeout. Trap 8 in another hat.
+3. **The render counter cannot stand in for "the drop committed".** Returning from
+   `dragToHour` on it was tried and reverted: the counter moves for any repaint at all,
+   so a drop could be called done before it had. It saved five seconds of a hundred and
+   cost ten checks. The sleeps after a drop are load-bearing.
 
 What this cannot reach, and what therefore stays manual: anything crossing a process
 restart, and anything that writes to Jira — **never run Finish Day against a live site

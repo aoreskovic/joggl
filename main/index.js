@@ -5,11 +5,13 @@ import { app, BrowserWindow, Menu, Tray, globalShortcut, shell, nativeImage } fr
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import * as credentials from './credentials.js';
 import { initCredentials } from './credentials.js';
 import { applyDevCredentials } from './dev-credentials.js';
 import { registerIpc } from './ipc.js';
 import * as log from './log.js';
 import { initStore } from './store.js';
+import * as settings from './settings.js';
 import { getUiPrefs, saveUiPrefs } from './settings.js';
 
 const ROOT = path.join(import.meta.dirname, '..');
@@ -29,6 +31,9 @@ let quitting = false;
  * the app is open. Both have to happen here, before `whenReady`.
  */
 const uiCheck = process.argv.includes('--uicheck');
+// The fixture-backed Jira also needs credentials that resolve, or every handler
+// stops at "not configured" before it ever reaches the fake. See main/ipc.js.
+const uiCheckFast = process.argv.includes('--uicheck-fast');
 if (uiCheck) {
   app.setPath('userData', path.join(app.getPath('temp'), `joggl-uicheck-${process.pid}`));
 }
@@ -57,9 +62,19 @@ async function start() {
 
   await initStore(app.getPath('userData'));
   initCredentials();
-  await applyDevCredentials({ isPackaged: app.isPackaged, projectRoot: ROOT }).catch((err) =>
-    log.error('Dev credential preset failed:', err),
-  );
+
+  if (uiCheckFast) {
+    // The fake ignores these, but the renderer does not: with nothing configured it
+    // opens the setup wizard over the app and every check presses at a covered
+    // window. Seeded here so the fast run works on a machine that has never had a
+    // real token — which is the point of it.
+    await settings.saveSettings({ baseUrl: 'https://fake.invalid', email: 'fake@example.com' });
+    await credentials.saveToken('fake-token').catch(() => {});
+  } else {
+    await applyDevCredentials({ isPackaged: app.isPackaged, projectRoot: ROOT }).catch((err) =>
+      log.error('Dev credential preset failed:', err),
+    );
+  }
   registerIpc();
 
   await createWindow();
@@ -110,9 +125,9 @@ async function createWindow() {
     const { runChecks } = await import(
       pathToFileURL(path.join(ROOT, 'scripts', 'ui-check.mjs')).href
     );
-    // Long enough for the first issue load to land — several checks need a task
-    // row to press.
-    setTimeout(() => runChecks(mainWindow, app), 7000);
+    // The harness waits for the app itself — see waitForApp. This is only long
+    // enough for the renderer to start evaluating anything at all.
+    setTimeout(() => runChecks(mainWindow, app), 300);
   }
 
   mainWindow.on('resize', debounce(persistBounds, 500));

@@ -16,7 +16,9 @@ short-dependency rule in `CLAUDE.md`.
 
 That makes this file the other half of the test suite. Keep it current.
 
-**Last full pass: 2026-07-30, all 75 checklist items green**, driven by dispatching real
+**Last full pass: 2026-07-30, 74 green and 1 skipped** (the future-start check skips
+after the last hour of the day), in **2m 12s** against the live Jira and **1m 57s**
+against fixtures — both reporting the same counts. Driven by dispatching real
 mouse events into the renderer from the main process against a throwaway
 `--user-data-dir`. See *The script* at the end for how, and for what it does not cover.
 
@@ -25,9 +27,10 @@ mouse events into the renderer from the main process against a throwaway
 ## Running it
 
 ```
-npm start      # the app
-npm test       # 177 tests, must be 0 failures
-npm run uicheck # the checklist below, driven as a script — 46 checks, must be 0 failures
+npm start           # the app
+npm test            # 222 tests, must be 0 failures
+npm run uicheck     # the checklist below as a script, against the live Jira (~2m)
+npm run uicheck:fast # the same, against fixtures — no network, no credentials (~2m)
 ```
 
 The log is at `logs/joggl.log`, credential-redacted. Send it along with any bug report.
@@ -371,20 +374,20 @@ day at 00:05 starts at 00:00 and every hour a check aims at moves.
 found on 2026-07-29, two were "does this element's box fit in the window" and "did the
 panel's scrollTop change", which no amount of reading catches and this catches in seconds.
 
-### A run occasionally stalls, and it is not the app
+### The stall is fixed — what it was
 
-Since the suite passed 75, a full run sometimes reports one or two checks as
-`THREW no answer in 120000ms` — the renderer did not answer for two minutes. Three runs
-on 2026-07-30 went 75/75, then 73/75, then 73/75, and **the pair that fails is different
-every time**. They always fail as a timeout, never as a wrong value, and the log holds no
-renderer error and no Jira error.
+A full run used to report one or two checks as `THREW no answer in 120000ms`, a
+different pair every time, always a timeout and never a wrong value, with nothing in the
+log. Three runs on 2026-07-30 went 75/75, 73/75, 73/75.
 
-So: a timeout on a check that has passed before is not evidence of a regression. Re-run
-it. What it is evidence of is that the suite has outgrown its own shape — nearly every
-check calls `H.resetDay()`, which clicks **Today** even when today is already selected,
-and each of those is another live read of that day's Jira worklogs. Seventy-odd of them
-per run, most redundant. Reloading the day without a re-fetch is the fix, and it needs a
-way to re-render from the page that does not go through the day picker.
+The cause was the shape of the suite, not the app: nearly every check called
+`H.resetDay()`, which clicked **Today** even when today was already selected, and each
+of those was another live read of that day's Jira worklogs — about a hundred and fifteen
+per run, serialised, almost all redundant. `H.resetDay()` now repaints through
+`window.__jogglTest.reloadDay()` instead, which touches no network.
+
+A run went from ten to twenty minutes to about two, and the timeouts have not come back.
+If one does, it is worth taking seriously again rather than shrugging at.
 
 ### Still manual
 

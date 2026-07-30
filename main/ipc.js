@@ -9,9 +9,20 @@ import { app, ipcMain, shell } from 'electron';
 
 import * as credentials from './credentials.js';
 import * as days from './days.js';
-import * as jira from './jira/client.js';
+import * as fakeJira from './jira/fake.js';
+import * as realJira from './jira/client.js';
 import * as log from './log.js';
 import * as settings from './settings.js';
+
+/**
+ * `npm run uicheck:fast` swaps the whole Jira client for fixtures.
+ *
+ * One binding, decided once at startup, because CLAUDE.md's rule that every network
+ * call lives in a single module is what makes this a two-line change instead of a
+ * mocking framework. The live client stays the default — `npm run uicheck` and the
+ * app itself are untouched.
+ */
+const jira = process.argv.includes('--uicheck-fast') ? fakeJira : realJira;
 
 /** Resolve the credentials a Jira call needs, preferring values passed in by a
  *  settings screen that has not saved yet. */

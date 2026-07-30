@@ -14,6 +14,7 @@ import {
   wireEntryList,
   updateTotal,
 } from './entries.js';
+import { closeHelp, toggleHelp, wireHelp } from './help.js';
 import { PLAY_ICON, STOP_ICON, ZOOM_ICON } from './icons.js';
 import { createRowNav } from './keynav.js';
 import { isPinned, renderPins, togglePin } from './pins.js';
@@ -39,6 +40,7 @@ import {
   applyFontSize,
   applyTheme,
   applyWeekendTint,
+  closeSettings,
   needsSetup,
   openSetup,
   wireSettings,
@@ -129,6 +131,7 @@ async function boot() {
   wireDayView();
   wireDayViewDrag();
   wireEntryList();
+  wireHelp();
   wirePinPicker();
   wireGlobal();
 
@@ -612,15 +615,28 @@ function wireGlobal() {
   });
 
   document.addEventListener('keydown', (event) => {
+    if (event.key === 'F1') {
+      event.preventDefault();
+      toggleHelp();
+      return;
+    }
+
     if (event.key === 'Escape') {
       // Read before closing anything: one Escape closes whatever is open, and only
       // a second one puts the selection down. Doing both at once would clear a
       // selection the user was only dismissing a menu over.
+      //
+      // The setup wizard is deliberately not in this list: on a first run there is
+      // no app behind it to go back to.
       const somethingOpen = !!document.querySelector(
-        '.ctx-menu:not(.hidden), .sched-quick-entry, #modal-overlay:not(.hidden)',
+        '.ctx-menu:not(.hidden), .sched-quick-entry, #modal-overlay:not(.hidden), ' +
+          '#help-overlay:not(.hidden), #settings-overlay:not(.hidden), #pin-overlay:not(.hidden)',
       );
       hideContextMenu();
       hideQuickEntry();
+      closeHelp();
+      closeSettings();
+      $('pin-overlay').classList.add('hidden');
       if (!somethingOpen) clearSelection();
       return;
     }

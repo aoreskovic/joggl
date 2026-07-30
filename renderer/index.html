@@ -37,6 +37,10 @@
 
         <div class="sidebar-spacer"></div>
 
+        <button id="help-btn" class="sidebar-item" title="How Joggl works, and every shortcut (F1)">
+          <span class="sidebar-icon"></span><span class="sidebar-label">Help</span>
+        </button>
+
         <button id="settings-btn" class="sidebar-item" title="Settings">
           <span class="sidebar-icon"></span><span class="sidebar-label">Settings</span>
         </button>
@@ -80,7 +84,8 @@
             </div>
             <div class="day-header-right">
               <span id="total-display" class="total-display">Total: 0m</span>
-              <button id="finish-day-btn" class="btn-primary">Finish Day</button>
+              <!-- Labelled from planFinishDay on every render — see syncLabel. -->
+              <button id="finish-day-btn" class="btn-primary">Sync</button>
             </div>
           </div>
 
@@ -278,6 +283,106 @@
               <option value="12">12 px</option>
             </select>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Help. Prose here, the shortcut table generated from help.js so there is one
+         list of bindings rather than a copy that quietly falls behind. -->
+    <div id="help-overlay" class="overlay hidden">
+      <div class="panel help-panel">
+        <div class="panel-head">
+          <h2>How Joggl works</h2>
+          <button id="close-help" class="btn-outline">Close</button>
+        </div>
+
+        <p class="panel-lede">
+          Joggl tracks your time on a timeline and writes it to Jira as worklogs. Nothing
+          reaches Jira until you press <strong>Sync</strong>, so you can move blocks about
+          all day and correct them before anyone sees them.
+        </p>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Putting time on a day</div>
+          <ul class="help-list">
+            <li>
+              <strong>Run a timer.</strong> Click an issue in the list, or type in the box
+              at the top and press Enter. Click the button again to stop. A timer runs only
+              on today.
+            </li>
+            <li>
+              <strong>Drag an issue onto the day view.</strong> It becomes a half-hour block
+              you can then move and resize. This is how you book time you have already
+              worked, or a meeting that is still in the diary.
+            </li>
+            <li>
+              <strong>Click an empty hour</strong> on the day view and name the task there.
+            </li>
+            <li>
+              <strong>Drag the edges</strong> of a block to change its start or end, or drag
+              the whole block to move it. Everything snaps to the quarter hour.
+            </li>
+            <li>
+              <strong>Type an exact time</strong> in the start, end or duration field of a
+              row in <em>On this day</em> — the other two follow.
+            </li>
+          </ul>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Changing an entry</div>
+          <ul class="help-list">
+            <li>
+              <strong>Click</strong> a block or a row to select it. The same entry lights up
+              in both panels, which is how you tell which block is which row.
+            </li>
+            <li>
+              <strong>Double-click the task name</strong> to book the block against a
+              different issue, keeping its times. <strong>Double-click anywhere else</strong>
+              to write the <em>Work description</em> — the comment Jira shows beside the
+              worklog.
+            </li>
+            <li>
+              <strong>Right-click</strong> for everything at once: edit the task, the work
+              description, restart the timer on it, duplicate it, split it in half, or delete
+              it.
+            </li>
+          </ul>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Getting it into Jira</div>
+          <ul class="help-list">
+            <li>
+              <strong>Sync</strong> sends every pending entry for the day. The button says
+              how many and how long before you press it, and greys out when there is nothing
+              to send. On any day but today it reads <strong>Re-sync</strong> and sends only
+              what is not already there.
+            </li>
+            <li>
+              <strong>● pending</strong> is waiting to be sent. <strong>✓ synced</strong> is
+              in Jira. <strong>◇ local</strong> has no issue attached, so it counts towards
+              your day's total but is never sent. <strong>✗ error</strong> failed, and says
+              why — nothing is ever logged twice.
+            </li>
+            <li>
+              Editing an entry that is already synced turns it back to pending, and the next
+              Sync <em>rewrites</em> that worklog rather than adding a second one.
+            </li>
+            <li>
+              Rows labelled <strong>Manual Jira entry</strong> were booked in the Jira web
+              interface, not here. They are shown so the day's total is honest, and they are
+              read-only — change them in Jira.
+            </li>
+          </ul>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Keyboard</div>
+          <p class="form-hint">
+            Single keys work unless you are typing in a box or a dialog is open.
+          </p>
+          <table class="help-keys" id="help-shortcuts"></table>
         </div>
       </div>
     </div>

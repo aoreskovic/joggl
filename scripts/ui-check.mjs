@@ -1545,6 +1545,120 @@ async function clicks() {
   );
 }
 
+async function syncButton() {
+  const label = `H.q('#finish-day-btn').textContent`;
+
+  await check(
+    'the Sync button says how much it will send, before it is pressed',
+    `await H.resetDay();
+     // Cleared, and today holds only read-only Jira rows if anything: nothing of
+     // Joggl's own is waiting, so the button has to say so and refuse the press.
+     const empty = { text: ${label}, disabled: H.q('#finish-day-btn').disabled };
+     const at = new Date(); at.setHours(9, 0, 0, 0);
+     const e = (id, fromMin, toMin, extra) => Object.assign({
+       id, issueKey: 'X-' + id, issueId: null, title: 'Task ' + id,
+       startTs: at.getTime() + fromMin * 60000, endTs: at.getTime() + toMin * 60000,
+       status: 'pending', worklogId: null, comment: null, errorMsg: null }, extra || {});
+     await window.joggl.days.save(H.todayKey(), [e('a', 0, 60), e('b', 120, 195)]);
+     H.q('#today-btn').click(); await H.sleep(300); await H.settle();
+     const two = { text: ${label}, disabled: H.q('#finish-day-btn').disabled };
+     const tip = H.q('#finish-day-btn').title;
+     // An entry with no issue never reaches Jira, so its minutes must not be
+     // counted in a label about what does.
+     await window.joggl.days.save(H.todayKey(), [e('a', 0, 60), e('c', 300, 480, { issueKey: null })]);
+     H.q('#today-btn').click(); await H.sleep(300); await H.settle();
+     const mixed = ${label};
+     await H.resetDay();
+     return JSON.stringify({ empty, two, tip, mixed })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.empty.text === 'Nothing to sync' && d.empty.disabled === true &&
+        d.two.text === 'Sync · 2 entries, 2h 15m' && d.two.disabled === false &&
+        /2 entries to log in Jira/.test(d.tip) &&
+        d.mixed === 'Sync · 1 entry, 1h 0m';
+    },
+  );
+
+  await check(
+    'a past day offers a re-sync rather than a first send',
+    `await H.resetDay();
+     const y = new Date(); y.setDate(y.getDate() - 1);
+     const p = (n) => String(n).padStart(2, '0');
+     const key = y.getFullYear() + '-' + p(y.getMonth() + 1) + '-' + p(y.getDate());
+     const at = new Date(y); at.setHours(9, 0, 0, 0);
+     await window.joggl.days.save(key, [{
+       id: 'past', issueKey: 'X-1', issueId: null, title: 'Yesterday',
+       startTs: at.getTime(), endTs: at.getTime() + 3600000,
+       status: 'pending', worklogId: null, comment: null, errorMsg: null }]);
+     H.q('#prev-day').click(); await H.sleep(400); await H.settle();
+     const text = ${label};
+     await window.joggl.days.save(key, []);
+     await H.resetDay();
+     return JSON.stringify({ text })`,
+    (v) => JSON.parse(v).text === 'Re-sync · 1 entry, 1h 0m',
+  );
+}
+
+async function help() {
+  await check(
+    'Help sits above Settings, opens from the sidebar and closes again',
+    `await H.resetDay();
+     const items = H.all('.sidebar-item').map(b => b.id || b.dataset.view);
+     H.click(H.q('#help-btn')); await H.sleep(400);
+     const opened = !H.q('#help-overlay').classList.contains('hidden');
+     const heading = H.q('#help-overlay h2')?.textContent ?? null;
+     const focused = document.activeElement?.id ?? null;
+     H.click(H.q('#close-help')); await H.sleep(300);
+     const closed = H.q('#help-overlay').classList.contains('hidden');
+     return JSON.stringify({ items, opened, heading, focused, closed })`,
+    (v) => {
+      const d = JSON.parse(v);
+      const help = d.items.indexOf('help-btn');
+      return help > 0 && d.items[help + 1] === 'settings-btn' &&
+        d.opened && /how joggl works/i.test(d.heading) && d.focused === 'close-help' && d.closed;
+    },
+  );
+
+  await check(
+    'F1 toggles the help, and Escape closes it without clearing the selection',
+    `await H.resetDay();
+     const press = (key) => document.body.dispatchEvent(new KeyboardEvent('keydown', {
+       key, bubbles: true, cancelable: true }));
+     press('F1'); await H.sleep(350);
+     const afterF1 = !H.q('#help-overlay').classList.contains('hidden');
+     press('F1'); await H.sleep(350);
+     const afterAgain = !H.q('#help-overlay').classList.contains('hidden');
+     press('F1'); await H.sleep(350);
+     press('Escape'); await H.sleep(350);
+     const afterEscape = !H.q('#help-overlay').classList.contains('hidden');
+     return JSON.stringify({ afterF1, afterAgain, afterEscape })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.afterF1 === true && d.afterAgain === false && d.afterEscape === false;
+    },
+  );
+
+  await check(
+    'the shortcut table is built from the one list, and covers every group',
+    `await H.resetDay();
+     H.click(H.q('#help-btn')); await H.sleep(400);
+     const groups = H.all('#help-shortcuts .help-keys-group th').map(th => th.textContent);
+     const rows = H.all('#help-shortcuts tr:not(.help-keys-group)').length;
+     const keys = H.all('#help-shortcuts kbd').map(k => k.textContent);
+     const text = H.q('#help-overlay').textContent;
+     H.click(H.q('#close-help')); await H.sleep(250);
+     return JSON.stringify({ groups, rows, keys, text })`,
+    (v) => {
+      const d = JSON.parse(v);
+      // Every binding the app actually has must appear, or the help is a lie.
+      const wanted = ['Ctrl + L', 'Ctrl + Enter', 'F1', 'T', '[ or ]', 'Page Up / Page Down'];
+      return d.groups.length >= 5 && d.rows >= 18 &&
+        wanted.every((k) => d.keys.includes(k)) &&
+        /Manual Jira entry/.test(d.text) && /Work description/.test(d.text);
+    },
+  );
+}
+
 async function overlapNotice() {
   await check(
     'overlaps are counted once above the list, not repeated on every row',
@@ -2039,6 +2153,8 @@ export async function runChecks(mainWindow, app) {
     await keyboard();
     await dateJump();
     await clicks();
+    await syncButton();
+    await help();
     await overlapNotice();
     await emptyStates();
     await workDescription();

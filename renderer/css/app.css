@@ -1669,6 +1669,86 @@ button {
   margin-bottom: 6px;
 }
 
+/* ── Help ── */
+
+/* Wider than the forms: this one is prose and a two-column key table, and both
+   read badly at 460px. The overlay already scrolls, so height looks after itself. */
+.help-panel {
+  max-width: 620px;
+}
+
+.help-list {
+  list-style: disc;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.help-list li + li {
+  margin-top: 7px;
+}
+
+/* The words inside a bullet that name a thing on screen stay in the body colour,
+   so they read as labels rather than as emphasis. */
+.help-list strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.help-keys {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  /* Fixed, or the nowrap on the key cells lets the longest binding in the whole
+     table set the column width and strand the descriptions half a panel away. */
+  table-layout: fixed;
+}
+
+.help-keys td {
+  padding: 4px 0;
+  vertical-align: top;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.help-keys-col {
+  width: 180px;
+}
+
+.help-keys td:first-child {
+  padding-right: 12px;
+  white-space: nowrap;
+}
+
+.help-keys-group th {
+  text-align: left;
+  padding: 14px 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-faint);
+}
+
+.help-keys-group:first-child th {
+  padding-top: 2px;
+}
+
+kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .panel-head {
   display: flex;
   align-items: center;

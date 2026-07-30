@@ -6,7 +6,7 @@
 // them. The day view's pair only toggles `hidden` on markup that already exists —
 // nothing about the working day view moves into a builder function.
 
-import { CHEVRON_ICON, DAY_ICON, MONTH_ICON, SETTINGS_ICON, WEEK_ICON } from './icons.js';
+import { CHEVRON_ICON, DAY_ICON, HELP_ICON, MONTH_ICON, SETTINGS_ICON, WEEK_ICON } from './icons.js';
 import { saveUi, state } from './state.js';
 
 /** Long enough that crossing the rail on the way somewhere else does not open it. */
@@ -75,6 +75,7 @@ export function wireShell() {
     button.querySelector('.sidebar-icon').innerHTML = icons[button.dataset.view] ?? '';
     button.addEventListener('click', () => setActiveView(button.dataset.view));
   }
+  document.querySelector('#help-btn .sidebar-icon').innerHTML = HELP_ICON;
   document.querySelector('#settings-btn .sidebar-icon').innerHTML = SETTINGS_ICON;
 
   applyCollapsed(Boolean(state.ui.sidebarCollapsed));

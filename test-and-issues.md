@@ -2,7 +2,7 @@
 
 What to test by hand, how to test it, and what is known to be broken.
 
-Joggl has 209 unit tests (`npm test`) covering the things where a silent failure loses
+Joggl has 222 unit tests (`npm test`) covering the things where a silent failure loses
 time data: the worklog timestamp formatter, merge decisions at the 30-minute boundary,
 Finish Day's partial-failure transitions, the day-log round trip, quarter-hour snapping,
 what a duplicate, a moved and a repointed entry inherit,
@@ -16,7 +16,7 @@ short-dependency rule in `CLAUDE.md`.
 
 That makes this file the other half of the test suite. Keep it current.
 
-**Last full pass: 2026-07-30, all 70 checklist items green**, driven by dispatching real
+**Last full pass: 2026-07-30, all 75 checklist items green**, driven by dispatching real
 mouse events into the renderer from the main process against a throwaway
 `--user-data-dir`. See *The script* at the end for how, and for what it does not cover.
 
@@ -133,6 +133,34 @@ The point of these is that **nothing** should end up offered for a re-sync.
 | Scroll the timeline, then click an empty hour | A quick-entry popup opens **visibly**, focused, titled with that hour and the half hour after it, and sitting fully inside the window. |
 | Type in it, then press Escape | It closes and nothing is created. |
 | Click an empty hour, then click elsewhere | It closes. A second click on the grid opens it again — a popup that closed itself must not eat the next click. |
+
+### The Sync button
+
+It is the one control that writes to Jira, and it used to say nothing about what it
+was about to do.
+
+| Do this | Correct result |
+|---|---|
+| Open a day with nothing pending | The button reads `Nothing to sync` and is greyed out. A day holding only **Manual Jira entry** rows counts as nothing — none of it is Joggl's to send. |
+| Put two pending entries on today | `Sync · 2 entries, 2h 15m`, with the real total. One entry reads `1 entry`, not `1 entries`. |
+| Hover it | The tooltip separates what will be logged, what will be *rewritten* rather than logged again, what is already in Jira, and whether the running timer is excluded. |
+| Add an entry with no issue attached | The count does not move — that entry is only marked `local` and never sent. The tooltip mentions it. |
+| Have only entries without an issue | `Sync · 2 local entries`. |
+| Start a timer and leave it running | It is not counted. Stopping it is what includes it. |
+| Step to any past day | The verb is `Re-sync`, not `Sync`. |
+| Press it | Mid-run it reads `Syncing 2/5…` and is disabled throughout. |
+
+### Help
+
+| Do this | Correct result |
+|---|---|
+| Look at the sidebar | **Help** sits directly above Settings, with its own icon. |
+| Click it | A panel opens explaining what Joggl is for, the four ways to put time on a day, how to change an entry, and what each status means. The Close button is focused. |
+| Read the keyboard table | Every shortcut the app actually has is listed, grouped. **If you add a binding, add a row to `SHORTCUTS` in `renderer/js/help.js`** — nothing else will. |
+| Press F1 | Opens it. F1 again closes it. |
+| Press Escape with it open | Closes it, and does not also clear the selected entry. |
+| Click the dark area outside the panel | Closes it. |
+| Press Escape with Settings or the pin picker open | Those close too. The first-run setup wizard does not — there is no app behind it yet. |
 
 ### Clicking
 
@@ -342,6 +370,21 @@ day at 00:05 starts at 00:00 and every hour a check aims at moves.
 **Add a check whenever a UI bug is fixed.** That is the whole point — of the three bugs
 found on 2026-07-29, two were "does this element's box fit in the window" and "did the
 panel's scrollTop change", which no amount of reading catches and this catches in seconds.
+
+### A run occasionally stalls, and it is not the app
+
+Since the suite passed 75, a full run sometimes reports one or two checks as
+`THREW no answer in 120000ms` — the renderer did not answer for two minutes. Three runs
+on 2026-07-30 went 75/75, then 73/75, then 73/75, and **the pair that fails is different
+every time**. They always fail as a timeout, never as a wrong value, and the log holds no
+renderer error and no Jira error.
+
+So: a timeout on a check that has passed before is not evidence of a regression. Re-run
+it. What it is evidence of is that the suite has outgrown its own shape — nearly every
+check calls `H.resetDay()`, which clicks **Today** even when today is already selected,
+and each of those is another live read of that day's Jira worklogs. Seventy-odd of them
+per run, most redundant. Reloading the day without a re-fetch is the fix, and it needs a
+way to re-render from the page that does not go through the day picker.
 
 ### Still manual
 

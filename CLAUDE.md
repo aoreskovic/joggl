@@ -80,10 +80,11 @@ been exercised end to end, not just written.
 | Finish Day | Confirmed against real Jira — worklog `60504` on `EHW-70` |
 | Jira-side worklogs | Time logged in the Jira web UI is read back and counted |
 | Logging | `logs/joggl.log`, credential-redacted |
-| Tests | 209 passing, `npm test`; 70 UI checks, `npm run uicheck` |
+| Tests | 222 passing, `npm test`; 75 UI checks, `npm run uicheck` |
 | Shell | Collapsible sidebar with a view registry; week and month tabs present but disabled |
 | Drag to day view | An issue dragged from the task list becomes a 30-minute pending entry |
 | Keyboard | Every list arrow-navigable, every menu and dialog reachable — see below |
+| Help | A panel above Settings: what the app is for, and every shortcut, built from one list |
 
 ### Deviations from this document, and why
 
@@ -187,11 +188,19 @@ three, which is why the rule is enforced in the helper and not left to each call
 | `↑` `↓` `Home` `End` | any list | Move the highlight, wrapping at both ends |
 | `Enter` | any list | Run the highlighted row, or fall back to that list's own Enter |
 | `Enter`, `Shift+F10`, Menu key | a focused row | Open its context menu. Shift+F10 needs no code — the browser dispatches `contextmenu` on the focused element, so `anchorFor` only has to notice the event carries no coordinates and anchor to the row instead |
-| `Escape` | menu or dialog | Close, and put focus back where it came from |
+| `F1` | anywhere | Open and close Help |
+| `Escape` | menu, dialog or panel | Close it, and put focus back where it came from. Again to put the selection down. The setup wizard is deliberately excluded — on a first run there is no app behind it |
 | `Tab` | inside a dialog | Cycles within it; `modal.js` traps it, so the page behind is unreachable |
 
 Bare-key shortcuts are suppressed while a modal is open and while the caret is in a field —
 otherwise `[` would step the day instead of reaching the text.
+
+**Help lists every one of these, in the app.** `renderer/js/help.js` holds the bindings
+as data and builds the table from it, so the panel cannot show a list the code does not
+have — but nothing stops the reverse, so **a new binding means a new row in
+`SHORTCUTS`**. The UI check counts the rows and asserts the ones that exist, which is
+the only pressure there is. The prose beside it lives in `index.html` with the other
+panels.
 
 ---
 
@@ -363,16 +372,30 @@ so the stop falls back to the entry's start.
 
 Merging is always local. Nothing reaches Jira until Finish Day.
 
-### Finish Day
+### Sync
+
+The button is **Sync** on today and **Re-sync** on any other day. The module and its
+functions are still called `finish-day` / `planFinishDay` / `runFinishDay`: renaming
+them would churn every test and every UI check for no behaviour, and finishing a day
+is still what the operation is.
 
 - Stopping a timer **never** submits anything. It writes a `pending` entry locally.
-- **Finish Day** submits all `pending` entries for the selected day, sequentially.
+- **Sync** submits all `pending` entries for the selected day, sequentially.
   An entry that carries a `worklogId` is an edit of something already synced, and is
   rewritten in place rather than posted again.
 - Entries without an `issueKey` are marked `local` and do not block the day from finishing.
 - On partial failure: successful entries keep `synced` and their `worklogId`; failures get `error` plus a message. **No automatic retry.** Show a summary with a `Retry failed` button.
-- Past days: the button becomes **Re-sync Day**, submitting only non-synced entries.
+- Past days: the button becomes **Re-sync**, submitting only non-synced entries.
 - The timer runs only on the current day.
+- **The button says what it will do before it does it** — `Sync · 3 entries, 2h 15m`,
+  and `Nothing to sync`, disabled, when there is neither a worklog to write nor an
+  entry to mark. Pressing the one control that writes to Jira was otherwise a blind
+  action, worst on a day where most of what is on screen is read-only Jira rows going
+  nowhere. `syncLabel` counts **only what reaches Jira**: entries with no issue key
+  are merely marked `local`, so folding their minutes in would overstate it, and they
+  get their own phrasing when they are all there is. `syncTooltip` carries the rest —
+  what is a rewrite rather than a fresh log, what is already there, and that the
+  running timer is excluded.
 
 ### Validation
 
@@ -676,7 +699,9 @@ Five more, learned from flakes rather than from wrong results:
   gives it two minutes — a run that only prints at the end tells you nothing about where
   it wedged, and a tighter bound fails checks that are merely slow. `findEmptyDay`
   remembers how far back it went, because searching twice floods the request everything
-  after it is queued behind.
+  after it is queued behind. **A full run now stalls occasionally for exactly this
+  reason** — a different check times out each time, never with a wrong value. See *A run
+  occasionally stalls* in `test-and-issues.md` before believing a timeout.
 
 What this cannot reach, and what therefore stays manual: anything crossing a process
 restart, and anything that writes to Jira — **never run Finish Day against a live site

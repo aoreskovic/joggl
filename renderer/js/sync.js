@@ -1,6 +1,13 @@
-// Finish Day / Re-sync Day — the only path from Joggl to Jira.
+// Sync / Re-sync — the only path from Joggl to Jira.
 
-import { planFinishDay, resetFailedForRetry, runFinishDay } from './finish-day.js';
+import {
+  nothingToSync,
+  planFinishDay,
+  resetFailedForRetry,
+  runFinishDay,
+  syncLabel,
+  syncTooltip,
+} from './finish-day.js';
 import { askModal } from './modal.js';
 import { renderAll } from './render.js';
 import { isToday, persistDayNow, state, submitWorklog } from './state.js';
@@ -12,8 +19,13 @@ let running = false;
 export function updateFinishButton() {
   const button = document.getElementById('finish-day-btn');
   if (!button) return;
-  button.textContent = running ? 'Syncing…' : isToday() ? 'Finish Day' : 'Re-sync Day';
-  button.disabled = running;
+
+  const plan = planFinishDay(state.entries);
+  button.textContent = syncLabel(plan, { isToday: isToday(), busy: running });
+  button.title = syncTooltip(plan);
+  // Disabled when there is nothing to do, so the day's state is legible from the
+  // button alone rather than from pressing it and reading a toast.
+  button.disabled = running || nothingToSync(plan);
 }
 
 export async function finishDay() {
@@ -46,7 +58,7 @@ export async function finishDay() {
     const result = await runFinishDay(state.entries, submitWorklog, {
       onProgress: (done, total) => {
         const button = document.getElementById('finish-day-btn');
-        if (button) button.textContent = `Syncing ${done}/${total}…`;
+        if (button) button.textContent = syncLabel(plan, { busy: true, done, total });
       },
     });
 

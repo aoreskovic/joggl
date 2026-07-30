@@ -36,6 +36,15 @@ export const SETTINGS_ICON = svg(
     '<rect x="1" y="8.7" width="10" height="1.2" rx=".6" /><circle cx="8.4" cy="9.3" r="1.7" />',
 );
 
+// An "i" rather than a "?": a question mark small enough to sit inside a 14 px ring
+// turns to mush, and an unringed one means hand-rolling a curve that only looks
+// right at one size. A ring, a dot and a bar are three primitives and read at any.
+export const HELP_ICON = svg(
+  '<path fill-rule="evenodd" d="M6 .6a5.4 5.4 0 1 0 0 10.8A5.4 5.4 0 0 0 6 .6Zm0 1.4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z" />' +
+    '<circle cx="6" cy="3.7" r=".8" />' +
+    '<rect x="5.3" y="5.1" width="1.4" height="3.6" rx=".7" />',
+);
+
 // Points left. Collapsed, CSS rotates it rather than swapping in a second icon.
 export const CHEVRON_ICON = svg('<path d="M7.4 1.6 8.6 2.8 5.4 6l3.2 3.2-1.2 1.2L3 6Z" />');
 

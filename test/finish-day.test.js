@@ -5,7 +5,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { planFinishDay, resetFailedForRetry, runFinishDay } from '../renderer/js/finish-day.js';
+import {
+  nothingToSync,
+  planFinishDay,
+  resetFailedForRetry,
+  runFinishDay,
+  syncLabel,
+  syncTooltip,
+} from '../renderer/js/finish-day.js';
 
 const T = (h, m = 0) => new Date(2026, 6, 28, h, m, 0, 0).getTime();
 
@@ -262,4 +269,104 @@ test('a running entry is left untouched', async () => {
   });
   assert.equal(byId(result.entries, 'live').status, 'pending');
   assert.equal(byId(result.entries, 'live').endTs, null);
+});
+
+// ── What the button says before it is pressed ───────────────────────────────
+//
+// The one control that writes to Jira used to read "Finish Day" and nothing more,
+// so pressing it was a blind action. These are display only, but a label that
+// overstates what is about to be sent is worse than no label.
+
+const label = (entries, opts) => syncLabel(planFinishDay(entries), opts);
+
+test('the label counts what will reach Jira, and how long it is', () => {
+  const entries = [
+    entry({ id: 'a', startTs: T(9), endTs: T(10) }),
+    entry({ id: 'b', startTs: T(11), endTs: T(12, 15) }),
+  ];
+  assert.equal(label(entries), 'Sync · 2 entries, 2h 15m');
+});
+
+test('one entry is not "1 entries"', () => {
+  assert.equal(label([entry({ startTs: T(9), endTs: T(9, 30) })]), 'Sync · 1 entry, 30m');
+});
+
+test('a past day is a re-sync, and says so before it is pressed', () => {
+  const entries = [entry({ startTs: T(9), endTs: T(10) })];
+  assert.equal(label(entries, { isToday: false }), 'Re-sync · 1 entry, 1h 0m');
+});
+
+test('entries already in Jira are not counted, because nothing will be sent', () => {
+  const entries = [
+    entry({ id: 'done', status: 'synced', worklogId: '1' }),
+    entry({ id: 'todo', startTs: T(11), endTs: T(12) }),
+  ];
+  assert.equal(label(entries), 'Sync · 1 entry, 1h 0m');
+});
+
+test('the running timer is not counted — stopping it is what includes it', () => {
+  const entries = [entry({ id: 'live', endTs: null }), entry({ id: 'done', startTs: T(11), endTs: T(12) })];
+  assert.equal(label(entries), 'Sync · 1 entry, 1h 0m');
+});
+
+test('entries with no issue get their own phrasing, since none of it reaches Jira', () => {
+  // Folding their minutes into the same number would claim time was being logged
+  // that is only ever marked local.
+  const entries = [entry({ id: 'x', issueKey: null }), entry({ id: 'y', issueKey: null })];
+  assert.equal(label(entries), 'Sync · 2 local entries');
+});
+
+test('a mixed day counts only the Jira half on the button', () => {
+  const entries = [
+    entry({ id: 'jira', startTs: T(9), endTs: T(10) }),
+    entry({ id: 'local', issueKey: null, startTs: T(14), endTs: T(17) }),
+  ];
+  assert.equal(label(entries), 'Sync · 1 entry, 1h 0m', 'the three local hours are not Jira time');
+  assert.match(syncTooltip(planFinishDay(entries)), /1 entry without an issue/);
+});
+
+test('nothing to do says so, in both directions', () => {
+  assert.equal(label([]), 'Nothing to sync');
+  assert.equal(label([], { isToday: false }), 'Nothing to sync');
+  assert.equal(label([entry({ status: 'synced', worklogId: '1' })]), 'Nothing to sync');
+  assert.equal(label([entry({ endTs: null })]), 'Nothing to sync', 'a running timer alone');
+});
+
+test('nothingToSync agrees with the label, so the button cannot say one and do the other', () => {
+  const cases = [
+    [],
+    [entry()],
+    [entry({ issueKey: null })],
+    [entry({ status: 'synced', worklogId: '1' })],
+    [entry({ endTs: null })],
+  ];
+  for (const entries of cases) {
+    const plan = planFinishDay(entries);
+    assert.equal(nothingToSync(plan), syncLabel(plan) === 'Nothing to sync');
+  }
+});
+
+test('a syncing label reports progress, and does not pretend to know the plan', () => {
+  const plan = planFinishDay([entry()]);
+  assert.equal(syncLabel(plan, { busy: true }), 'Syncing…');
+  assert.equal(syncLabel(plan, { busy: true, done: 2, total: 5 }), 'Syncing 2/5…');
+});
+
+test('the tooltip separates a rewrite from a fresh log, which read very differently', () => {
+  const entries = [
+    entry({ id: 'new' }),
+    // Edited after syncing: it keeps its worklogId and is rewritten in place.
+    entry({ id: 'edited', worklogId: '900', status: 'pending' }),
+  ];
+  const tip = syncTooltip(planFinishDay(entries));
+  assert.match(tip, /1 entry to log in Jira/);
+  assert.match(tip, /1 worklog to rewrite, not log again/);
+});
+
+test('the tooltip mentions the running timer, which the button cannot', () => {
+  assert.match(syncTooltip(planFinishDay([entry({ endTs: null })])), /running timer is not included/);
+});
+
+test('an empty day still says something rather than showing a blank tooltip', () => {
+  assert.match(syncTooltip(planFinishDay([])), /Nothing on this day/);
 });

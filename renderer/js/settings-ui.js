@@ -128,7 +128,7 @@ export function openSettings() {
   document.getElementById('settings-overlay').classList.remove('hidden');
 }
 
-function closeSettings() {
+export function closeSettings() {
   document.getElementById('settings-overlay').classList.add('hidden');
 }
 

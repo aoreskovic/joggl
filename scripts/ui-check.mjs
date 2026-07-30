@@ -1340,6 +1340,211 @@ async function dateJump() {
   );
 }
 
+async function clicks() {
+  /** Two entries an hour apart, so a click can pick one and leave the other. */
+  const twoEntries = `
+     const at = new Date(); at.setHours(9, 0, 0, 0);
+     const e = (id, fromMin, toMin) => ({
+       id, issueKey: 'X-' + id, issueId: null, title: 'Task ' + id,
+       startTs: at.getTime() + fromMin * 60000, endTs: at.getTime() + toMin * 60000,
+       status: 'pending', worklogId: null, comment: null, errorMsg: null });
+     await window.joggl.days.save(H.todayKey(), [e('one', 0, 30), e('two', 60, 90)]);
+     H.q('#today-btn').click(); await H.sleep(300); await H.settle();`;
+  const marked = `H.all('.is-selected').map(el =>
+       (el.classList.contains('entry-card') ? 'row:' : 'block:') + el.dataset.id).sort()`;
+
+  await check(
+    'a click on a block marks it and its row, and only that entry',
+    `${twoEntries}
+     H.click(H.q('.sched-entry-block[data-id="one"]'));
+     await H.sleep(300);
+     const selected = ${marked};
+     const focused = document.activeElement?.dataset?.id ?? null;
+     // A second click on the other one moves the selection rather than adding to it.
+     H.click(H.q('.sched-entry-block[data-id="two"]'));
+     await H.sleep(300);
+     const moved = ${marked};
+     await H.resetDay();
+     return JSON.stringify({ selected, focused, moved })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return JSON.stringify(d.selected) === JSON.stringify(['block:one', 'row:one']) &&
+        d.focused === 'one' &&
+        JSON.stringify(d.moved) === JSON.stringify(['block:two', 'row:two']);
+    },
+  );
+
+  await check(
+    'a click on a row marks its block, and empty space puts the selection down',
+    `${twoEntries}
+     H.click(H.q('.entry-card[data-id="two"] .entry-title'));
+     await H.sleep(300);
+     const selected = ${marked};
+     // The blank space below the rows, and the grid away from every block.
+     H.q('#entry-list').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+     await H.sleep(200);
+     const afterList = H.all('.is-selected').length;
+     H.click(H.q('.entry-card[data-id="two"]'));
+     await H.sleep(250);
+     const again = H.all('.is-selected').length;
+     const y = await H.showHour('16:00');
+     H.q('#schedule-grid').dispatchEvent(new MouseEvent('click', {
+       bubbles: true, cancelable: true, clientX: H.gridX(), clientY: y }));
+     await H.sleep(300);
+     const afterGrid = H.all('.is-selected').length;
+     document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+     await H.sleep(200);
+     await H.resetDay();
+     return JSON.stringify({ selected, afterList, again, afterGrid })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return JSON.stringify(d.selected) === JSON.stringify(['block:two', 'row:two']) &&
+        d.afterList === 0 && d.again === 2 && d.afterGrid === 0;
+    },
+  );
+
+  await check(
+    'the selection survives a re-render, and a day change puts it down',
+    `${twoEntries}
+     H.click(H.q('.entry-card[data-id="one"]'));
+     await H.sleep(250);
+     // Zooming re-renders the whole grid and rebuilds every block.
+     H.q('#zoom-in').click(); await H.sleep(400);
+     const afterZoom = ${marked};
+     H.q('#zoom-out').click(); await H.sleep(400);
+     H.q('#prev-day').click(); await H.sleep(400); await H.settle();
+     H.q('#today-btn').click(); await H.sleep(400); await H.settle();
+     const afterDayChange = H.all('.is-selected').length;
+     await H.resetDay();
+     return JSON.stringify({ afterZoom, afterDayChange })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return JSON.stringify(d.afterZoom) === JSON.stringify(['block:one', 'row:one']) &&
+        d.afterDayChange === 0;
+    },
+  );
+
+  await check(
+    'arrow keys carry the selection with them, so keyboard and mouse agree',
+    `${twoEntries}
+     const rows = H.all('.entry-card');
+     const from = rows.findIndex(r => r.dataset.id === 'one');
+     // The next row, whatever it is: a Jira-side worklog can sit between the two
+     // entries this check created, and it is a row like any other to the arrows.
+     const wanted = rows[from + 1]?.dataset.id ?? null;
+     rows[from].focus();
+     document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {
+       key: 'ArrowDown', bubbles: true, cancelable: true }));
+     await H.sleep(250);
+     const selected = H.all('.is-selected').map(el => el.dataset.id);
+     await H.resetDay();
+     return JSON.stringify({ wanted, selected })`,
+    (v) => {
+      const d = JSON.parse(v);
+      // One mark if that row has no block on the grid, two if it does — either way
+      // every mark must be on the row the arrow landed on.
+      return d.wanted !== null && d.selected.length >= 1 &&
+        d.selected.every((id) => id === d.wanted);
+    },
+  );
+
+  await check(
+    'a double click on the task name opens Edit task, elsewhere the description',
+    `${twoEntries}
+     const dbl = (sel) => H.q(sel).dispatchEvent(new MouseEvent('dblclick', {
+       bubbles: true, cancelable: true }));
+     dbl('.entry-card[data-id="one"] .entry-title');
+     await H.sleep(500);
+     const onName = H.q('#modal-title')?.textContent ?? null;
+     H.all('#modal-buttons button').at(-1)?.click(); await H.sleep(300);
+     dbl('.entry-card[data-id="one"] .status-badge');
+     await H.sleep(500);
+     const elsewhere = H.q('#modal-title')?.textContent ?? null;
+     H.all('#modal-buttons button').at(-1)?.click(); await H.sleep(300);
+     // A block carries no separate title region, so it always means the description.
+     dbl('.sched-entry-block[data-id="one"]');
+     await H.sleep(500);
+     const onBlock = H.q('#modal-title')?.textContent ?? null;
+     H.all('#modal-buttons button').at(-1)?.click(); await H.sleep(300);
+     await H.resetDay();
+     return JSON.stringify({ onName, elsewhere, onBlock })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return /edit task/i.test(d.onName) && /work description/i.test(d.elsewhere) &&
+        /work description/i.test(d.onBlock);
+    },
+  );
+
+  await check(
+    'a double click in a time field is left alone, and never opens a dialog',
+    `${twoEntries}
+     H.q('.entry-card[data-id="one"] [data-f="start"]').dispatchEvent(
+       new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+     await H.sleep(500);
+     const opened = !H.q('#modal-overlay').classList.contains('hidden');
+     const still = H.entries().map(e => e.range);
+     await H.resetDay();
+     return JSON.stringify({ opened, still })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.opened === false && JSON.stringify(d.still) === JSON.stringify(['09:00-09:30', '10:00-10:30']);
+    },
+  );
+
+  await check(
+    'a Jira-side row can be selected, but a double click on it only warns',
+    `H.q('#today-btn').click(); await H.sleep(300); await H.settle();
+     const ext = H.q('.entry-card.external');
+     if (!ext) return JSON.stringify({ skip: true });
+     H.click(ext); await H.sleep(250);
+     const selected = H.all('.is-selected').length;
+     H.all('.toast').forEach(t => t.remove());
+     H.q('.entry-card.external').dispatchEvent(new MouseEvent('dblclick', {
+       bubbles: true, cancelable: true }));
+     await H.sleep(500);
+     const opened = !H.q('#modal-overlay').classList.contains('hidden');
+     const warned = H.all('.toast').some(t => /in jira/i.test(t.textContent));
+     await H.resetDay();
+     return JSON.stringify({ selected, opened, warned })`,
+    (v) => {
+      const d = JSON.parse(v);
+      if (d.skip) return 'skipped';
+      // Two marks when the row also has a block on the grid, one when it is off it.
+      return d.selected >= 1 && d.opened === false && d.warned === true;
+    },
+  );
+
+  await check(
+    'a double click on the running task does not restart its timer',
+    `await H.resetDay();
+     const row = H.firstTask();
+     H.click(row); await H.sleep(600);
+     const running = H.q('#start-stop-btn').classList.contains('btn-stop');
+     // Back-dated so a reset is unmistakable: twenty minutes cannot be mistaken for
+     // a timer that merely carried on.
+     H.backdateStart(20);
+     // Past a tick: the display is repainted once a second, so a shorter wait reads
+     // the 00:00:00 it held before the back-date and proves nothing either way.
+     await H.sleep(1300);
+     const before = H.q('#timer-display').textContent;
+     // The second click of a double click used to stop and restart, and a fragment
+     // under ten seconds old is discarded — the elapsed time simply vanished.
+     H.click(H.firstTask()); await H.sleep(700);
+     const stillRunning = H.q('#start-stop-btn').classList.contains('btn-stop');
+     const after = H.q('#timer-display').textContent;
+     const created = H.entries().length;
+     H.click(H.q('#start-stop-btn')); await H.sleep(700);
+     await H.resetDay();
+     return JSON.stringify({ running, before, stillRunning, after, created })`,
+    (v) => {
+      const d = JSON.parse(v);
+      // Zero-padded HH:MM:SS compares as text.
+      return d.running && d.before > '00:15:00' && d.stillRunning &&
+        d.after > '00:15:00' && d.created === 0;
+    },
+  );
+}
+
 async function overlapNotice() {
   await check(
     'overlaps are counted once above the list, not repeated on every row',
@@ -1833,6 +2038,7 @@ export async function runChecks(mainWindow, app) {
     await editTask();
     await keyboard();
     await dateJump();
+    await clicks();
     await overlapNotice();
     await emptyStates();
     await workDescription();

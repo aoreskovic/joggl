@@ -18,6 +18,12 @@ export const state = {
   externalEntries: [],
   externalState: 'idle', // idle | loading | loaded | error
   externalError: null,
+  /**
+   * The entry a click marked, drawn in both panels at once. Not persisted: it says
+   * what is being looked at, which does not survive closing the window, and not the
+   * same thing as focus, which is per-panel and moves away the moment you type.
+   */
+  selectedEntryId: null,
   /** null when idle. mergeChoice is decided at start and applied at stop. */
   timer: null,
   /** Issues loaded from the configured task sources. */

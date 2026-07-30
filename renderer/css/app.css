@@ -833,6 +833,24 @@ button {
   background: var(--warn-soft);
 }
 
+/* Selected — the same entry is marked in both panels at once, which is the point:
+   with overlap columns it is otherwise unclear which block is which row.
+
+   A ring rather than a border colour or a background. Four states already own
+   those — pending indigo, synced green, external cyan dashed, overlapping --warn —
+   and a fifth would have to beat all four. box-shadow sits outside that argument,
+   and it also leaves `outline` free for the focus ring, which is a different thing:
+   focus is per-panel and moves away the moment you type. */
+.entry-card.is-selected {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    var(--shadow-sm);
+}
+
+.sched-entry-block.is-selected {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
 /* Logged in Jira, not by Joggl: visible and counted, but not Joggl's to change.
    Dashed and unfilled so it reads as a record rather than something to grab. */
 .entry-card.external {

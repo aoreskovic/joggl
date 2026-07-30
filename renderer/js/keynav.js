@@ -27,7 +27,14 @@ const ACTIVE = 'is-keynav-active';
  *
  * @param {{container: () => Element|null, rowSelector: string}} options
  */
-export function wireRovingList({ container, rowSelector }) {
+/**
+ * @param {object} spec
+ * @param {() => Element|null} spec.container
+ * @param {string} spec.rowSelector
+ * @param {(row: Element) => void} [spec.onMove] the row the arrows just landed on,
+ *        so the selection can follow the keyboard as it follows the mouse
+ */
+export function wireRovingList({ container, rowSelector, onMove }) {
   const rows = () => {
     const host = container();
     return host ? [...host.querySelectorAll(rowSelector)] : [];
@@ -60,6 +67,7 @@ export function wireRovingList({ container, rowSelector }) {
       all[from].tabIndex = -1;
       all[to].tabIndex = 0;
       all[to].focus();
+      onMove?.(all[to]);
     });
   }
 

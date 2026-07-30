@@ -35,6 +35,31 @@ test('task identity is the issue key, falling back to a case-insensitive title',
   assert.equal(taskKeyOf({ issueKey: null, title: 'LUNCH' }), 'local:lunch');
 });
 
+// The same identity guards the timer against restarting itself. A double click on a
+// task row used to arrive at startTimer twice, and the second call stopped the timer
+// the first had just started — a fragment under ten seconds old is discarded on
+// purpose, so a slip of the finger threw the elapsed time away. The guard compares
+// these keys, so it and the merge can never disagree about what "the same task" is.
+test('the timer guard: a running task is recognised however the click phrased it', () => {
+  const running = { issueKey: 'PROJ-1', issueId: '10001', title: 'Meetings' };
+
+  // A row click passes the issue; the entry row's ▶ passes the entry. Same task.
+  assert.equal(taskKeyOf(running), taskKeyOf({ issueKey: 'PROJ-1', title: 'Meetings' }));
+  // The title is irrelevant once there is a key — an issue renamed in Jira between
+  // the two clicks must not read as a different task.
+  assert.equal(taskKeyOf(running), taskKeyOf({ issueKey: 'PROJ-1', title: 'Renamed' }));
+
+  assert.notEqual(taskKeyOf(running), taskKeyOf({ issueKey: 'PROJ-2', title: 'Meetings' }));
+  // A local entry of the same name is not the issue, and never becomes it.
+  assert.notEqual(taskKeyOf(running), taskKeyOf({ issueKey: null, title: 'Meetings' }));
+});
+
+test('the timer guard holds for local entries, which have no key to compare', () => {
+  const running = { issueKey: null, title: 'Lunch' };
+  assert.equal(taskKeyOf(running), taskKeyOf({ issueKey: null, title: ' lunch ' }));
+  assert.notEqual(taskKeyOf(running), taskKeyOf({ issueKey: null, title: 'Coffee' }));
+});
+
 test('no earlier entry for the task means a plain new entry', () => {
   const entries = [entry({ issueKey: 'OTHER-9' })];
   assert.deepEqual(decideMerge(entries, 'issue:PROJ-1', T(11)), { action: 'new' });

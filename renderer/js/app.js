@@ -11,12 +11,14 @@ import {
   editEntryTask,
   renderEntryList,
   splitEntry,
+  wireEntryList,
   updateTotal,
 } from './entries.js';
 import { PLAY_ICON, STOP_ICON, ZOOM_ICON } from './icons.js';
 import { createRowNav } from './keynav.js';
 import { isPinned, renderPins, togglePin } from './pins.js';
 import { registerRenderer, renderAll } from './render.js';
+import { clearSelection } from './selection.js';
 import { registerView, setActiveView, wireShell } from './shell.js';
 import {
   appVersion,
@@ -126,6 +128,7 @@ async function boot() {
   wireDayNav();
   wireDayView();
   wireDayViewDrag();
+  wireEntryList();
   wirePinPicker();
   wireGlobal();
 
@@ -157,6 +160,9 @@ async function boot() {
 // ── Day selection ──────────────────────────────────────────────────────────
 
 async function selectDate(date) {
+  // The selected entry belongs to the day being left, and its id would otherwise
+  // sit in state waiting to match something on a day it was never on.
+  clearSelection();
   await loadDay(date);
 
   $('current-date-label').textContent = formatDateLabel(date);
@@ -607,8 +613,15 @@ function wireGlobal() {
 
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
+      // Read before closing anything: one Escape closes whatever is open, and only
+      // a second one puts the selection down. Doing both at once would clear a
+      // selection the user was only dismissing a menu over.
+      const somethingOpen = !!document.querySelector(
+        '.ctx-menu:not(.hidden), .sched-quick-entry, #modal-overlay:not(.hidden)',
+      );
       hideContextMenu();
       hideQuickEntry();
+      if (!somethingOpen) clearSelection();
       return;
     }
 

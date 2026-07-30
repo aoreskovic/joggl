@@ -1,6 +1,7 @@
 // The entry list: cards, inline editing with bidirectional recalculation, and
 // the day total.
 
+import { editorForTarget } from './click-actions.js';
 import { showContextMenu } from './context-menu.js';
 import {
   canRetarget,
@@ -16,6 +17,7 @@ import { PLAY_ICON } from './icons.js';
 import { sortEntries } from './merge.js';
 import { askModal } from './modal.js';
 import { renderAll } from './render.js';
+import { applySelection, clearSelection, select } from './selection.js';
 import {
   deleteWorklog,
   isToday,
@@ -92,11 +94,46 @@ export function renderEntryList() {
 
   list.replaceChildren(...children);
   rovingEntries().refresh();
+  // These rows are new elements and know nothing about the selection.
+  applySelection();
 
   // The count has to stay readable while the panel is collapsed — that is the
   // only thing left saying whether the day has anything in it.
   const count = document.getElementById('day-count');
   if (count) count.textContent = String(entries.length);
+}
+
+/**
+ * Click and double click on the rows. Bound once, on the container.
+ *
+ * Delegated for the same reason `wireDayViewDrag` is: every render replaces these
+ * children, so per-row listeners would be rebound constantly and leak the old ones.
+ */
+export function wireEntryList() {
+  const list = document.getElementById('entry-list');
+  if (!list) return;
+
+  list.addEventListener('click', (event) => {
+    const card = event.target.closest('.entry-card');
+    // A click on the empty space below the rows is how you put the selection down.
+    if (!card) {
+      clearSelection();
+      return;
+    }
+    // The time fields and the row's buttons keep their own click.
+    if (event.target.closest('.ie, [data-a]')) return;
+    select(card.dataset.id);
+    // The roving tab stop should follow the mouse, or Tab returns somewhere else.
+    card.focus();
+  });
+
+  list.addEventListener('dblclick', (event) => {
+    const card = event.target.closest('.entry-card');
+    if (!card) return;
+    const editor = editorForTarget(event.target);
+    if (editor === 'task') editEntryTask(card.dataset.id);
+    else if (editor === 'comment') editEntryComment(card.dataset.id);
+  });
 }
 
 /** A multi-line description has to sit on the row's single line. */
@@ -111,6 +148,7 @@ function rovingEntries() {
   roving ??= wireRovingList({
     container: () => document.getElementById('entry-list'),
     rowSelector: '.entry-card',
+    onMove: (row) => select(row.dataset.id),
   });
   return roving;
 }

@@ -5,11 +5,13 @@
 // settled by use, not by design — treat behaviour changes as regressions unless
 // they are deliberate.
 
+import { editorForTarget } from './click-actions.js';
 import { showContextMenu } from './context-menu.js';
-import { markDirty } from './entries.js';
+import { editEntryComment, markDirty } from './entries.js';
 import { sameTimes } from './entry-ops.js';
 import { createRowNav, wireRovingList } from './keynav.js';
 import { renderAll } from './render.js';
+import { applySelection, clearSelection, select } from './selection.js';
 import { isToday, persistDayNow, pxPerMin, state, visibleEntries } from './state.js';
 import { createIssueLookup, searchIssues } from './tasks.js';
 import { toastWarn } from './toast.js';
@@ -42,6 +44,7 @@ function roving() {
   rovingBlocks ??= wireRovingList({
     container: () => document.getElementById('schedule-grid'),
     rowSelector: '.sched-entry-block:not(.live)',
+    onMove: (block) => select(block.dataset.id),
   });
   return rovingBlocks;
 }
@@ -181,6 +184,8 @@ export function renderTimeline() {
   }
 
   roving().refresh();
+  // These blocks are new elements and know nothing about the selection.
+  applySelection();
 }
 
 function placeBlock(el, startTs, endTs, slot, minHeightPx = 6) {
@@ -293,6 +298,22 @@ function buildBlock(entry, slot) {
     onMoveBlock(event, entry);
   });
 
+  block.addEventListener('click', (event) => {
+    if (event.target.closest('.sched-handle')) return;
+    // A move that actually moved is not a click, however it ends up on screen.
+    if (Date.now() < suppressClickUntil) return;
+    select(entry.id);
+    // onMoveBlock calls preventDefault on mousedown, which suppresses the focus a
+    // click would otherwise give, so the roving tab stop has to be set by hand.
+    block.focus();
+  });
+
+  block.addEventListener('dblclick', (event) => {
+    if (editorForTarget(event.target) === null) return;
+    // A block is all label, so this is always the description — see click-actions.js.
+    editEntryComment(entry.id);
+  });
+
   block.addEventListener('contextmenu', (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -374,6 +395,17 @@ function onResize(event, entry, edge) {
   document.addEventListener('mouseup', onMouseUp);
 }
 
+/**
+ * Until when a click on a block is the tail of a move rather than a click.
+ *
+ * `preventDefault()` on mousedown stops focus and text selection but not the click,
+ * so without this every completed drag would also read as "select this". Module
+ * level rather than per-gesture because the commit re-renders: the click lands on
+ * the *new* block, which knows nothing about the drag that produced it.
+ */
+let suppressClickUntil = 0;
+const CLICK_TAIL_MS = 200;
+
 function onMoveBlock(event, entry) {
   event.preventDefault();
   event.stopPropagation();
@@ -385,6 +417,7 @@ function onMoveBlock(event, entry) {
   const dayStart = startOfDayMs(state.selectedDate);
   const block = document.querySelector(`.sched-entry-block[data-id="${CSS.escape(entry.id)}"]`);
   block?.classList.add('dragging', 'moving');
+  let moved = false;
 
   const onMouseMove = (move) => {
     const deltaMs = ((move.clientY - startY) / view.pxPerMin) * 60_000;
@@ -402,6 +435,10 @@ function onMoveBlock(event, entry) {
       start = end - duration;
     }
 
+    // Snapping means most small movements change nothing, and a gesture that never
+    // changed the start is exactly what a plain click is.
+    if (start !== origStart) moved = true;
+
     entry.startTs = start;
     entry.endTs = end;
     liveUpdate(block, entry);
@@ -411,7 +448,8 @@ function onMoveBlock(event, entry) {
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseup', onMouseUp);
     block?.classList.remove('dragging', 'moving');
-    await commitDrag(entry, { startTs: origStart, endTs: origStart + duration });
+    if (moved) suppressClickUntil = Date.now() + CLICK_TAIL_MS;
+    await commitDrag(entry, { startTs: origStart, endTs: origStart + duration }, { touched: moved });
   };
 
   document.addEventListener('mousemove', onMouseMove);
@@ -455,9 +493,19 @@ function liveUpdate(block, entry) {
  * A render still happens: liveUpdate left inline styles on the block, and this
  * restores the canonical layout.
  */
-async function commitDrag(entry, before) {
+/**
+ * End of a move or resize.
+ *
+ * `touched` is false for a gesture that never moved anything — a plain click on a
+ * block. There is nothing to repaint then, and the render would replace the block
+ * the click had just focused, so focus would fall back to `<body>` and Tab would
+ * restart from the top of the list.
+ */
+async function commitDrag(entry, before, { touched = true } = {}) {
   if (sameTimes(entry, before)) {
-    renderAll();
+    // Dragged out and back: liveUpdate moved the element by hand, so the true
+    // layout has to be restored even though the times are unchanged.
+    if (touched) renderAll();
     return;
   }
   markDirty(entry);
@@ -481,6 +529,10 @@ function onQuickEntryOutside(event) {
 
 export function onGridClick(event) {
   if (event.target.closest('.sched-entry-block') || event.target.closest('.sched-handle')) return;
+
+  // Clicking away from every block is how you put the selection down here, the same
+  // as the empty space below the entry rows.
+  clearSelection();
 
   const rawStartTs = gridTimeAt(event.clientX, event.clientY);
   if (rawStartTs === null) return;

@@ -2,20 +2,21 @@
 
 What to test by hand, how to test it, and what is known to be broken.
 
-Joggl has 201 unit tests (`npm test`) covering the things where a silent failure loses
+Joggl has 209 unit tests (`npm test`) covering the things where a silent failure loses
 time data: the worklog timestamp formatter, merge decisions at the 30-minute boundary,
 Finish Day's partial-failure transitions, the day-log round trip, quarter-hour snapping,
 what a duplicate, a moved and a repointed entry inherit,
 when a touch counts as an edit, weekend detection, pin labelling, the ADF a worklog
 comment becomes and back again, the search box's remote-lookup loop, arrow-key
-navigation over a list of results, and the calendar grid behind "Jump to a date".
+navigation over a list of results, the calendar grid behind "Jump to a date", and which
+editor a double click opens.
 Everything else — the whole UI — is verified against the checklist below, because the
 project deliberately has no DOM test harness and adding one would break the
 short-dependency rule in `CLAUDE.md`.
 
 That makes this file the other half of the test suite. Keep it current.
 
-**Last full pass: 2026-07-30, all 62 checklist items green**, driven by dispatching real
+**Last full pass: 2026-07-30, all 70 checklist items green**, driven by dispatching real
 mouse events into the renderer from the main process against a throwaway
 `--user-data-dir`. See *The script* at the end for how, and for what it does not cover.
 
@@ -132,6 +133,29 @@ The point of these is that **nothing** should end up offered for a re-sync.
 | Scroll the timeline, then click an empty hour | A quick-entry popup opens **visibly**, focused, titled with that hour and the half hour after it, and sitting fully inside the window. |
 | Type in it, then press Escape | It closes and nothing is created. |
 | Click an empty hour, then click elsewhere | It closes. A second click on the grid opens it again — a popup that closed itself must not eat the next click. |
+
+### Clicking
+
+Before this, a left click on a block or a row did nothing at all, and `dblclick`
+appeared nowhere in the renderer.
+
+| Do this | Correct result |
+|---|---|
+| Click a block on the day view | It and its row in "On this day" both get a ring. Nothing else does. |
+| Click a different block | The ring moves. Only ever one entry is selected. |
+| Click a row instead | Its block gets the ring too — the pairing works both ways. |
+| Arrow down the rows or the blocks | The ring follows the keyboard, not just the mouse. |
+| Zoom, or let a Jira read land | The ring survives the re-render. |
+| Click the empty space below the rows, or the grid away from every block | The ring goes. |
+| Press Escape with a menu or dialog open | It closes and the ring stays. A second Escape puts the ring down. |
+| Step to another day and back | Nothing is selected. |
+| Drag a block and let go | It is **not** selected — a finished move is not a click. |
+| Double-click the task name in a row | **Edit task** opens. |
+| Double-click anywhere else on a row, or anywhere on a block | **Work description** opens. |
+| Double-click a time or duration field | The text is selected, as any field does. No dialog. |
+| Double-click a **Manual Jira entry** | Only the usual refusal, no dialog. It can still be selected. |
+| Double-click the issue row the timer is already running | The timer keeps its elapsed time and no entry is created. Before, the second click stopped and restarted it, and a fragment under ten seconds old was discarded. |
+| Double-click a different issue row | Starts on that one, exactly as a single click does. |
 
 ### Jumping to a date
 

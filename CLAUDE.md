@@ -80,7 +80,7 @@ been exercised end to end, not just written.
 | Finish Day | Confirmed against real Jira — worklog `60504` on `EHW-70` |
 | Jira-side worklogs | Time logged in the Jira web UI is read back and counted |
 | Logging | `logs/joggl.log`, credential-redacted |
-| Tests | 201 passing, `npm test`; 62 UI checks, `npm run uicheck` |
+| Tests | 209 passing, `npm test`; 70 UI checks, `npm run uicheck` |
 | Shell | Collapsible sidebar with a view registry; week and month tabs present but disabled |
 | Drag to day view | An issue dragged from the task list becomes a 30-minute pending entry |
 | Keyboard | Every list arrow-navigable, every menu and dialog reachable — see below |
@@ -192,6 +192,58 @@ three, which is why the rule is enforced in the helper and not left to each call
 
 Bare-key shortcuts are suppressed while a modal is open and while the caret is in a field —
 otherwise `[` would step the day instead of reaching the text.
+
+---
+
+## Clicking
+
+Everything an entry can do used to sit on the right-click menu, and a left click on a
+block or a row did nothing at all.
+
+| Where | Click | Double click |
+|---|---|---|
+| Issues row, pin chip | Start the timer | Nothing extra — the second click is ignored |
+| Day view, empty hour | Quick-entry popup, and the selection goes down | Same |
+| Day view, a block | Select it | Work description |
+| "On this day", the task name or key | Select it | Edit task |
+| "On this day", anywhere else on the row | Select it | Work description |
+| Time fields, ▶, 🗑 | Their own | Their own — a double click selects the text |
+| A **Manual Jira entry** | Select it | The refusal it already gives |
+
+**Selection is not focus.** `state.selectedEntryId` marks one entry in *both* panels at
+once, which is the point: with overlap columns it is otherwise unclear which block is
+which row. Focus is per-panel, invisible in the other one, and moves away the moment
+you type; the selection stays until Escape, a click on empty space, a day change, or
+the entry being deleted. The arrow keys carry it, so keyboard and mouse agree.
+
+Three things shape the implementation, and each of them was a bug first:
+
+1. **Selecting must not re-render.** If the first click of a double click ran
+   `renderAll()`, the element would be replaced and the second click would land on a
+   new node, so the `dblclick` would never fire. `selection.js` puts the class
+   straight onto the two elements, the same reason `liveUpdate` mirrors a drag by
+   hand. `applySelection()` then runs at the end of both renders, because the id in
+   state is the truth and the class is only its shadow.
+2. **A completed move is not a click.** `onMoveBlock` calls `preventDefault()` on
+   *mousedown*, which suppresses focus and text selection but **not** the click — so
+   every finished drag would also read as "select this". It records whether the start
+   ever actually changed and suppresses the click that follows. That flag is module
+   level, not per-gesture, because the commit re-renders and the click lands on the
+   *new* block. The same `preventDefault` is why the click has to call `focus()`
+   itself.
+3. **Starting the timer on the task it is already running is a no-op.** `startTimer`
+   opened with `if (state.timer) await stopTimer()`, so a double click on a task row
+   stopped the timer the first click started — and a fragment under ten seconds old is
+   discarded on purpose, so the elapsed time vanished. The guard compares
+   `taskKeyOf`, merge.js's definition of "the same task", so the timer and the merge
+   cannot disagree about it.
+
+`click-actions.js` holds the one rule for which editor a double click opens, so the
+two panels cannot drift apart about what a region means. A day-view block resolves to
+the description whatever part of it was hit: the block is all label, so there is no
+"anywhere else" to aim at, and the description is the dominant need there — every one
+of the 391 real worklogs sampled on this site had one, while repointing a block at
+another issue is a rare correction that stays first on its right-click menu.
 
 ---
 

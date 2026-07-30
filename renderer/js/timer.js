@@ -33,6 +33,15 @@ export async function startTimer(task) {
     toastWarn('The timer only runs on today. Switch to today to start tracking.');
     return;
   }
+  // Already running this very task: do nothing rather than stop and start again.
+  //
+  // A double click on a task row used to arrive here twice, and the second call
+  // stopped the timer it had just started — a fragment under ten seconds old is
+  // discarded on purpose, so a slip of the finger threw the elapsed time away.
+  // `taskKeyOf` is merge.js's definition of "the same task", shared so the timer
+  // and the merge cannot disagree about it.
+  if (state.timer && taskKeyOf(state.timer) === taskKeyOf(task)) return;
+
   if (state.timer) await stopTimer();
 
   const startTs = pendingStartTs ?? Date.now();

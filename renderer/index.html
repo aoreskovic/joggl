@@ -52,6 +52,7 @@
                   id="task-input"
                   type="text"
                   placeholder="Search an issue, or type a name for a local entry…"
+                  title="Ctrl+L to jump here. Arrow keys pick a result, Enter starts it."
                   autocomplete="off"
                 />
                 <div id="task-dropdown" class="task-dropdown hidden"></div>
@@ -65,16 +66,16 @@
                 title="Start time — set before pressing Start to backdate the entry"
               />
               <div id="timer-display">00:00:00</div>
-              <button id="start-stop-btn" class="btn-primary">Start</button>
+              <button id="start-stop-btn" class="btn-primary" title="Start or stop the timer (Ctrl+Enter)">Start</button>
             </div>
           </div>
 
           <div class="day-header">
             <div class="day-picker">
-              <button id="prev-day" class="nav-btn" title="Previous day">‹</button>
+              <button id="prev-day" class="nav-btn" title="Previous day ([)">‹</button>
               <span id="current-date-label">—</span>
-              <button id="next-day" class="nav-btn" title="Next day">›</button>
-              <button id="today-btn" class="btn-outline">Today</button>
+              <button id="next-day" class="nav-btn" title="Next day (])">›</button>
+              <button id="today-btn" class="btn-outline" title="Today (T)">Today</button>
             </div>
             <div class="day-header-right">
               <span id="total-display" class="total-display">Total: 0m</span>

@@ -420,6 +420,30 @@ button {
   background: var(--accent-softer);
 }
 
+/* The arrow-key row. Stronger than :hover, since it is where Enter will land and
+   the mouse may be resting somewhere else entirely. */
+.is-keynav-active {
+  background: var(--accent-soft) !important;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Keyboard focus has to be visible or the roving tab stop is a trap. :focus-visible
+   rather than :focus, so clicking a row does not leave a ring behind. */
+.entry-card:focus-visible,
+.sched-entry-block:focus-visible,
+.task-panel-hdr:focus-visible,
+.pin-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+#ctx-menu:focus,
+#ctx-menu:focus-visible {
+  /* The menu takes focus so the arrow keys reach it, but the active row is what
+     the eye should follow — a ring around the whole menu would compete with it. */
+  outline: none;
+}
+
 .task-dd-sep {
   padding: 5px 10px 3px;
   font-size: 10px;
@@ -747,6 +771,32 @@ button {
 
 .entry-card.external .entry-title {
   color: var(--text-muted);
+}
+
+.timeline-empty.empty-title {
+  padding: 18px 0 2px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.timeline-empty.empty-hint {
+  padding: 0 0 18px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* Centred on the visible part of the grid rather than its full height, which can
+   be two thousand pixels at 3x zoom and would put the hint far off screen. */
+.sched-empty-hint {
+  position: sticky;
+  top: 40%;
+  padding: 0 12px 0 44px;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--text-faint);
+  /* Never swallow the click it is describing. */
+  pointer-events: none;
 }
 
 .timeline-empty.warn {

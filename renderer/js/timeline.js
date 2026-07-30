@@ -8,6 +8,7 @@
 import { showContextMenu } from './context-menu.js';
 import { markDirty } from './entries.js';
 import { sameTimes } from './entry-ops.js';
+import { createRowNav, wireRovingList } from './keynav.js';
 import { renderAll } from './render.js';
 import { isToday, persistDayNow, pxPerMin, state, visibleEntries } from './state.js';
 import { createIssueLookup, searchIssues } from './tasks.js';
@@ -33,6 +34,17 @@ const GUTTER_PX = 40;
 
 // Shared between a render and the drag handlers that run against it.
 const view = { rangeStartMs: 0, pxPerMin: 1.5, totalMinutes: 0 };
+
+// One tab stop for the whole grid, arrow keys between blocks. Lazy because the
+// grid exists before this module runs but renderTimeline may be called first.
+let rovingBlocks = null;
+function roving() {
+  rovingBlocks ??= wireRovingList({
+    container: () => document.getElementById('schedule-grid'),
+    rowSelector: '.sched-entry-block:not(.live)',
+  });
+  return rovingBlocks;
+}
 
 /**
  * Assign each entry a column so concurrent entries sit side by side, Toggl-style.
@@ -157,6 +169,18 @@ export function renderTimeline() {
       grid.appendChild(nowLine);
     }
   }
+
+  // Same reasoning as the empty entry list: the two gestures are undiscoverable,
+  // and an empty grid is where there is room to name them. pointer-events off, or
+  // the hint would swallow the very click it is describing.
+  if (entries.length === 0 && !live) {
+    const hint = document.createElement('div');
+    hint.className = 'sched-empty-hint';
+    hint.textContent = 'Click an hour to add time, or drag an issue here';
+    grid.appendChild(hint);
+  }
+
+  roving().refresh();
 }
 
 function placeBlock(el, startTs, endTs, slot, minHeightPx = 6) {
@@ -241,6 +265,9 @@ function buildBlock(entry, slot) {
   if (entry.status === 'error') block.classList.add('st-error');
   if (entry.external) block.classList.add('external');
   block.dataset.id = entry.id;
+  // Focusable for the same reason the entry rows are: the Menu key fires
+  // contextmenu on whatever has focus. The tab stop is roved, not one per block.
+  block.tabIndex = -1;
   placeBlock(block, entry.startTs, entry.endTs, slot);
 
   const label = document.createElement('div');
@@ -270,6 +297,15 @@ function buildBlock(entry, slot) {
     event.preventDefault();
     event.stopPropagation();
     showContextMenu(event, entry);
+  });
+
+  block.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.target !== block) return;
+    event.preventDefault();
+    showContextMenu(
+      { clientX: 0, clientY: 0, currentTarget: block, target: block, preventDefault() {} },
+      entry,
+    );
   });
 
   return block;
@@ -511,9 +547,12 @@ function showQuickEntry(cx, cy, startTs, endTs) {
     if (quickEntryEl === wrap) renderResults(input.value);
   });
 
+  const nav = createRowNav({ container: () => results, rowSelector: '.task-dd-item' });
+
   const issueRow = (issue) => {
     const item = document.createElement('div');
     item.className = 'task-dd-item';
+    item.dataset.issue = JSON.stringify(issue);
     item.innerHTML =
       `<span class="jira-chip">${esc(issue.issueKey)}</span>` +
       `<span class="task-dd-title">${esc(issue.title)}</span>`;
@@ -586,7 +625,20 @@ function showQuickEntry(cx, cy, startTs, endTs) {
   input.addEventListener('input', () => refreshResults(input.value));
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') return hideQuickEntry();
+    if (nav.handleKey(event)) {
+      event.preventDefault();
+      return;
+    }
     if (event.key !== 'Enter') return;
+
+    // An arrow-key row is an explicit choice and outranks anything derived from
+    // the text — including the free-text fallback below.
+    const chosen = nav.activate();
+    if (chosen) {
+      const issue = JSON.parse(chosen.dataset.issue);
+      return commit(issue.issueKey, issue.issueId, issue.title);
+    }
+
     const raw = input.value.trim();
     if (!raw) return hideQuickEntry();
 

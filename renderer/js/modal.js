@@ -2,6 +2,8 @@
 // and the Finish Day retry summary.
 
 let activeResolve = null;
+/** Where focus goes when the modal closes — whatever opened it. */
+let returnFocusTo = null;
 
 /**
  * @param {object} spec
@@ -40,7 +42,19 @@ export function askModal({ title, body, buttons, dismissValue = null, focusBody 
     btnsEl.appendChild(el);
   }
 
+  // Announced as a dialog, so a screen reader says what it is and stops reading the
+  // day behind it.
+  const panel = overlay.querySelector('.panel');
+  panel?.setAttribute('role', 'dialog');
+  panel?.setAttribute('aria-modal', 'true');
+  panel?.setAttribute('aria-labelledby', 'modal-title');
+
   overlay.classList.remove('hidden');
+
+  // What had focus before, so it can be given back. Otherwise focus lands on
+  // <body> when the modal closes and the next Tab starts from the top of the app.
+  returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
   if (focusBody) bodyEl.querySelector('input, textarea, select')?.focus();
   else btnsEl.querySelector('button')?.focus();
 
@@ -49,14 +63,55 @@ export function askModal({ title, body, buttons, dismissValue = null, focusBody 
   });
 }
 
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), ' +
+  'select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Keep Tab inside the modal.
+ *
+ * Without this, Tab walks out of a modal that is covering the app and lands on the
+ * entry rows behind it — which are now focusable and would take a Menu key press
+ * for a menu the user cannot see.
+ */
+function trapTab(event) {
+  const overlay = document.getElementById('modal-overlay');
+  if (!overlay || overlay.classList.contains('hidden')) return;
+
+  const stops = [...overlay.querySelectorAll(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+  if (stops.length === 0) return;
+
+  const first = stops[0];
+  const last = stops[stops.length - 1];
+  const onFirst = document.activeElement === first;
+  const onLast = document.activeElement === last;
+
+  if (event.shiftKey && (onFirst || !overlay.contains(document.activeElement))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (onLast || !overlay.contains(document.activeElement))) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 function close(value) {
   const overlay = document.getElementById('modal-overlay');
+  const wasOpen = overlay && !overlay.classList.contains('hidden');
   overlay?.classList.add('hidden');
+
   const resolve = activeResolve;
   activeResolve = null;
+
+  const back = returnFocusTo;
+  returnFocusTo = null;
+  if (wasOpen && back?.isConnected) back.focus();
+
   resolve?.(value);
 }
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && activeResolve) close(null);
+  if (!activeResolve) return;
+  if (event.key === 'Escape') close(null);
+  else if (event.key === 'Tab') trapTab(event);
 });

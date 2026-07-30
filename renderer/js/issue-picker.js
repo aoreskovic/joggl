@@ -5,6 +5,7 @@
 // configured JQL sources returned — an issue that is Done, or assigned to someone
 // else, is simply not in them.
 
+import { createRowNav } from './keynav.js';
 import { createIssueLookup, searchIssues } from './tasks.js';
 import { esc } from './util.js';
 
@@ -35,9 +36,14 @@ export function createIssuePicker({ onPick, placeholder = 'Search an issue…' }
     render();
   });
 
+  const nav = createRowNav({ container: () => results, rowSelector: '.task-dd-item' });
+
   const row = (issue, expanded) => {
     const item = document.createElement('div');
     item.className = 'task-dd-item';
+    // Carried on the row so the keyboard path picks exactly what the mouse would,
+    // rather than re-deriving the issue from an index into a list that has moved.
+    item.dataset.issue = JSON.stringify(issue);
     item.innerHTML =
       `<span class="jira-chip">${esc(issue.issueKey)}</span>` +
       `<span class="task-dd-title">${esc(issue.title)}</span>` +
@@ -75,6 +81,8 @@ export function createIssuePicker({ onPick, placeholder = 'Search an issue…' }
     }
 
     results.replaceChildren(...children);
+    // The row that was active no longer exists.
+    nav.reset();
   }
 
   const refresh = () => {
@@ -83,10 +91,22 @@ export function createIssuePicker({ onPick, placeholder = 'Search an issue…' }
   };
 
   input.addEventListener('input', refresh);
-  // Enter picks the only candidate; with a list still on screen it would be a guess.
   input.addEventListener('keydown', (event) => {
+    if (nav.handleKey(event)) {
+      // Otherwise the caret jumps to either end of the text as the list moves.
+      event.preventDefault();
+      return;
+    }
     if (event.key !== 'Enter') return;
     event.preventDefault();
+
+    // An arrow-key row wins; without one, Enter still picks a lone candidate, which
+    // is what it did before there was any keyboard navigation.
+    const chosen = nav.activate();
+    if (chosen) {
+      onPick(JSON.parse(chosen.dataset.issue));
+      return;
+    }
     const query = input.value.trim();
     const candidates = [
       ...searchIssues(input.value),

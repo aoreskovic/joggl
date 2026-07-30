@@ -11,7 +11,7 @@
 // `webContents.executeJavaScript`, which is enough to dispatch real MouseEvents,
 // read computed styles and element boxes, and drive the whole app.
 //
-// ── Six traps, all of which made checks pass or fail for the wrong reason ──
+// ── Nine traps, all of which made checks pass or fail for the wrong reason ──
 //
 // 1. A timer stopped inside ten seconds is discarded on purpose (MIN_ENTRY_MS in
 //    timer.js). Back-date the start with H.backdateStart() or the check measures
@@ -32,6 +32,20 @@
 //    just after midnight it starts at 00:00 and the afternoon is far below the
 //    fold. Never aim at an hour where it happens to sit — H.showHour scrolls it
 //    to the middle first, clear of the window edge and of the auto-scroll band.
+// 7. Selecting a day starts an async read of that day's Jira worklogs, and the
+//    re-render when it lands replaces every row. H.settle() waits for that, and it
+//    wants sustained stillness: one stable sample arrives before the request has
+//    even answered. A row grabbed before the render and pressed after it is
+//    detached, and a press on a detached node never reaches the delegated listener
+//    — the drag simply never starts. H.dragToHour re-finds its row for that reason.
+// 8. The window must be the foreground one. A background or occluded window has
+//    its compositor frozen, so a CSS transition stays stuck half way and `:focus`
+//    stops matching — sidebar widths read as nonsense and key presses land
+//    nowhere. main/index.js takes focus at startup; prefer document.activeElement
+//    over `:focus` anyway, and do not click away during a run.
+// 9. An empty-state check cannot use today. Time booked in the Jira web UI puts
+//    rows on the day whatever the store says, so H.findEmptyDay() steps back until
+//    it finds a day with none.
 //
 // ── What this cannot reach ──
 //
@@ -114,7 +128,28 @@ window.H = {
     }
     H.mouse(document, 'mouseup', tx, ty, 0);
   },
-  async dragToHour(el, hhmm) { H.drag(el, H.gridX(), await H.showHour(hhmm)); },
+  /**
+   * Re-find a row that a render replaced while we were looking away.
+   *
+   * showHour scrolls and awaits, so a caller that grabbed its row first can be
+   * holding a detached node by the time the press goes out — and a press on a
+   * detached node never reaches the delegated listener on #task-list, so the
+   * drag silently never starts and the check reports "nothing was created".
+   */
+  relocate(el) {
+    if (el.isConnected) return el;
+    // Plain concatenation: this whole block is a template string, so a nested
+    // backtick would end it early.
+    const d = el.dataset || {};
+    const found = d.id ? H.q('[data-id="' + d.id + '"]')
+      : d.key ? H.q('[data-key="' + d.key + '"]') : null;
+    if (!found) throw new Error('the drag source was replaced and could not be found again');
+    return found;
+  },
+  async dragToHour(el, hhmm) {
+    const y = await H.showHour(hhmm);
+    H.drag(H.relocate(el), H.gridX(), y);
+  },
   click(el) {
     const r = el.getBoundingClientRect();
     const x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2);
@@ -137,14 +172,23 @@ window.H = {
    * before that settles gets its element pulled out from under it, which shows
    * up as a drag that never begins. So: wait until the row count stops moving.
    */
-  async settle(timeoutMs = 4000) {
+  async settle(timeoutMs = 6000) {
     const count = () => H.all('.entry-card').length + H.all('.task-item').length;
-    let last = -1;
+    // One stable sample is not enough. The Jira read takes about a second, so the
+    // count sits still at 250ms and 500ms and then everything is replaced mid-drag,
+    // which shows up as a gesture that never starts. Require sustained stillness,
+    // and a floor on the total wait so a fast machine cannot outrun the request.
+    const NEEDED = 3;
+    const floor = Date.now() + 1200;
     const until = Date.now() + timeoutMs;
+    let last = -1;
+    let stable = 0;
+
     while (Date.now() < until) {
       const now = count();
-      if (now === last && now > 0) return;
+      stable = now === last ? stable + 1 : 0;
       last = now;
+      if (stable >= NEEDED && now > 0 && Date.now() >= floor) return;
       await H.sleep(250);
     }
   },
@@ -161,6 +205,30 @@ window.H = {
     await H.settle();
   },
   firstTask() { return H.q('.task-item'); },
+  /**
+   * Select a day with nothing on it at all, and return its label.
+   *
+   * An empty-state check cannot just clear today: time booked in the Jira web UI
+   * renders as .entry-card too (trap 2), so "today, cleared" is usually not an
+   * empty day. Step back until a day has no rows of either kind. Under --uicheck
+   * the store is a temp directory, so only Jira-side rows can be in the way.
+   */
+  async findEmptyDay(maxBack = 45) {
+    H.q('#today-btn').click();
+    await H.sleep(300);
+    await H.settle();
+    for (let i = 0; i <= maxBack; i++) {
+      if (H.all('.entry-card').length === 0) return H.q('#current-date-label').textContent;
+      H.q('#prev-day').click();
+      await H.sleep(300);
+      await H.settle();
+    }
+    return null;
+  },
+  /** The running timer's issue key, read off the omnibar — state is not exposed. */
+  runningKey() {
+    return (H.q('#task-input').value.match(/\\(([A-Z][A-Z0-9_]*-\\d+)\\)\\s*$/) ?? [])[1] ?? null;
+  },
   /**
    * Unpin everything through the × on each chip.
    *
@@ -871,6 +939,307 @@ async function editTask() {
   );
 }
 
+async function keyboard() {
+  const press = (sel, key, mods = {}) => `
+     H.q(${JSON.stringify(sel)}).dispatchEvent(new KeyboardEvent('keydown', {
+       key: ${JSON.stringify(key)}, bubbles: true, cancelable: true, ...${JSON.stringify(mods)} }));`;
+
+  await check(
+    'arrow keys walk the omnibar results and Enter starts the highlighted one',
+    `await H.resetDay();
+     const i = H.q('#task-input');
+     i.focus(); i.value = 'e'; i.dispatchEvent(new Event('input'));
+     await H.sleep(600);
+     const rows = H.all('#task-dropdown .task-dd-item').length;
+     ${press('#task-input', 'ArrowDown')}
+     ${press('#task-input', 'ArrowDown')}
+     await H.sleep(150);
+     const marked = H.all('#task-dropdown .is-keynav-active').length;
+     const secondRow = H.all('#task-dropdown .task-dd-item')[1];
+     const wanted = JSON.parse(secondRow.dataset.issue).issueKey;
+     const isSecond = secondRow.classList.contains('is-keynav-active');
+     ${press('#task-input', 'Enter')}
+     await H.sleep(800);
+     const started = H.q('#start-stop-btn').classList.contains('btn-stop');
+     const onIssue = H.runningKey();
+     H.click(H.q('#start-stop-btn')); await H.sleep(500);
+     await H.resetDay();
+     return JSON.stringify({ rows, marked, isSecond, wanted, started, onIssue })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.rows > 1 && d.marked === 1 && d.isSecond && d.started && d.onIssue === d.wanted;
+    },
+  );
+
+  await check(
+    'nothing is highlighted until an arrow key, so Enter keeps its old meaning',
+    `await H.resetDay();
+     const i = H.q('#task-input');
+     i.focus(); i.value = 'a local thing that matches nothing';
+     i.dispatchEvent(new Event('input'));
+     await H.sleep(700);
+     const marked = H.all('#task-dropdown .is-keynav-active').length;
+     ${press('#task-input', 'Enter')}
+     await H.sleep(800);
+     // Enter with no highlighted row still starts the free text as a local entry.
+     const started = H.q('#start-stop-btn').classList.contains('btn-stop');
+     const label = H.q('#task-input').value;
+     H.click(H.q('#start-stop-btn')); await H.sleep(500);
+     await H.resetDay();
+     return JSON.stringify({ marked, started, label })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.marked === 0 && d.started && d.label.includes('a local thing');
+    },
+  );
+
+  await check(
+    'the pin picker takes arrows too, and Enter pins the highlighted issue',
+    `await H.resetDay();
+     await H.clearPins();
+     H.q('#add-pin-btn').click(); await H.sleep(400);
+     ${press('#pin-search-input', 'ArrowDown')}
+     ${press('#pin-search-input', 'ArrowDown')}
+     await H.sleep(150);
+     const rows = H.all('#pin-results .task-dd-item');
+     const marked = H.all('#pin-results .is-keynav-active').length;
+     const isSecond = rows[1].classList.contains('is-keynav-active');
+     const wanted = rows[1].querySelector('.jira-chip').textContent;
+     ${press('#pin-search-input', 'Enter')}
+     await H.sleep(400);
+     // Pinning re-renders the list, so rows[1] is detached by now — find it again.
+     const label = H.all('#pin-results .task-dd-item')
+       .find(r => r.querySelector('.jira-chip').textContent === wanted)
+       ?.querySelector('button').textContent ?? null;
+     H.q('#close-pin').click(); await H.sleep(200);
+     const pinned = H.all('.pin-chip').map(c => c.dataset.key);
+     await H.clearPins();
+     return JSON.stringify({ count: rows.length, marked, isSecond, wanted, label, pinned })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.count > 1 && d.marked === 1 && d.isSecond &&
+        d.label === 'Unpin' && JSON.stringify(d.pinned) === JSON.stringify([d.wanted]);
+    },
+  );
+
+  await check(
+    'Ctrl+L reaches the omnibar and Ctrl+Enter resumes the last entry',
+    `await H.resetDay();
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     const wanted = H.entries()[0].key;
+     document.body.focus();
+     ${press('body', 'l', { ctrlKey: true })}
+     await H.sleep(200);
+     const focused = document.activeElement?.id;
+     H.q('#task-input').blur(); H.q('#task-input').value = '';
+     document.body.focus();
+     ${press('body', 'Enter', { ctrlKey: true })}
+     await H.sleep(900);
+     // Resuming an issue already booked earlier today is a merge decision, and
+     // the prompt is the correct answer to it — the timer starts once it is
+     // answered. Keep them separate, so nothing swallows the dropped block.
+     const prompted = !H.q('#modal-overlay').classList.contains('hidden');
+     if (prompted) {
+       H.all('#modal-buttons button').find(b => /keep separate/i.test(b.textContent))?.click();
+       await H.sleep(600);
+     }
+     const running = H.q('#start-stop-btn').classList.contains('btn-stop');
+     const onIssue = H.runningKey();
+     H.click(H.q('#start-stop-btn')); await H.sleep(600);
+     await H.resetDay();
+     return JSON.stringify({ focused, prompted, running, onIssue, wanted })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.focused === 'task-input' && d.running && d.onIssue === d.wanted;
+    },
+  );
+
+  await check(
+    'the day can be stepped with [ ] and T, but not while typing',
+    `await H.resetDay();
+     const label = () => H.q('#current-date-label').textContent;
+     const start = label();
+     ${press('body', '[')}
+     await H.sleep(700);
+     const back = label();
+     ${press('body', 'T')}
+     await H.sleep(700);
+     const home = label();
+     // The same key inside the omnibar must reach the text, not the day.
+     const i = H.q('#task-input'); i.focus(); i.value = '';
+     ${press('#task-input', '[')}
+     await H.sleep(400);
+     const unmoved = label();
+     i.blur();
+     await H.resetDay();
+     return JSON.stringify({ start, back, home, unmoved })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.back !== d.start && d.home === d.start && d.unmoved === d.start;
+    },
+  );
+
+  await check(
+    'the entry list is one tab stop, and arrows move focus inside it',
+    `await H.resetDay();
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(500);
+     await H.dragToHour(H.all('.task-item')[1], '11:00'); await H.sleep(600);
+     const cards = H.all('.entry-card');
+     const stops = cards.filter(c => c.tabIndex === 0).length;
+     cards[0].focus();
+     // On the focused row, not on the list: a real key event targets whatever has
+     // focus and bubbles up, and dispatching on the container instead makes
+     // event.target the container, which the handler correctly ignores.
+     //
+     // document.activeElement rather than H.q(':focus') — the pseudo-class stops
+     // matching the moment the window is not the foreground one, which would make
+     // this check pass or throw depending on where the user clicked last.
+     document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {
+       key: 'ArrowDown', bubbles: true, cancelable: true }));
+     await H.sleep(150);
+     const movedTo = H.all('.entry-card').indexOf(document.activeElement);
+     await H.resetDay();
+     return JSON.stringify({ count: cards.length, stops, movedTo })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.count >= 2 && d.stops === 1 && d.movedTo === 1;
+    },
+  );
+
+  await check(
+    'Enter on a focused row opens the menu, arrows walk it, Escape returns focus',
+    `await H.resetDay();
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     const card = H.q('.entry-card');
+     card.focus();
+     ${press('.entry-card', 'Enter')}
+     await H.sleep(300);
+     const opened = !H.q('#ctx-menu').classList.contains('hidden');
+     const menuFocused = document.activeElement?.id === 'ctx-menu';
+     const role = H.q('#ctx-menu').getAttribute('role');
+     ${press('#ctx-menu', 'ArrowDown')}
+     ${press('#ctx-menu', 'ArrowDown')}
+     await H.sleep(150);
+     const active = H.q('#ctx-menu .is-keynav-active')?.textContent ?? null;
+     ${press('#ctx-menu', 'Escape')}
+     await H.sleep(250);
+     const closed = H.q('#ctx-menu').classList.contains('hidden');
+     const backOnRow = document.activeElement?.classList.contains('entry-card');
+     await H.resetDay();
+     return JSON.stringify({ opened, menuFocused, role, active, closed, backOnRow })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.opened && d.menuFocused && d.role === 'menu' &&
+        d.active?.includes('Work description') && d.closed && d.backOnRow;
+    },
+  );
+
+  await check(
+    'Enter in the menu runs the highlighted item',
+    `await H.resetDay();
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     H.q('.entry-card').focus();
+     ${press('.entry-card', 'Enter')}
+     await H.sleep(300);
+     // Second item is Work description; open it from the keyboard alone.
+     ${press('#ctx-menu', 'ArrowDown')}
+     ${press('#ctx-menu', 'ArrowDown')}
+     ${press('#ctx-menu', 'Enter')}
+     await H.sleep(500);
+     const dialog = H.q('#modal-title')?.textContent ?? '';
+     const focused = document.activeElement?.tagName;
+     const role = H.q('#modal-overlay .panel')?.getAttribute('role');
+     H.all('#modal-buttons button')[0].click();
+     await H.sleep(300);
+     const backOnRow = document.activeElement?.classList.contains('entry-card');
+     await H.resetDay();
+     return JSON.stringify({ dialog, focused, role, backOnRow })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.dialog.startsWith('Work description') && d.focused === 'TEXTAREA' &&
+        d.role === 'dialog' && d.backOnRow;
+    },
+  );
+
+  await check(
+    'Tab cannot walk out of an open modal',
+    `await H.resetDay();
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(600);
+     H.q('.entry-card').focus();
+     ${press('.entry-card', 'Enter')}
+     await H.sleep(250);
+     ${press('#ctx-menu', 'ArrowDown')}
+     ${press('#ctx-menu', 'ArrowDown')}
+     ${press('#ctx-menu', 'Enter')}
+     await H.sleep(500);
+     const overlay = H.q('#modal-overlay');
+     // Walk further than there are stops; focus must still be inside.
+     let inside = true;
+     for (let n = 0; n < 8; n++) {
+       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+       await H.sleep(60);
+       if (!overlay.contains(document.activeElement)) inside = false;
+     }
+     H.all('#modal-buttons button')[0].click();
+     await H.sleep(300);
+     await H.resetDay();
+     return String(inside)`,
+    eq('true'),
+  );
+}
+
+async function emptyStates() {
+  await check(
+    'an empty day says how to add time in both places, and the hint takes no clicks',
+    `const day = await H.findEmptyDay();
+     if (!day) return JSON.stringify({ skip: true });
+     const panel = H.q('#entry-list').textContent;
+     const grid = H.q('.sched-empty-hint')?.textContent ?? null;
+     const swallows = grid === null ? null
+       : getComputedStyle(H.q('.sched-empty-hint')).pointerEvents;
+     // With the hint on screen, a click on the grid must still open the popup —
+     // pointer-events: none is what makes that true.
+     const y = await H.showHour('13:00');
+     H.q('#schedule-grid').dispatchEvent(new MouseEvent('click', {
+       bubbles: true, cancelable: true, clientX: H.gridX(), clientY: y }));
+     await H.sleep(500);
+     const popup = H.q('.sched-quick-entry-time')?.textContent ?? 'NONE';
+     document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+     await H.sleep(200);
+     await H.resetDay();
+     return JSON.stringify({ day, panel, grid, swallows, popup })`,
+    (v) => {
+      const d = JSON.parse(v);
+      if (d.skip) return 'skipped';
+      return /drag an issue/i.test(d.panel) && /click an hour/i.test(d.panel) &&
+        d.grid && /click an hour/i.test(d.grid) && d.swallows === 'none' &&
+        d.popup === '13:00 – 13:30';
+    },
+  );
+
+  await check(
+    'the hint goes as soon as the day has anything, and comes back when it is emptied',
+    `const day = await H.findEmptyDay();
+     if (!day) return JSON.stringify({ skip: true });
+     await H.dragToHour(H.firstTask(), '09:00'); await H.sleep(700);
+     const gone = H.q('.sched-empty-hint') === null;
+     const panelClean = !/drag an issue/i.test(H.q('#entry-list').textContent);
+     // Deleting the last entry has to bring the hint back, or the day goes quiet
+     // again with nothing to say how to fill it. A pending entry deletes outright.
+     H.q('.entry-card:not(.external) [data-a="delete"]').click();
+     await H.sleep(700);
+     const back = H.q('.sched-empty-hint') !== null;
+     const panelBack = /drag an issue/i.test(H.q('#entry-list').textContent);
+     await H.resetDay();
+     return JSON.stringify({ day, gone, panelClean, back, panelBack })`,
+    (v) => {
+      const d = JSON.parse(v);
+      if (d.skip) return 'skipped';
+      return d.gone && d.panelClean && d.back && d.panelBack;
+    },
+  );
+}
+
 async function workDescription() {
   const openMenuOn = (selector) => `
      H.q(${JSON.stringify(selector)}).dispatchEvent(new MouseEvent('contextmenu', {
@@ -1255,6 +1624,8 @@ export async function runChecks(mainWindow, app) {
     await dayPanel();
     await dragging();
     await editTask();
+    await keyboard();
+    await emptyStates();
     await workDescription();
     await noOpEdits();
     await displayPrefs();

@@ -80,9 +80,10 @@ been exercised end to end, not just written.
 | Finish Day | Confirmed against real Jira — worklog `60504` on `EHW-70` |
 | Jira-side worklogs | Time logged in the Jira web UI is read back and counted |
 | Logging | `logs/joggl.log`, credential-redacted |
-| Tests | 107 passing, `npm test` |
+| Tests | 189 passing, `npm test`; 57 UI checks, `npm run uicheck` |
 | Shell | Collapsible sidebar with a view registry; week and month tabs present but disabled |
 | Drag to day view | An issue dragged from the task list becomes a 30-minute pending entry |
+| Keyboard | Every list arrow-navigable, every menu and dialog reachable — see below |
 
 ### Deviations from this document, and why
 
@@ -132,8 +133,10 @@ a reason.
    view beside it showing whichever day was clicked.
 3. **Tray icon states** — the icon should show at a glance whether a timer is running.
    Right now the only signal is opening the window.
-4. **Keyboard-first start/stop** — a global shortcut exists for showing the window;
-   starting the last task without touching the mouse is the obvious next one.
+4. **A global start/stop shortcut** — Ctrl+Enter starts and stops from inside the
+   window (see *Keyboard*), but reaching it still means giving Joggl focus first. A
+   `globalShortcut` that resumes the last task with the window hidden is what would
+   make it keyboard-first, and it needs a main↔renderer signal it does not have.
 5. **Pagination for busy issues** — `fetchDayWorklogs` asks for `maxResults=200` per
    issue and does not follow `startAt`. Fine at present volumes, wrong eventually.
 6. **Which days are not worked is a toggle, not a schedule.** The weekend tint is
@@ -150,6 +153,43 @@ a reason.
 
 Deliberately **not** planned: everything under *Out of scope* at the end of this file.
 The discipline the 100 KB limit used to impose now has to come from that list.
+
+---
+
+## Keyboard
+
+Five lists are arrow-navigable and they all share **one** helper, `renderer/js/keynav.js`.
+Three copies of "which row is active" would rot apart, which is the whole reason it is a
+module and has its own tests.
+
+Two shapes, because the lists are two different things:
+
+- `createRowNav` — a **highlight** inside a search result list, driven from the text field
+  the user is still typing in. Focus never leaves the input. Used by the omnibar
+  dropdown, the quick-entry popup, `issue-picker.js` (Edit task), the pin picker, and the
+  context menu.
+- `wireRovingList` — a **roving tabindex** over rows that are themselves focusable, so the
+  list is one tab stop and arrows move within it. Used by "On this day" and the day view's
+  blocks.
+
+**Nothing is active until an arrow key is pressed.** `activate()` answers `null` until
+then, and every caller falls back to what Enter already meant — start the typed text, take
+the only match, commit free text. Pre-selecting the first row would silently change all
+three, which is why the rule is enforced in the helper and not left to each caller.
+
+| Key | Where | What |
+|---|---|---|
+| `Ctrl+L` | anywhere | Focus the omnibar and select its text |
+| `Ctrl+Enter` | anywhere | Start the highlighted or typed issue; with an empty box, resume the day's most recent entry; while running, stop |
+| `T` `[` `]` | anywhere, not while typing | Today, previous day, next day |
+| `↑` `↓` `Home` `End` | any list | Move the highlight, wrapping at both ends |
+| `Enter` | any list | Run the highlighted row, or fall back to that list's own Enter |
+| `Enter`, `Shift+F10`, Menu key | a focused row | Open its context menu. Shift+F10 needs no code — the browser dispatches `contextmenu` on the focused element, so `anchorFor` only has to notice the event carries no coordinates and anchor to the row instead |
+| `Escape` | menu or dialog | Close, and put focus back where it came from |
+| `Tab` | inside a dialog | Cycles within it; `modal.js` traps it, so the page behind is unreachable |
+
+Bare-key shortcuts are suppressed while a modal is open and while the caret is in a field —
+otherwise `[` would step the day instead of reaching the text.
 
 ---
 
@@ -491,6 +531,11 @@ Never probe the environment. If something above appears missing, say so and stop
   `render → lookup → callback → render` into a loop that blew the stack, and because
   the quick-entry popup revealed itself *after* rendering its results, the whole day
   view looked dead. `createRemoteLookup` therefore never calls back synchronously.
+- **An empty state names the gesture.** Both ways of putting time on a day — dragging a
+  row from the issue list, clicking an hour on the grid — leave no trace in the UI, so an
+  empty day says so in both places. The grid's hint is `pointer-events: none`, or it would
+  sit over the hours it is telling people to click. A day holding only read-only Jira rows
+  is **not** empty: the hint keys off what is rendered, not off what the store holds.
 
 ### Tests
 
@@ -527,8 +572,9 @@ what the DOM probably does: a temporary env-gated block in `createWindow` that c
 committing. `webContents.capturePage()` gives a screenshot, which is the quickest way to
 settle a question about layout or colour.
 
-Four traps make checks pass or fail for the wrong reason. All four cost real time before
-they were understood, and all four are restated in `scripts/ui-check.mjs`:
+Nine traps make checks pass or fail for the wrong reason. Every one cost real time before
+it was understood, and all nine are restated in `scripts/ui-check.mjs`. The first four
+produce wrong results:
 
 1. **A timer stopped inside ten seconds is discarded on purpose.** Back-date the start
    first, or a merge check measures nothing at all and passes.
@@ -539,13 +585,27 @@ they were understood, and all four are restated in `scripts/ui-check.mjs`:
 4. **At 0.5× zoom a quarter hour is 11 px.** Assert that a drop landed where the *preview*
    said, not at an hour hard-coded in the test.
 
-Two more, learned from flakes rather than from wrong results:
+Five more, learned from flakes rather than from wrong results:
 
 - **Selecting a day starts an async read of that day's Jira worklogs**, and the re-render
   when it lands replaces every row. A gesture begun before that settles has its element
-  pulled out from under it and simply never starts. Wait for the row count to stop moving.
+  pulled out from under it and simply never starts. Wait for the row count to stop moving —
+  and wait for it to hold still, because **one** stable sample arrives before the request
+  has even answered. That single missing sample produced eight failures in one run and a
+  different six in the next, all of them reading as "nothing was created".
+- **A row grabbed before an `await` and pressed after it may be detached**, and a press on
+  a detached node never reaches the delegated listener. `H.dragToHour` re-finds its row by
+  `data-key` / `data-id` for exactly this reason.
 - **A zoom change re-renders the grid behind an `await`.** Re-measure the hour line
   afterwards rather than trusting a coordinate read before the click.
+- **The window has to be the foreground one.** A background or occluded window has its
+  compositor frozen: a CSS transition stops half way, so a sidebar width reads as a number
+  from nowhere, and `:focus` stops matching, so a key press dispatched at `:focus` throws.
+  `main/index.js` calls `focus()` under `--uicheck`; prefer `document.activeElement` over
+  `:focus` regardless, and do not click away mid-run.
+- **An empty-state check cannot use today.** Clearing the store does not clear the day —
+  time booked in the Jira web UI still renders. `H.findEmptyDay()` steps back until it
+  finds a day with no rows of either kind, and skips rather than lying if there is none.
 
 What this cannot reach, and what therefore stays manual: anything crossing a process
 restart, and anything that writes to Jira — **never run Finish Day against a live site

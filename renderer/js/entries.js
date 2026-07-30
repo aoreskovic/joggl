@@ -11,6 +11,7 @@ import {
   sameTimes,
 } from './entry-ops.js';
 import { createIssuePicker } from './issue-picker.js';
+import { wireRovingList } from './keynav.js';
 import { PLAY_ICON } from './icons.js';
 import { sortEntries } from './merge.js';
 import { askModal } from './modal.js';
@@ -61,7 +62,17 @@ export function renderEntryList() {
   const children = [];
 
   if (entries.length === 0) {
-    children.push(note(state.externalState === 'loading' ? 'Loading…' : 'No entries for this day'));
+    if (state.externalState === 'loading') {
+      children.push(note('Loading…'));
+    } else {
+      // Both ways in are gestures nobody would guess: dragging a row out of the
+      // issue list, and clicking an hour on the grid. An empty day is the one
+      // moment there is room to say so.
+      children.push(note('Nothing logged yet', 'empty-title'));
+      children.push(
+        note('Drag an issue onto the day view, or click an hour there.', 'empty-hint'),
+      );
+    }
   } else {
     const overlaps = overlappingIds(entries);
     children.push(
@@ -76,6 +87,7 @@ export function renderEntryList() {
   }
 
   list.replaceChildren(...children);
+  rovingEntries().refresh();
 
   // The count has to stay readable while the panel is collapsed — that is the
   // only thing left saying whether the day has anything in it.
@@ -86,6 +98,17 @@ export function renderEntryList() {
 /** A multi-line description has to sit on the row's single line. */
 function oneLine(text) {
   return String(text ?? '').replace(/\s*\n+\s*/g, ' ').trim();
+}
+
+// One tab stop for the whole list, arrow keys within it. Created lazily because
+// renderEntryList can run before this module's first import completes.
+let roving = null;
+function rovingEntries() {
+  roving ??= wireRovingList({
+    container: () => document.getElementById('entry-list'),
+    rowSelector: '.entry-card',
+  });
+  return roving;
 }
 
 function note(text, kind) {
@@ -108,6 +131,9 @@ function buildEntryCard(entry, isOverlapping) {
   card.className =
     'entry-card' + (flagOverlap ? ' overlapping' : '') + (external ? ' external' : '');
   card.dataset.id = entry.id;
+  // Focusable so the Menu key has something to fire contextmenu on. Which row is
+  // the list's single tab stop is roved by wireRovingList below.
+  card.tabIndex = -1;
   if (!external) card.title = 'Drag onto the day view to move this entry';
 
   card.innerHTML =
@@ -179,6 +205,17 @@ function buildEntryCard(entry, isOverlapping) {
     if (event.target.closest('.ie')) return; // leave the text fields their own menu
     event.preventDefault();
     showContextMenu(event, entry);
+  });
+
+  // Enter on a focused row opens the menu too: it is the row's only action, and
+  // hunting for the Menu key on a laptop without one is not a keyboard path.
+  card.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.target !== card) return;
+    event.preventDefault();
+    showContextMenu(
+      { clientX: 0, clientY: 0, currentTarget: card, target: card, preventDefault() {} },
+      entry,
+    );
   });
 
   return card;

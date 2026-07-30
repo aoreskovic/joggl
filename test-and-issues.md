@@ -2,19 +2,20 @@
 
 What to test by hand, how to test it, and what is known to be broken.
 
-Joggl has 177 unit tests (`npm test`) covering the things where a silent failure loses
+Joggl has 189 unit tests (`npm test`) covering the things where a silent failure loses
 time data: the worklog timestamp formatter, merge decisions at the 30-minute boundary,
 Finish Day's partial-failure transitions, the day-log round trip, quarter-hour snapping,
 what a duplicate, a moved and a repointed entry inherit,
 when a touch counts as an edit, weekend detection, pin labelling, the ADF a worklog
-comment becomes and back again, and the search box's remote-lookup loop.
+comment becomes and back again, the search box's remote-lookup loop, and arrow-key
+navigation over a list of results.
 Everything else — the whole UI — is verified against the checklist below, because the
 project deliberately has no DOM test harness and adding one would break the
 short-dependency rule in `CLAUDE.md`.
 
 That makes this file the other half of the test suite. Keep it current.
 
-**Last full pass: 2026-07-30, all 46 checklist items green**, driven by dispatching real
+**Last full pass: 2026-07-30, all 56 checklist items green**, driven by dispatching real
 mouse events into the renderer from the main process against a throwaway
 `--user-data-dir`. See *The script* at the end for how, and for what it does not cover.
 
@@ -131,6 +132,44 @@ The point of these is that **nothing** should end up offered for a re-sync.
 | Scroll the timeline, then click an empty hour | A quick-entry popup opens **visibly**, focused, titled with that hour and the half hour after it, and sitting fully inside the window. |
 | Type in it, then press Escape | It closes and nothing is created. |
 | Click an empty hour, then click elsewhere | It closes. A second click on the grid opens it again — a popup that closed itself must not eat the next click. |
+
+### The keyboard
+
+Everything here used to need the mouse. The rule that shapes it: **nothing is highlighted
+until an arrow key is pressed**, because Enter already means something in three of these
+four lists — start the typed text, commit free text, take the only match — and
+pre-selecting the first row would quietly change all three.
+
+| Do this | Correct result |
+|---|---|
+| Type in the omnibar, then press ↓ twice | The second result is highlighted, and only it. ↑ walks back, Home and End jump to the ends, and both ends wrap. |
+| Press Enter | The highlighted issue starts, not the typed text. |
+| Type something that matches nothing, press Enter | Nothing was highlighted, so it starts as a local entry — the old behaviour, unchanged. |
+| Same arrows in the quick-entry popup, the pin picker and Edit task's search | Same behaviour in all three. They share one helper; three copies would rot apart. |
+| Press Ctrl+L from anywhere | The omnibar takes focus and its text is selected. |
+| Press Ctrl+Enter with the omnibar empty | The day's most recent entry resumes. Resuming an issue already booked earlier today is a merge decision, so the prompt appearing is correct. |
+| Press Ctrl+Enter with a timer running | It stops, exactly as the button does. |
+| Press `[`, `]`, `T` | Previous day, next day, today. `]` does nothing on today, since the button is disabled. |
+| Press `[` with the caret in the omnibar | A `[` appears in the text. The day does not move. |
+| Press `[` with a modal open | Nothing. An open dialog owns the keyboard. |
+| Tab into "On this day" | The list is **one** tab stop. ↓ and ↑ then move between rows inside it, and Tab leaves. |
+| Press Enter on a focused row, or Shift+F10 | The context menu opens beside that row, first item highlighted. |
+| Arrow down the menu and press Enter | That item runs. Escape closes it and puts focus back on the row it came from. |
+| Tab repeatedly inside any dialog | Focus cycles within it and never reaches the page behind. Escape closes it and returns focus to where it started. |
+| Tab into the day view, then ↓ | The blocks rove the same way as the rows. A running block is skipped — it has no menu. |
+
+### An empty day
+
+The two ways to put time on a day — dragging an issue in, clicking an hour — are both
+invisible. A colleague opening Joggl for the first time has no reason to try either.
+
+| Do this | Correct result |
+|---|---|
+| Open a day with nothing on it | The panel says what to drag and what to click; the day view says the same on the grid. |
+| Click an hour while that hint is on screen | The quick-entry popup opens as usual. The hint must not swallow the click. |
+| Drop anything on the day | Both hints disappear at once. |
+| Delete the last entry again | Both come back. |
+| Look at a day holding only **Manual Jira entry** rows | No hint. The day is not empty, whatever the local store says. |
 
 ### Dragging onto the day view
 

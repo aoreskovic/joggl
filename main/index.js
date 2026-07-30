@@ -101,6 +101,12 @@ async function createWindow() {
   mainWindow.show();
 
   if (uiCheck) {
+    // A background or occluded window has its compositor frozen: CSS transitions
+    // stop advancing mid-way and `:focus` stops matching, so checks that measure a
+    // slide or press a key on the focused row fail for a reason that has nothing
+    // to do with the app. The launching terminal holds focus, so take it back.
+    mainWindow.focus();
+
     const { runChecks } = await import(
       pathToFileURL(path.join(ROOT, 'scripts', 'ui-check.mjs')).href
     );

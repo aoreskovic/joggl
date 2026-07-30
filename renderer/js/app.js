@@ -13,6 +13,7 @@ import {
   updateTotal,
 } from './entries.js';
 import { PLAY_ICON, STOP_ICON, ZOOM_ICON } from './icons.js';
+import { createRowNav } from './keynav.js';
 import { isPinned, renderPins, togglePin } from './pins.js';
 import { registerRenderer, renderAll } from './render.js';
 import { registerView, setActiveView, wireShell } from './shell.js';
@@ -264,6 +265,8 @@ function wireOmnibar() {
   const dropdown = $('task-dropdown');
 
   // Results from Jira for a query that is still on screen.
+  const nav = createRowNav({ container: () => dropdown, rowSelector: '.task-dd-item' });
+
   let remote = { query: '', issues: [] };
   const lookupRemote = createIssueLookup((query, issues) => {
     remote = { query, issues };
@@ -279,6 +282,7 @@ function wireOmnibar() {
   const issueRow = (issue, expanded) => {
     const item = document.createElement('div');
     item.className = 'task-dd-item';
+    item.dataset.issue = JSON.stringify(issue);
     item.innerHTML =
       `<span class="jira-chip">${esc(issue.issueKey)}</span>` +
       `<span class="task-dd-title">${esc(issue.title)}</span>` +
@@ -330,6 +334,7 @@ function wireOmnibar() {
 
     dropdown.replaceChildren(...children);
     dropdown.classList.remove('hidden');
+    nav.reset();
   };
 
   // The one place a lookup is started: from what the user did, not from a render.
@@ -346,7 +351,21 @@ function wireOmnibar() {
     if (!state.timer) refreshDropdown();
   });
   input.addEventListener('keydown', (event) => {
+    // Arrow keys walk the results instead of the caret walking the text.
+    if (!dropdown.classList.contains('hidden') && nav.handleKey(event)) {
+      event.preventDefault();
+      return;
+    }
     if (event.key === 'Enter') {
+      // An arrow-key row is a choice; Enter then starts the timer on it directly
+      // rather than filling the box and making the user press Enter again.
+      const chosen = nav.activate();
+      if (chosen) {
+        event.preventDefault();
+        pick(JSON.parse(chosen.dataset.issue));
+        $('start-stop-btn').click();
+        return;
+      }
       dropdown.classList.add('hidden');
       $('start-stop-btn').click();
     }
@@ -481,8 +500,12 @@ function wirePinPicker() {
   const overlay = $('pin-overlay');
   const input = $('pin-search-input');
   const results = $('pin-results');
+  const nav = createRowNav({ container: () => results, rowSelector: '.task-dd-item' });
 
   const render = () => {
+    // Every render replaces the rows, so a highlight held over from the last one
+    // would point at a node that is gone.
+    nav.reset();
     const matches = searchIssues(input.value);
     if (matches.length === 0) {
       const empty = document.createElement('div');
@@ -527,6 +550,46 @@ function wirePinPicker() {
     if (event.target === overlay) overlay.classList.add('hidden');
   });
   input.addEventListener('input', render);
+
+  input.addEventListener('keydown', (event) => {
+    if (nav.handleKey(event)) {
+      event.preventDefault();
+      return;
+    }
+    if (event.key !== 'Enter') return;
+    // Enter pins the highlighted row through its own button, so pinning and
+    // unpinning stay one code path however they were reached.
+    const row = nav.activate();
+    if (!row) return;
+    event.preventDefault();
+    row.querySelector('button')?.click();
+  });
+}
+
+/**
+ * What Ctrl+Enter does.
+ *
+ * Running: stop, which needs no target. Idle with something typed or picked: the
+ * button already knows what to do. Idle with an empty box: resume the day's most
+ * recent entry, because "start the last thing again" is the whole point of a
+ * keyboard shortcut for a timer — otherwise it would only ever be able to stop.
+ */
+function resumeOrToggleTimer() {
+  const input = $('task-input');
+  if (state.timer || input.value.trim() || !isToday()) {
+    $('start-stop-btn').click();
+    return;
+  }
+
+  const last = [...state.entries]
+    .filter((e) => !e.external && e.endTs !== null)
+    .sort((a, b) => b.endTs - a.endTs)[0];
+
+  if (!last) {
+    toastWarn('Nothing to resume yet. Ctrl+L to search for an issue.');
+    return;
+  }
+  startTimer({ issueKey: last.issueKey, issueId: last.issueId, title: last.title });
 }
 
 // ── Global ─────────────────────────────────────────────────────────────────
@@ -541,6 +604,47 @@ function wireGlobal() {
     if (event.key === 'Escape') {
       hideContextMenu();
       hideQuickEntry();
+      return;
+    }
+
+    // Shortcuts are suppressed while a modal is up — it owns the keyboard, and
+    // starting a timer from behind a dialog would be a surprise.
+    if (!$('modal-overlay').classList.contains('hidden')) return;
+
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? '');
+
+    // Ctrl+L for the omnibar, the same key every address bar uses.
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'l') {
+      event.preventDefault();
+      const input = $('task-input');
+      if (!input.disabled) {
+        input.focus();
+        input.select();
+      }
+      return;
+    }
+
+    // Ctrl+Enter starts or stops the timer from anywhere, so a day can be tracked
+    // without reaching for the mouse. Plain Enter is left alone: it belongs to
+    // whatever has focus.
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      resumeOrToggleTimer();
+      return;
+    }
+
+    // Bare keys only when not typing, or they would land in the text.
+    if (typing || event.ctrlKey || event.metaKey || event.altKey) return;
+
+    if (event.key === 't' || event.key === 'T') {
+      event.preventDefault();
+      $('today-btn').click();
+    } else if (event.key === '[') {
+      event.preventDefault();
+      $('prev-day').click();
+    } else if (event.key === ']') {
+      event.preventDefault();
+      if (!$('next-day').disabled) $('next-day').click();
     }
   });
 

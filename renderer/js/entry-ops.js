@@ -1,6 +1,48 @@
 // Pure transforms on entries. No DOM, no IPC — the rules here decide what Jira
 // ends up holding, so they are kept testable.
 
+import { startOfDayMs, uuid } from './util.js';
+
+/**
+ * A day as it should be read: local entries, plus any Jira-side worklog that no
+ * local entry already stands for.
+ *
+ * A synced entry and the Jira worklog it created are the same half hour seen twice.
+ * Showing both would double the day's total; copying both would book it twice.
+ * `visibleEntries` in state.js reads a day for the screen and this reads one for
+ * copying — one rule, so they cannot come to disagree about what a day contains.
+ */
+export function copyableEntries(local, external) {
+  const claimed = new Set((local ?? []).map((e) => e.worklogId).filter(Boolean));
+  return [...(local ?? []), ...(external ?? []).filter((e) => !claimed.has(e.worklogId))];
+}
+
+/**
+ * The same entries, on another day, at the same times on the clock.
+ *
+ * Measured as an offset from local midnight rather than as a fixed number of
+ * milliseconds: the two days can be on opposite sides of a clock change, and a
+ * 09:00 start that arrived as 08:00 or 10:00 would be a quiet, plausible-looking
+ * lie about when the work happened.
+ *
+ * Everything else is `duplicateOf`'s business — dropping the worklog, resetting the
+ * status, keeping the description, and turning a Jira-side row into an ordinary
+ * entry of Joggl's own.
+ */
+export function copiedToDay(entries, fromDayKey, toDayKey, newId = uuid) {
+  const from = startOfDayMs(fromDayKey);
+  const to = startOfDayMs(toDayKey);
+
+  return (entries ?? [])
+    // A timer still running has no end to copy, and its day is not one being copied
+    // from anyway.
+    .filter((entry) => entry.endTs !== null && entry.endTs !== undefined)
+    .map((entry) => {
+      const copy = duplicateOf(entry, newId());
+      return { ...copy, startTs: to + (entry.startTs - from), endTs: to + (entry.endTs - from) };
+    });
+}
+
 /**
  * A copy of `entry` covering the same stretch of time.
  *

@@ -9,6 +9,8 @@ import test from 'node:test';
 import {
   canRetarget,
   clampDropStart,
+  copiedToDay,
+  copyableEntries,
   DEFAULT_DROP_MS,
   dropEntryFor,
   duplicateOf,
@@ -152,6 +154,114 @@ test('the count and the outlines cannot disagree: both read the same set', () =>
   ]);
   assert.deepEqual([...ids].sort(), ['a', 'b']);
   assert.equal(ids.size, 2, 'reads as "2 entries overlap"');
+});
+
+// ── Copying a day onto another day ──────────────────────────────────────────
+
+const ids = () => {
+  let n = 0;
+  return () => `copy-${++n}`;
+};
+
+test('a copy sits at the same time on the clock, on the new day', () => {
+  const [copy] = copiedToDay(
+    [entry({ startTs: T(9), endTs: T(10, 30) })],
+    '2026-07-28',
+    '2026-07-30',
+    ids(),
+  );
+  const at = (h, m = 0) => new Date(2026, 6, 30, h, m, 0, 0).getTime();
+  assert.equal(copy.startTs, at(9));
+  assert.equal(copy.endTs, at(10, 30));
+});
+
+test('the wall clock survives a change of clocks between the two days', () => {
+  // 2026-10-25 is when the clocks go back here, so the two days are not the same
+  // number of hours apart. A copy measured as a fixed millisecond delta would land
+  // an hour out — a quiet, plausible-looking lie about when the work happened.
+  const start = new Date(2026, 9, 23, 9, 0, 0, 0).getTime();
+  const [copy] = copiedToDay(
+    [entry({ startTs: start, endTs: start + 3600000 })],
+    '2026-10-23',
+    '2026-10-26',
+    ids(),
+  );
+  assert.equal(new Date(copy.startTs).getHours(), 9);
+  assert.equal(new Date(copy.endTs).getHours(), 10);
+});
+
+test('every copy is a new entry, unsynced, with the description carried over', () => {
+  const copies = copiedToDay(
+    [
+      entry({ id: 'a', status: 'synced', worklogId: '900', comment: 'what I did' }),
+      entry({ id: 'b', startTs: T(11), endTs: T(12) }),
+    ],
+    '2026-07-28',
+    '2026-07-30',
+    ids(),
+  );
+  assert.deepEqual(copies.map((c) => c.id), ['copy-1', 'copy-2']);
+  assert.deepEqual(copies.map((c) => c.worklogId), [null, null], 'or Sync would rewrite the original');
+  assert.deepEqual(copies.map((c) => c.status), ['pending', 'pending']);
+  assert.equal(copies[0].comment, 'what I did');
+});
+
+test('a Jira-side row copies as an ordinary entry of our own', () => {
+  const [copy] = copiedToDay(
+    [{ ...entry(), external: true, worklogId: '900', status: 'synced' }],
+    '2026-07-28',
+    '2026-07-30',
+    ids(),
+  );
+  assert.equal(copy.external, undefined, 'a copy is Joggl’s, not a second view of Jira’s record');
+  assert.equal(copy.worklogId, null);
+  assert.equal(copy.status, 'pending');
+});
+
+test('an entry with no issue key copies as local, and never syncs', () => {
+  const [copy] = copiedToDay([entry({ issueKey: null, issueId: null })], '2026-07-28', '2026-07-30', ids());
+  assert.equal(copy.status, 'local');
+});
+
+test('a running timer is not copied — it has no end to copy', () => {
+  const copies = copiedToDay(
+    [entry({ id: 'live', endTs: null }), entry({ id: 'done' })],
+    '2026-07-28',
+    '2026-07-30',
+    ids(),
+  );
+  assert.equal(copies.length, 1);
+});
+
+test('an empty day copies to nothing rather than throwing', () => {
+  assert.deepEqual(copiedToDay([], '2026-07-28', '2026-07-30', ids()), []);
+  assert.deepEqual(copiedToDay(undefined, '2026-07-28', '2026-07-30', ids()), []);
+});
+
+test('copying does not touch the day it copied from', () => {
+  const original = entry({ startTs: T(9), endTs: T(10) });
+  const before = { ...original };
+  copiedToDay([original], '2026-07-28', '2026-07-30', ids());
+  assert.deepEqual(original, before);
+});
+
+// ── Reading a day: local entries plus the Jira rows none of them stand for ───
+
+test('a Jira worklog a local entry already claims is not counted twice', () => {
+  const mine = entry({ id: 'mine', status: 'synced', worklogId: '900' });
+  const twin = { id: 'jira:900', worklogId: '900', external: true };
+  assert.deepEqual(copyableEntries([mine], [twin]).map((e) => e.id), ['mine']);
+});
+
+test('a Jira worklog nothing claims is kept', () => {
+  const mine = entry({ id: 'mine', worklogId: null });
+  const other = { id: 'jira:901', worklogId: '901', external: true };
+  assert.deepEqual(copyableEntries([mine], [other]).map((e) => e.id).sort(), ['jira:901', 'mine']);
+});
+
+test('either side missing is an empty day, not a crash', () => {
+  assert.deepEqual(copyableEntries(undefined, undefined), []);
+  assert.deepEqual(copyableEntries([entry()], undefined).length, 1);
 });
 
 // ── What a drop onto the day view creates ───────────────────────────────────

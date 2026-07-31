@@ -105,6 +105,16 @@
               aria-controls="entry-list"
             >
               <span><span class="tt-chevron" id="day-panel-chevron">▼</span>On this day</span>
+              <!-- Inside a header that is itself a toggle, so both stop the click
+                   from reaching it. See wireDayPanelActions. -->
+              <button id="copy-day-btn" class="add-pin-btn"
+                      title="Fill this day from the last one that has entries, keeping the same times">
+                Copy previous day
+              </button>
+              <button id="clear-day-btn" class="add-pin-btn"
+                      title="Remove this day's entries. Nothing is deleted from Jira">
+                Clear day
+              </button>
               <span class="tt-count" id="day-count">—</span>
             </div>
             <div id="entry-list"></div>
@@ -324,6 +334,13 @@
             <li>
               <strong>Type an exact time</strong> in the start, end or duration field of a
               row in <em>On this day</em> — the other two follow.
+            </li>
+            <li>
+              <strong>Copy previous day.</strong> Fills the day from the last one that has
+              anything on it — over a weekend, or back past a holiday, up to 30 days. Time
+              logged in the Jira web UI is copied too, and everything arrives unsynced.
+              <strong>Clear day</strong> beside it empties the day; it never deletes
+              anything from Jira.
             </li>
           </ul>
         </div>

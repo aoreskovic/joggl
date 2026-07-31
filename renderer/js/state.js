@@ -1,6 +1,7 @@
 // Renderer state and the persistence it needs. `window.joggl` is the preload
 // bridge; there is no other way out of this process.
 
+import { copyableEntries } from './entry-ops.js';
 import { DAY, debounce, startOfDayMs, todayKey } from './util.js';
 
 const api = window.joggl;
@@ -192,8 +193,7 @@ export async function loadExternalWorklogs(date = state.selectedDate) {
  * no local entry already stands for.
  */
 export function visibleEntries() {
-  const claimed = new Set(state.entries.map((e) => e.worklogId).filter(Boolean));
-  return [...state.entries, ...state.externalEntries.filter((e) => !claimed.has(e.worklogId))];
+  return copyableEntries(state.entries, state.externalEntries);
 }
 
 export function testConnection(creds) {

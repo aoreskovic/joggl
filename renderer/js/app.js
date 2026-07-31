@@ -2,6 +2,7 @@
 // connects the DOM to it.
 
 import { hideContextMenu, setContextActions } from './context-menu.js';
+import { clearDay, copyPreviousDay } from './copy-day.js';
 import { pickDate } from './date-picker.js';
 import { wireDayViewDrag } from './drag-drop.js';
 import {
@@ -273,6 +274,23 @@ function wireDayPanel() {
       toggle();
     }
   });
+
+  // Both actions live inside a header that is itself a toggle, so their clicks and
+  // their Enter have to stop there — otherwise copying a day also collapses the
+  // panel showing what was copied.
+  for (const [id, run] of [
+    ['copy-day-btn', copyPreviousDay],
+    ['clear-day-btn', clearDay],
+  ]) {
+    const button = $(id);
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      run();
+    });
+    button.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') event.stopPropagation();
+    });
+  }
 }
 
 function wireDayNav() {

@@ -1745,6 +1745,141 @@ async function help() {
   );
 }
 
+async function copyAndClear() {
+  /** Seeds yesterday with one entry, and cleans it up afterwards. */
+  const seedYesterday = `
+     const y = new Date(); y.setDate(y.getDate() - 1);
+     const p = (n) => String(n).padStart(2, '0');
+     const yKey = y.getFullYear() + '-' + p(y.getMonth() + 1) + '-' + p(y.getDate());
+     const at = new Date(y); at.setHours(9, 0, 0, 0);
+     await window.joggl.days.save(yKey, [{
+       id: 'src', issueKey: 'X-COPY', issueId: null, title: 'Yesterday work',
+       startTs: at.getTime(), endTs: at.getTime() + 5400000,
+       status: 'synced', worklogId: 'w-src', comment: 'carried over', errorMsg: null }]);`;
+
+  await check(
+    'Copy previous day brings yesterday over at the same times, unsynced',
+    `await H.resetDay();
+     ${seedYesterday}
+     H.q('#copy-day-btn').click();
+     await H.until(() => !H.q('#modal-overlay').classList.contains('hidden'), 20000, 'the confirm')
+       .catch(() => false);
+     const title = H.q('#modal-title')?.textContent ?? null;
+     const body = H.q('#modal-body')?.textContent ?? '';
+     H.q('#modal-buttons .btn-primary').click();
+     await H.sleep(700);
+     // Live, yesterday may also hold real Jira worklogs, so assert the copy of the
+     // seeded entry rather than a total that depends on what was booked that day.
+     const mine = H.entries().find(e => e.key === 'X-COPY') ?? null;
+     const anySynced = H.entries().some(e => /synced/.test(e.status ?? ''));
+     await window.joggl.days.save(yKey, []);
+     await H.resetDay();
+     return JSON.stringify({ title, body, mine, anySynced })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return /copy previous day/i.test(d.title) && /Yesterday|\d{2}\.\d{2}\.\d{4}/.test(d.body) &&
+        d.mine && d.mine.range === '09:00-10:30' && /pending/.test(d.mine.status) &&
+        // A synced source must not copy its worklog across, or Sync would rewrite it.
+        d.anySynced === false;
+    },
+  );
+
+  await check(
+    'the confirm says the day is not empty, and Cancel copies nothing',
+    `await H.resetDay();
+     ${seedYesterday}
+     const at2 = new Date(); at2.setHours(14, 0, 0, 0);
+     await window.joggl.days.save(H.todayKey(), [{
+       id: 'here', issueKey: 'X-HERE', issueId: null, title: 'Already here',
+       startTs: at2.getTime(), endTs: at2.getTime() + 1800000,
+       status: 'pending', worklogId: null, comment: null, errorMsg: null }]);
+     await window.__jogglTest.reloadDay();
+     H.q('#copy-day-btn').click();
+     await H.until(() => !H.q('#modal-overlay').classList.contains('hidden'), 20000, 'the confirm')
+       .catch(() => false);
+     const warned = /already has/i.test(H.q('#modal-body').textContent);
+     H.all('#modal-buttons button').find(b => /cancel/i.test(b.textContent)).click();
+     await H.sleep(500);
+     const afterCancel = H.entries().map(e => e.key);
+     await window.joggl.days.save(yKey, []);
+     await H.resetDay();
+     return JSON.stringify({ warned, afterCancel })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.warned === true && JSON.stringify(d.afterCancel) === JSON.stringify(['X-HERE']);
+    },
+  );
+
+  await check(
+    'Clear day offers to spare the synced entries, and never touches Jira',
+    `await H.resetDay();
+     const at = new Date(); at.setHours(9, 0, 0, 0);
+     const e = (id, fromMin, extra) => Object.assign({
+       id, issueKey: 'X-' + id, issueId: null, title: 'Entry ' + id,
+       startTs: at.getTime() + fromMin * 60000, endTs: at.getTime() + (fromMin + 30) * 60000,
+       status: 'pending', worklogId: null, comment: null, errorMsg: null }, extra || {});
+     await window.joggl.days.save(H.todayKey(), [
+       e('keep', 0, { status: 'synced', worklogId: 'w1' }), e('go', 60), e('go2', 120)]);
+     await window.__jogglTest.reloadDay();
+
+     H.q('#clear-day-btn').click(); await H.sleep(500);
+     const buttons = H.all('#modal-buttons button').map(b => b.textContent.trim());
+     const saysJira = /not deleted from Jira|not touched/i.test(H.q('#modal-body').textContent);
+     H.all('#modal-buttons button').find(b => /unsynced/i.test(b.textContent)).click();
+     await H.sleep(600);
+     const left = H.entries().map(e => e.key).sort();
+
+     // And now the rest, which is the whole day.
+     H.q('#clear-day-btn').click(); await H.sleep(500);
+     H.all('#modal-buttons button').find(b => /clear all/i.test(b.textContent)).click();
+     await H.sleep(600);
+     const empty = H.entries().length;
+     // Jira-side rows are not ours to remove and must survive both.
+     const externals = H.all('.entry-card.external').length;
+     await H.resetDay();
+     return JSON.stringify({ buttons, saysJira, left, empty, externals })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.buttons.length === 3 && d.saysJira === true &&
+        JSON.stringify(d.left) === JSON.stringify(['X-keep']) && d.empty === 0 &&
+        d.externals >= 0;
+    },
+  );
+
+  await check(
+    'the header buttons act without collapsing the panel they sit in',
+    `await H.resetDay();
+     const list = H.q('#entry-list');
+     const openBefore = !list.hidden;
+     H.q('#clear-day-btn').click(); await H.sleep(400);
+     // Nothing to clear, so it toasts rather than opening a dialog — either way the
+     // panel must still be open, since the header around it is itself a toggle.
+     const stillOpen = !H.q('#entry-list').hidden;
+     const noDialog = H.q('#modal-overlay').classList.contains('hidden');
+     await H.resetDay();
+     return JSON.stringify({ openBefore, stillOpen, noDialog })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.openBefore && d.stillOpen && d.noDialog;
+    },
+  );
+
+  await check(
+    'an empty day offers the copy as a button, where it is most wanted',
+    `const day = await H.findEmptyDay();
+     if (!day) return JSON.stringify({ skip: true });
+     const button = H.q('#entry-list .empty-action');
+     const label = button?.textContent.trim() ?? null;
+     await H.resetDay();
+     return JSON.stringify({ day, label })`,
+    (v) => {
+      const d = JSON.parse(v);
+      if (d.skip) return 'skipped';
+      return /copy previous day/i.test(d.label ?? '');
+    },
+  );
+}
+
 async function overlapNotice() {
   await check(
     'overlaps are counted once above the list, not repeated on every row',
@@ -2308,6 +2443,7 @@ export async function runChecks(mainWindow, app) {
     await dateJump();
     await clicks();
     await syncButton();
+    await copyAndClear();
     await help();
     await overlapNotice();
     await emptyStates();

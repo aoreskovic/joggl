@@ -34,6 +34,15 @@ Pure frontend logic, no SP coupling. Port as-is; refactor into modules only wher
   text, shown after the task name in grey italics and clipped before the times.
 - The day's entries live in a collapsible **On this day** panel above the issue list,
   open by default, its state remembered like the sidebar's
+- **Copy previous day** and **Clear day** sit in that panel's header, and Copy is
+  offered again in the empty state where it is most wanted. Copy finds the most recent
+  day with anything on it — **checking Jira as well as the day log for each day**,
+  since a day worked entirely in the Jira web UI has no local entries at all — and
+  brings it over at the same times on the clock. Capped at 30 days, after which the
+  honest answer is that there is nothing to copy. Copies arrive unsynced and carry no
+  `worklogId`, so Sync logs them as new worklogs rather than rewriting the originals.
+  Clear day is **local only**: it never issues a DELETE to Jira, offers to spare the
+  synced entries, and cannot touch Jira-side rows because they are not `state.entries`
 - Settings for the two things people read differently: pin labels (key and title by
   default, since a title alone does not identify a `Meetings` issue when every project
   has one) and a faint tint on Saturday and Sunday in the day view
@@ -93,7 +102,7 @@ been exercised end to end, not just written.
 | Finish Day | Confirmed against real Jira — worklog `60504` on `EHW-70` |
 | Jira-side worklogs | Time logged in the Jira web UI is read back and counted |
 | Logging | `logs/joggl.log`, credential-redacted |
-| Tests | 227 passing, `npm test`; 76 UI checks, `npm run uicheck` (or `:fast`) |
+| Tests | 251 passing, `npm test`; 82 UI checks, `npm run uicheck` (or `:fast`) |
 | Shell | Collapsible sidebar with a view registry; week and month tabs present but disabled |
 | Drag to day view | An issue dragged from the task list becomes a 30-minute pending entry |
 | Keyboard | Every list arrow-navigable, every menu and dialog reachable — see below |
@@ -723,6 +732,11 @@ Five more, learned from flakes rather than from wrong results:
   from nowhere, and `:focus` stops matching, so a key press dispatched at `:focus` throws.
   `main/index.js` calls `focus()` under `--uicheck`; prefer `document.activeElement` over
   `:focus` regardless, and do not click away mid-run.
+- **The throwaway profile is keyed on the pid *and* a timestamp.** Windows recycles
+  process ids and nothing deletes those directories, so a run could open one another
+  run had left behind and inherit its settings — which is exactly how a check asserting
+  the day-view text default failed against a profile still holding the previous
+  default. A run that does not start from nothing is not repeatable.
 - **An empty-state check cannot use today.** Clearing the store does not clear the day —
   time booked in the Jira web UI still renders. `H.findEmptyDay()` steps back until it
   finds a day with no rows of either kind, and skips rather than lying if there is none.

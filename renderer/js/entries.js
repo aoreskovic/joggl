@@ -3,6 +3,7 @@
 
 import { editorForTarget } from './click-actions.js';
 import { showContextMenu } from './context-menu.js';
+import { copyPreviousDay } from './copy-day.js';
 import {
   canRetarget,
   duplicateOf,
@@ -74,6 +75,14 @@ export function renderEntryList() {
       children.push(
         note('Drag an issue onto the day view, or click an hour there.', 'empty-hint'),
       );
+      // The third way in, offered where it is most useful and least findable: the
+      // header button is a few words in small type, and this is the moment someone
+      // is looking for exactly this.
+      const copy = document.createElement('button');
+      copy.className = 'btn-outline empty-action';
+      copy.textContent = 'Copy previous day';
+      copy.addEventListener('click', () => copyPreviousDay());
+      children.push(copy);
     }
   } else {
     const overlaps = flaggedOverlaps(entries);

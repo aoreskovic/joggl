@@ -787,6 +787,20 @@ button {
   color: var(--accent);
 }
 
+/* Sits under the two lines of the empty state, with room to read as an offer
+   rather than as part of the sentence above it. */
+.empty-action {
+  display: block;
+  margin: 10px auto 4px;
+}
+
+/* The day panel header carries two actions as well as the title and the count.
+   `space-between` alone would spread all four evenly; the title takes the slack so
+   the actions cluster to the right beside the count they act on. */
+.day-panel .task-panel-hdr > span:first-child {
+  margin-right: auto;
+}
+
 /* ── Entry list ── */
 
 .timeline-empty {

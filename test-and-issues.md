@@ -2,22 +2,22 @@
 
 What to test by hand, how to test it, and what is known to be broken.
 
-Joggl has 227 unit tests (`npm test`) covering the things where a silent failure loses
+Joggl has 251 unit tests (`npm test`) covering the things where a silent failure loses
 time data: the worklog timestamp formatter, merge decisions at the 30-minute boundary,
 Finish Day's partial-failure transitions, the day-log round trip, quarter-hour snapping,
 what a duplicate, a moved and a repointed entry inherit,
 when a touch counts as an edit, weekend detection, pin labelling, the ADF a worklog
 comment becomes and back again, the search box's remote-lookup loop, arrow-key
-navigation over a list of results, the calendar grid behind "Jump to a date", and which
-editor a double click opens.
+navigation over a list of results, the calendar grid behind "Jump to a date", which
+editor a double click opens, and the search for the last day worth copying — including
+the cases nobody reaches twice, like a fortnight off or a first run with no history.
 Everything else — the whole UI — is verified against the checklist below, because the
 project deliberately has no DOM test harness and adding one would break the
 short-dependency rule in `CLAUDE.md`.
 
 That makes this file the other half of the test suite. Keep it current.
 
-**Last full pass: 2026-07-30, 74 green and 1 skipped** (the future-start check skips
-after the last hour of the day), in **2m 12s** against the live Jira and **1m 57s**
+**Last full pass: 2026-07-31, all 82 green**, in **2m 33s** against the live Jira and **1m 54s**
 against fixtures — both reporting the same counts. Driven by dispatching real
 mouse events into the renderer from the main process against a throwaway
 `--user-data-dir`. See *The script* at the end for how, and for what it does not cover.
@@ -28,7 +28,7 @@ mouse events into the renderer from the main process against a throwaway
 
 ```
 npm start           # the app
-npm test            # 222 tests, must be 0 failures
+npm test            # 251 tests, must be 0 failures
 npm run uicheck     # the checklist below as a script, against the live Jira (~2m)
 npm run uicheck:fast # the same, against fixtures — no network, no credentials (~2m)
 ```
@@ -140,6 +140,24 @@ The point of these is that **nothing** should end up offered for a re-sync.
 | Scroll the timeline, then click an empty hour | A quick-entry popup opens **visibly**, focused, titled with that hour and the half hour after it, and sitting fully inside the window. |
 | Type in it, then press Escape | It closes and nothing is created. |
 | Click an empty hour, then click elsewhere | It closes. A second click on the grid opens it again — a popup that closed itself must not eat the next click. |
+
+### Copying a day, and clearing one
+
+| Do this | Correct result |
+|---|---|
+| Press **Copy previous day** on a day after a normal working day | The confirm names yesterday, the number of entries and the total, and says they arrive unsynced. |
+| Press it on a Monday | It reaches back over the weekend to Friday. Nothing is assumed about which days are worked — Saturday and Sunday are looked at and found empty. |
+| Press it on the first day back from a fortnight off | It reaches the last day worked before the break. It says how far back it has looked while it goes, because that is a real wait. |
+| Press it where the last 30 days hold nothing | `Nothing to copy — no entries in the last 30 days.` This is also what a first run should say. |
+| Copy a day that had **Manual Jira entry** rows | They come over as ordinary pending entries of your own. The next Sync logs them as new worklogs. |
+| Copy a day where an entry was synced *and* shows as a Jira row | It arrives once, not twice. |
+| Look at the copies | Same times on the clock, `● pending`, no worklog — so Sync never rewrites the original day's worklogs. |
+| Copy onto a day that already has entries | The confirm says so, and the copies are added to what is there rather than replacing it. |
+| Press **Clear day** with a mix of synced and unsynced | Three buttons: Cancel, Clear unsynced only, Clear all. The dialog says plainly that nothing is deleted from Jira. |
+| Choose *Clear unsynced only* | The synced entries stay. |
+| Choose *Clear all* | The day's own entries go. **Manual Jira entry** rows stay — they are not Joggl's to remove. |
+| Check Jira afterwards | Every worklog is still there. Clear day never deletes anything from Jira. |
+| Press either header button | The panel does not collapse, even though the header around them is itself a toggle. |
 
 ### The Sync button
 

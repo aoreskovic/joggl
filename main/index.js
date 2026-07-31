@@ -35,7 +35,14 @@ const uiCheck = process.argv.includes('--uicheck');
 // stops at "not configured" before it ever reaches the fake. See main/ipc.js.
 const uiCheckFast = process.argv.includes('--uicheck-fast');
 if (uiCheck) {
-  app.setPath('userData', path.join(app.getPath('temp'), `joggl-uicheck-${process.pid}`));
+  // PID *and* a timestamp. Windows recycles process ids, and nothing deletes these
+  // directories, so a run could open a profile another run had left behind and
+  // inherit its settings. Not hypothetical: it made "the day view text defaults to
+  // 12" fail against a stale profile still holding the old default of 9, which the
+  // app then correctly snapped to 10. A run has to start from nothing to be
+  // repeatable.
+  const profile = `joggl-uicheck-${process.pid}-${Date.now()}`;
+  app.setPath('userData', path.join(app.getPath('temp'), profile));
 }
 
 // One instance only: two copies writing the same day log would race each other.

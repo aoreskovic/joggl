@@ -8,9 +8,10 @@ import {
   installDayAccessors,
   missingDays,
 } from './day-range.js';
+import { createDayWriter } from './day-writes.js';
 import { copyableEntries } from './entry-ops.js';
 import { renderAll } from './render.js';
-import { addDays, debounce, startOfDayMs, todayKey } from './util.js';
+import { addDays, startOfDayMs, todayKey } from './util.js';
 
 const api = window.joggl;
 
@@ -90,13 +91,26 @@ export async function loadDay(date) {
   return state.entries;
 }
 
-export async function persistDayNow() {
-  await api.days.save(state.selectedDate, state.entries);
+/**
+ * Every day write goes through one queue, so a write decided now cannot land on
+ * whichever day happens to be selected when it runs. See day-writes.js.
+ */
+const dayWriter = createDayWriter((dayKey) => api.days.save(dayKey, entriesFor(dayKey)));
+
+/** Write this day within half a second. Defaults to the day on screen. */
+export function persistDay(dayKey = state.selectedDate) {
+  dayWriter.queue(dayKey);
 }
 
-export const persistDay = debounce(() => {
-  persistDayNow().catch((err) => console.error('Failed to save day log:', err));
-}, 500);
+/** Write this day now. Defaults to the day on screen. */
+export function persistDayNow(dayKey = state.selectedDate) {
+  return dayWriter.now(dayKey);
+}
+
+/** Write everything a debounce still owes. */
+export function flushDayWrites() {
+  return dayWriter.flush();
+}
 
 export async function readDay(date) {
   return api.days.get(date);
@@ -116,18 +130,21 @@ export function entriesFor(dayKey) {
 /**
  * One day as it should be shown: local entries plus unclaimed Jira-side worklogs.
  *
- * No callers yet, and deliberately so — this and `persistDayFor` below are the
- * explicit-day forms of `visibleEntries` and `persistDayNow`, which phase 2 converts
- * the week view's call sites to when "the day on screen" stops being the only day
- * being drawn. Not dead code awaiting deletion.
+ * No callers yet, and deliberately so: it is the explicit-day form of
+ * `visibleEntries`, waiting for the week view to draw a day that is not the one on
+ * screen. `onResize`'s edge snapping in timeline-drag.js is the first line that will
+ * take it. Not dead code awaiting deletion.
  */
 export function visibleEntriesFor(dayKey) {
   return copyableEntries(state.days.get(dayKey) ?? [], state.external.get(dayKey) ?? []);
 }
 
-/** The explicit-day form of `persistDayNow`. No callers until phase 2 — see above. */
-export async function persistDayFor(dayKey) {
-  await api.days.save(dayKey, entriesFor(dayKey));
+/** The explicit-day form of `persistDayNow`, kept as a name that says so. */
+export const persistDayFor = persistDayNow;
+
+/** Replace one day's entries, whether or not it is the day on screen. */
+export function setEntriesFor(dayKey, entries) {
+  state.days.set(dayKey, entries ?? []);
 }
 
 /**
@@ -150,10 +167,8 @@ export function invalidateExternal(...dayKeys) {
  * enforced here:
  *
  * 1. **This overwrites `state.days` for every day in the range**, straight from
- *    disk. Safe only because the one caller that does not go through `refreshRange`
- *    — *Copy previous day* — asks for `[from-30, from-1]`, which excludes the
- *    selected day. Phase 3 draws a month including today and must guard this, or an
- *    unsaved edit on screen is replaced by what is on disk.
+ *    disk. Any debounced edit is flushed first, so what is on disk is what was on
+ *    screen — but an edit made *during* the read still loses, which no caller does.
  * 2. **Called directly, it is not covered by `whenIdle()`.** `refreshRange` wraps it
  *    in `track`, this does not, so *Copy previous day* is the one range read a UI
  *    check cannot wait on. Swapping it for `refreshRange` is not free: `track`
@@ -161,6 +176,11 @@ export function invalidateExternal(...dayKeys) {
  *    copy" instead of propagating to the caller that reports it.
  */
 export async function loadDays(from, to) {
+  // A debounced edit not yet on disk would be replaced by what is on disk. Writing
+  // it out first is cheaper than deciding which days to skip, and leaves memory and
+  // disk agreeing rather than merely not fighting.
+  await flushDayWrites();
+
   const logs = await api.days.getRange(from, to);
   for (const key of eachDay(from, to)) state.days.set(key, logs[key]?.entries ?? []);
 

@@ -37,3 +37,6 @@ Thumbs.db
 
 # Claude Code local overrides
 .claude/settings.local.json
+
+# Brainstorming companion mockups — working material, not part of the app.
+.superpowers/

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { getDay, getRunningTimer, saveDay, saveRunningTimer } from '../main/days.js';
+import { getDay, getDays, getRunningTimer, MAX_RANGE_DAYS, saveDay, saveRunningTimer } from '../main/days.js';
 import { del, get, initStore, set } from '../main/store.js';
 
 const T = (h, m = 0) => new Date(2026, 6, 28, h, m, 0, 0).getTime();
@@ -214,6 +214,43 @@ test('a malformed date key is refused rather than writing a stray file', async (
   await withStore(async () => {
     await assert.rejects(() => saveDay('28-07-2026', []), /YYYY-MM-DD/);
     await assert.rejects(() => getDay('../escape'), /YYYY-MM-DD/);
+  });
+});
+
+test('a range answers with every day in it, including the ones never written', async () => {
+  await withStore(async () => {
+    await saveDay('2026-08-03', [sampleEntries[0]]);
+    await saveDay('2026-08-05', sampleEntries);
+
+    const range = await getDays('2026-08-03', '2026-08-05');
+
+    assert.deepEqual(Object.keys(range), ['2026-08-03', '2026-08-04', '2026-08-05']);
+    assert.equal(range['2026-08-03'].entries.length, 1);
+    assert.equal(range['2026-08-05'].entries.length, 3);
+    // An absent day is an empty day, not a missing key — a caller should never have
+    // to tell "not written yet" from "nothing on it".
+    assert.deepEqual(range['2026-08-04'], { date: '2026-08-04', entries: [] });
+  });
+});
+
+test('a single-day range is exactly the answer getDay gives', async () => {
+  await withStore(async () => {
+    await saveDay('2026-08-05', sampleEntries);
+    const range = await getDays('2026-08-05', '2026-08-05');
+    assert.deepEqual(range['2026-08-05'], await getDay('2026-08-05'));
+  });
+});
+
+test('a range longer than the cap is refused rather than quietly truncated', async () => {
+  await withStore(async () => {
+    assert.equal(MAX_RANGE_DAYS, 62);
+    await assert.rejects(() => getDays('2026-01-01', '2026-12-31'), /62/);
+  });
+});
+
+test('a range running backwards is refused rather than answering nothing', async () => {
+  await withStore(async () => {
+    await assert.rejects(() => getDays('2026-08-05', '2026-08-01'), /backwards/);
   });
 });
 

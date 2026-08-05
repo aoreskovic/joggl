@@ -108,8 +108,14 @@ const handlers = {
   'jira:dayWorklogs': async ({ date, dayStartTs, dayEndTs } = {}) =>
     jira.fetchDayWorklogs(await resolveCreds(), { date, dayStartTs, dayEndTs }),
 
+  // A whole range in one pass, for the week and month views and for finding the
+  // last day worth copying. One JQL rather than one per day.
+  'jira:rangeWorklogs': async ({ from, to, rangeStartTs, rangeEndTs } = {}) =>
+    jira.fetchRangeWorklogs(await resolveCreds(), { from, to, rangeStartTs, rangeEndTs }),
+
   'day:get': ({ date } = {}) => days.getDay(date),
   'day:save': ({ date, entries } = {}) => days.saveDay(date, entries),
+  'day:getRange': ({ from, to } = {}) => days.getDays(from, to),
 
   'timer:get': () => days.getRunningTimer(),
   'timer:save': ({ timer } = {}) => days.saveRunningTimer(timer ?? null),

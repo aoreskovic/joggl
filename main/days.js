@@ -52,6 +52,43 @@ export async function saveDay(date, entries) {
   return { date, entries: clean };
 }
 
+/**
+ * How many days one call may ask for.
+ *
+ * A month view asks for six weeks (42) and *Copy previous day* for 30, so 62 leaves
+ * room without letting a caller ask for a year and get a payload nobody wants across
+ * the bridge.
+ */
+export const MAX_RANGE_DAYS = 62;
+
+/**
+ * Every day between two keys, inclusive. Days never written answer with an empty
+ * entry list rather than being absent, so a caller never has to tell "not written
+ * yet" from "nothing on it".
+ *
+ * @returns {Promise<Record<string, {date: string, entries: object[]}>>}
+ */
+export async function getDays(from, to) {
+  assertDate(from);
+  assertDate(to);
+  if (to < from) throw new Error(`Day range runs backwards: ${from} to ${to}`);
+
+  const out = {};
+  const cursor = new Date(`${from}T00:00:00`);
+  const last = new Date(`${to}T00:00:00`);
+
+  for (let i = 0; cursor <= last; i++) {
+    if (i >= MAX_RANGE_DAYS) {
+      throw new Error(`Day range ${from} to ${to} is longer than ${MAX_RANGE_DAYS} days.`);
+    }
+    const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`;
+    out[key] = await getDay(key);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return out;
+}
+
 // Survives a crash or a quit while the timer is running. Kept out of the day
 // log so restoring it can never corrupt logged entries.
 export async function getRunningTimer() {

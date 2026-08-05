@@ -43,11 +43,14 @@ contextBridge.exposeInMainWorld('joggl', {
       call('jira:deleteWorklog', { issueIdOrKey, worklogId }),
     dayWorklogs: (date, dayStartTs, dayEndTs) =>
       call('jira:dayWorklogs', { date, dayStartTs, dayEndTs }),
+    rangeWorklogs: (from, to, rangeStartTs, rangeEndTs) =>
+      call('jira:rangeWorklogs', { from, to, rangeStartTs, rangeEndTs }),
   },
 
   days: {
     get: (date) => call('day:get', { date }),
     save: (date, entries) => call('day:save', { date, entries }),
+    getRange: (from, to) => call('day:getRange', { from, to }),
   },
 
   timer: {

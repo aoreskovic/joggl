@@ -14,6 +14,8 @@
 // The live run stays the default and stays the one that must pass before a commit.
 // This one exists so the suite can be run after every edit rather than twice a day.
 
+import { localDayKey } from './time.js';
+
 /** Deterministic issues, spread over two projects so key filtering has something to bite on. */
 const ISSUES = [
   issue('GEN-1', '10001', 'Meeting - Protostar', 'In Progress', 'GEN'),
@@ -87,13 +89,19 @@ export async function lookupIssues(_creds, query) {
  * happened to be booked that week. No rows on any other day means `findEmptyDay`
  * succeeds on the first step back, where against a live site it can walk for a
  * fortnight — and the empty-state checks skip rather than run if it fails.
+ *
+ * The range read answers from the same two, filtered, so a range covering today and
+ * a day read of today return the same rows. A fake where they differed would make
+ * the fast run and the live run disagree, which is the one thing it must not do.
  */
-export async function fetchDayWorklogs(_creds, { dayStartTs } = {}) {
+export async function fetchRangeWorklogs(_creds, { rangeStartTs, rangeEndTs } = {}) {
   const midnight = new Date();
   midnight.setHours(0, 0, 0, 0);
-  if (dayStartTs !== midnight.getTime()) return [];
+  const dayStartTs = midnight.getTime();
+  if (dayStartTs < rangeStartTs || dayStartTs >= rangeEndTs) return [];
 
   const at = (h, m) => dayStartTs + (h * 60 + m) * 60_000;
+  const dayKey = localDayKey(dayStartTs);
   return [
     {
       worklogId: 'fake-1',
@@ -103,6 +111,7 @@ export async function fetchDayWorklogs(_creds, { dayStartTs } = {}) {
       startTs: at(9, 30),
       endTs: at(10, 0),
       comment: 'Daily',
+      dayKey,
     },
     {
       worklogId: 'fake-2',
@@ -112,8 +121,18 @@ export async function fetchDayWorklogs(_creds, { dayStartTs } = {}) {
       startTs: at(13, 0),
       endTs: at(14, 0),
       comment: null,
+      dayKey,
     },
   ];
+}
+
+export async function fetchDayWorklogs(creds, { date, dayStartTs, dayEndTs } = {}) {
+  return fetchRangeWorklogs(creds, {
+    from: date,
+    to: date,
+    rangeStartTs: dayStartTs,
+    rangeEndTs: dayEndTs,
+  });
 }
 
 // No script presses Sync — that rule is unchanged and is not enforced here. These

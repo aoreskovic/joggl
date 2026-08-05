@@ -2,7 +2,8 @@
 // One place to mock, one place to debug.
 
 import { adfToText, emptyAdfComment, toAdfComment } from './adf.js';
-import { formatWorklogStarted, worklogSeconds } from './time.js';
+import { collectPaged } from './paging.js';
+import { formatWorklogStarted, localDayKey, worklogSeconds } from './time.js';
 
 const API = '/rest/api/3';
 
@@ -468,49 +469,59 @@ export function buildWorklogRangeJql(from, to) {
 }
 
 /**
- * Every worklog the current user has on a given local day, wherever it was
- * entered — including straight into the Jira web UI, which Joggl knows nothing
- * about but which still counts towards the day.
+ * Every worklog the current user has between two local days, wherever it was
+ * entered — including straight into the Jira web UI, which Joggl knows nothing about
+ * but which still counts towards the day.
  *
- * Two steps, because Jira has no "my worklogs on date X" endpoint:
- *   1. JQL narrows the whole instance down to the issues carrying such a worklog;
+ * Two steps, because Jira has no "my worklogs between X and Y" endpoint:
+ *   1. one JQL narrows the whole instance down to the issues carrying such a worklog
+ *      anywhere in the range;
  *   2. each of those issues is asked for its worklogs, bounded server-side by
  *      startedAfter/startedBefore — a shared issue can hold hundreds of other
- *      people's entries and pulling them all back to find one is wasteful.
+ *      people's entries and pulling them all back to find one is wasteful — and
+ *      paged to the end, because bounding still leaves more than one page of your
+ *      own on a busy issue over a month.
  *
- * @param {{date: string, dayStartTs: number, dayEndTs: number}} range
- * @returns {Promise<object[]>} one entry per worklog, already filtered to this account
+ * One JQL for thirty days rather than thirty of them is the whole point: *Copy
+ * previous day* used to walk back a day at a time and could spend a minute on a
+ * fortnight off.
+ *
+ * @param {{from: string, to: string, rangeStartTs: number, rangeEndTs: number}} range
+ * @returns {Promise<object[]>} one entry per worklog, filtered to this account, each
+ *   carrying the local `dayKey` it belongs to, sorted by start
  */
-export async function fetchDayWorklogs(creds, { date, dayStartTs, dayEndTs }) {
+export async function fetchRangeWorklogs(creds, { from, to, rangeStartTs, rangeEndTs }) {
   const me = await testConnection(creds);
   if (!me.accountId) {
     throw new JiraError('Jira did not return an account id, so worklogs cannot be matched to you.');
   }
 
-  const issues = await searchIssues(
-    creds,
-    `worklogAuthor = currentUser() AND worklogDate = "${date}"`,
-    { maxResults: 100 },
-  );
+  const issues = await searchIssues(creds, buildWorklogRangeJql(from, to), { maxResults: 100 });
 
   const found = [];
   for (const issue of issues) {
-    const query = new URLSearchParams({
-      startedAfter: String(dayStartTs),
-      startedBefore: String(dayEndTs),
-      maxResults: '200',
+    const worklogs = await collectPaged(async (startAt) => {
+      const query = new URLSearchParams({
+        startedAfter: String(rangeStartTs),
+        startedBefore: String(rangeEndTs),
+        startAt: String(startAt),
+        maxResults: '100',
+      });
+      const data = await request(
+        creds,
+        'GET',
+        `${API}/issue/${encodeURIComponent(issue.issueKey)}/worklog?${query}`,
+        { context: `worklogs on ${issue.issueKey}` },
+      );
+      return { items: data?.worklogs ?? [], total: data?.total ?? null };
     });
-    const data = await request(
-      creds,
-      'GET',
-      `${API}/issue/${encodeURIComponent(issue.issueKey)}/worklog?${query}`,
-      { context: `worklogs on ${issue.issueKey}` },
-    );
 
-    for (const worklog of data?.worklogs ?? []) {
+    for (const worklog of worklogs) {
       if (worklog.author?.accountId !== me.accountId) continue;
       const startTs = Date.parse(worklog.started);
-      if (!Number.isFinite(startTs) || startTs < dayStartTs || startTs >= dayEndTs) continue;
+      // The server-side bound is inclusive at both ends and the JQL matches whole
+      // days, so the range is re-checked here rather than trusted.
+      if (!Number.isFinite(startTs) || startTs < rangeStartTs || startTs >= rangeEndTs) continue;
 
       found.push({
         worklogId: String(worklog.id),
@@ -521,9 +532,26 @@ export async function fetchDayWorklogs(creds, { date, dayStartTs, dayEndTs }) {
         endTs: startTs + (worklog.timeSpentSeconds ?? 0) * 1000,
         // Flattened, so a description written in the Jira UI is visible here too.
         comment: adfToText(worklog.comment),
+        dayKey: localDayKey(startTs),
       });
     }
   }
 
   return found.sort((a, b) => a.startTs - b.startTs);
+}
+
+/**
+ * One day's worklogs — a range of one.
+ *
+ * Kept as its own export because the day view has no business knowing about ranges,
+ * and sharing the implementation is what stops the two views coming to disagree
+ * about what a day holds.
+ */
+export async function fetchDayWorklogs(creds, { date, dayStartTs, dayEndTs }) {
+  return fetchRangeWorklogs(creds, {
+    from: date,
+    to: date,
+    rangeStartTs: dayStartTs,
+    rangeEndTs: dayEndTs,
+  });
 }

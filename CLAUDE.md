@@ -633,9 +633,13 @@ Never probe the environment. If something above appears missing, say so and stop
 - All network calls live in one main-process Jira client module. One place to mock, one place to debug.
 - Errors surface inline or via toast. Modals are for decisions (merge prompt, retry summary), never for information.
 - Keep the main process thin. If logic can live in the renderer without needing Node, it lives in the renderer.
-- **Bump the minor version on every commit** — `npm run bump`, `0.1.0` → `0.2.0`. The
-  version shows in the footer, so "which build are you on" has an answer without
-  asking anyone to check a commit hash.
+- **Bump the version on every commit.** The version shows in the footer, so "which
+  build are you on" has an answer without asking anyone to check a commit hash.
+  - **A change bumps the minor** — `npm run bump`, `0.15.0` → `0.16.0`.
+  - **A fix to a change bumps the patch** — `npm run bump:fix`, `0.16.0` → `0.16.1`.
+    Review findings, follow-ups and anything else that corrects a version already cut
+    belong here. Spending a minor on them makes the minor stop meaning "something new",
+    which is the only thing it is for.
 - **Touching an entry is not editing it.** Every path that can mark an entry as
   needing a re-sync compares the times first — `sameTimes` in `entry-ops.js`. A click
   on a day-view block runs the whole move gesture and lands where it started;

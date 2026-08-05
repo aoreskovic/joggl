@@ -1424,6 +1424,33 @@ function refreshRange(from, to) {
 
 Add `invalidateExternal` to the `state.js` import list at the top of `app.js`. This is the call that stops `invalidateExternal` being dead code in this phase.
 
+- [ ] **Step 2b: Make deleting a Jira worklog drop the cache too**
+
+Found by Task 7's review. `deleteEntry` in `renderer/js/entries.js` (around line 430) offers to delete the Jira worklog as well, and issues the DELETE. The day's cached external list was fetched *before* that and still holds a row for the worklog now gone. `copyableEntries` suppressed that row only while a local entry claimed it — and that local entry is exactly what was just deleted. So a phantom **Manual Jira entry** appears for time that no longer exists.
+
+This happened before the cache too, but a day change refetched and it vanished. Now it survives every day change and lasts the session, which turns a flicker into a lie. Add the invalidation immediately after the successful Jira delete, before the re-render:
+
+```js
+      invalidateExternal(state.selectedDate);
+```
+
+and add `invalidateExternal` to the `state.js` import list at the top of `entries.js`.
+
+Finish Day and this are the only two paths in the app that change what Jira holds, so with Step 2 they are both covered. The plan's earlier claim that "nothing in this phase changes what Jira holds" was wrong about this one.
+
+- [ ] **Step 2c: Make the day bound exact across a clock change**
+
+Also from Task 7's review. `state.js` bounds a day with `startOfDayMs(date) + DAY` in two places — the single-day read in `loadExternalWorklogs`, and `startOfDayMs(last) + DAY` in `loadDays`. `DAY` is a fixed 86,400,000 ms, so on the 25-hour autumn day the bound falls at 23:00 local: worklogs in that last hour are dropped, and the day is then marked as held, so they never appear for the rest of the session.
+
+Twice a year, and it hides logged time — the failure this project takes most seriously. Use calendar arithmetic, which `addDays` already does correctly:
+
+```js
+startOfDayMs(addDays(date, 1))   // in loadExternalWorklogs
+startOfDayMs(addDays(last, 1))   // in loadDays
+```
+
+Add `addDays` to the `util.js` import in `state.js`. `DAY` may become unused there — remove it from the import if so.
+
 - [ ] **Step 3: Leave `refreshRange` unwired**
 
 `app.js` is the entry module and exports nothing; leave `refreshRange` unexported and add the comment above it that Phase 3's week view is its first caller. Nothing calls it in this phase, and wiring it to a view that does not exist yet would be untestable code.
@@ -1528,4 +1555,4 @@ Expected: ten commits on `feature/week-view`, `npm test` green. Phase 1 is done;
 
 - **No view changes.** The week tab stays disabled. Everything visible behaves exactly as it did at 0.15.0, apart from *Copy previous day* being fast and no longer showing a countdown.
 - **No timeline refactor.** The `view` singleton at `timeline.js:38` is untouched; that is Phase 2.
-- **No sync-driven cache invalidation.** `invalidateExternal` exists and is unused: nothing in this phase changes what Jira holds. Phase 3's week Sync is its first caller, and `persistDayNow` carries a comment marking where it goes.
+- **No *range* cache invalidation.** `invalidateExternal` is called for the two paths that do change what Jira holds — Finish Day and deleting a worklog, both wired in Task 9. An earlier draft of this plan claimed nothing in the phase changes what Jira holds; Task 7's review showed that was false for the delete path, and left uncaught it would have put a phantom **Manual Jira entry** on screen for the rest of the session. Phase 3's week Sync is the first caller that will need to invalidate a whole range at once.

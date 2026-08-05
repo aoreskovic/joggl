@@ -35,8 +35,8 @@ export async function collectPaged(fetchPage, { pageLimit = DEFAULT_PAGE_LIMIT }
 
     all.push(...items);
 
-    const total = Number(data?.total);
-    if (Number.isFinite(total) && all.length >= total) break;
+    const total = data?.total;
+    if (typeof total === 'number' && Number.isFinite(total) && all.length >= total) break;
   }
 
   return all;

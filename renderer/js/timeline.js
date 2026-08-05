@@ -14,6 +14,14 @@ import { renderAll } from './render.js';
 import { applySelection, clearSelection, select } from './selection.js';
 import { isToday, persistDayNow, pxPerMin, state, visibleEntries } from './state.js';
 import { createIssueLookup, searchIssues } from './tasks.js';
+import {
+  computeRange,
+  grid,
+  gridHeightPx,
+  offsetPxOf,
+  setGrid,
+  tsAtOffsetPx,
+} from './timeline-geometry.js';
 import { toastWarn } from './toast.js';
 import {
   dateKey,
@@ -33,9 +41,6 @@ import {
 const MIN_DURATION_MS = QUARTER;
 const EDGE_SNAP_MS = 8 * 60_000;
 const GUTTER_PX = 40;
-
-// Shared between a render and the drag handlers that run against it.
-const view = { rangeStartMs: 0, pxPerMin: 1.5, totalMinutes: 0 };
 
 // One tab stop for the whole grid, arrow keys between blocks. Lazy because the
 // grid exists before this module runs but renderTimeline may be called first.
@@ -81,37 +86,22 @@ export function computeColumns(entries) {
 }
 
 export function renderTimeline() {
-  const grid = document.getElementById('schedule-grid');
-  if (!grid) return;
+  const gridEl = document.getElementById('schedule-grid');
+  if (!gridEl) return;
 
-  const dayStart = startOfDayMs(state.selectedDate);
   const entries = visibleEntries().filter((e) => e.endTs !== null);
 
-  // A full work day at minimum, auto-expanded to cover everything logged and,
-  // on today, the current hour.
-  let startHour = 7;
-  let endHour = 20;
+  const { startHour, endHour } = computeRange(new Map([[state.selectedDate, entries]]), {
+    today: isToday() ? state.selectedDate : null,
+    timerStartTs: state.timer && isToday() ? state.timer.startTs : null,
+  });
+  setGrid({ startHour, endHour, pxPerMin: pxPerMin() });
+  // The hour loop below is expressed in px-per-minute terms directly, so it keeps
+  // its own short name rather than reading `grid.pxPerMin` on every line.
+  const px = grid.pxPerMin;
 
-  if (isToday()) {
-    const nowHour = new Date().getHours();
-    endHour = Math.max(endHour, Math.min(24, nowHour + 2));
-    startHour = Math.min(startHour, Math.max(0, nowHour - 1));
-  }
-
-  const stamps = entries.flatMap((e) => [e.startTs, e.endTs]);
-  if (state.timer && isToday()) stamps.push(state.timer.startTs, Date.now());
-  if (stamps.length) {
-    startHour = Math.min(startHour, Math.max(0, Math.floor((Math.min(...stamps) - dayStart) / 3_600_000) - 1));
-    endHour = Math.max(endHour, Math.min(24, Math.ceil((Math.max(...stamps) - dayStart) / 3_600_000) + 1));
-  }
-
-  const px = pxPerMin();
-  view.rangeStartMs = dayStart + startHour * 3_600_000;
-  view.pxPerMin = px;
-  view.totalMinutes = (endHour - startHour) * 60;
-
-  grid.replaceChildren();
-  grid.style.height = `${view.totalMinutes * px}px`;
+  gridEl.replaceChildren();
+  gridEl.style.height = `${gridHeightPx()}px`;
 
   for (let h = startHour; h <= endHour; h++) {
     const y = (h - startHour) * 60 * px;
@@ -123,13 +113,13 @@ export function renderTimeline() {
     label.className = 'sched-hour-label';
     label.textContent = `${String(h % 24).padStart(2, '0')}:00`;
     line.appendChild(label);
-    grid.appendChild(line);
+    gridEl.appendChild(line);
 
     if (h < endHour) {
       const half = document.createElement('div');
       half.className = 'sched-half';
       half.style.top = `${y + 30 * px}px`;
-      grid.appendChild(half);
+      gridEl.appendChild(half);
     }
   }
 
@@ -142,7 +132,7 @@ export function renderTimeline() {
   const columns = computeColumns(live ? [...entries, live] : entries);
 
   for (const entry of entries) {
-    grid.appendChild(
+    gridEl.appendChild(
       buildBlock(entry, columns.get(entry.id) ?? { col: 0, totalCols: 1 }),
     );
   }
@@ -157,19 +147,19 @@ export function renderTimeline() {
     label.textContent =
       (state.timer.issueKey ? `${state.timer.issueKey} ` : '') + state.timer.title;
     block.appendChild(label);
-    grid.appendChild(block);
+    gridEl.appendChild(block);
   }
 
   if (isToday()) {
-    const nowMin = (Date.now() - view.rangeStartMs) / 60_000;
-    if (nowMin >= 0 && nowMin <= view.totalMinutes) {
+    const nowPx = offsetPxOf(Date.now(), state.selectedDate);
+    if (nowPx >= 0 && nowPx <= gridHeightPx()) {
       const nowLine = document.createElement('div');
       nowLine.className = 'sched-now-line';
-      nowLine.style.top = `${nowMin * px}px`;
+      nowLine.style.top = `${nowPx}px`;
       const dot = document.createElement('div');
       dot.className = 'sched-now-dot';
       nowLine.appendChild(dot);
-      grid.appendChild(nowLine);
+      gridEl.appendChild(nowLine);
     }
   }
 
@@ -180,7 +170,7 @@ export function renderTimeline() {
     const hint = document.createElement('div');
     hint.className = 'sched-empty-hint';
     hint.textContent = 'Click an hour to add time, or drag an issue here';
-    grid.appendChild(hint);
+    gridEl.appendChild(hint);
   }
 
   roving().refresh();
@@ -189,10 +179,9 @@ export function renderTimeline() {
 }
 
 function placeBlock(el, startTs, endTs, slot, minHeightPx = 6) {
-  const offsetMin = (startTs - view.rangeStartMs) / 60_000;
   const durMin = Math.max(1, (endTs - startTs) / 60_000);
-  el.style.top = `${offsetMin * view.pxPerMin}px`;
-  el.style.minHeight = `${Math.max(minHeightPx, durMin * view.pxPerMin)}px`;
+  el.style.top = `${offsetPxOf(startTs, state.selectedDate)}px`;
+  el.style.minHeight = `${Math.max(minHeightPx, durMin * grid.pxPerMin)}px`;
 
   if (slot.totalCols === 1) {
     el.style.left = `${GUTTER_PX}px`;
@@ -223,16 +212,16 @@ function placeBlock(el, startTs, endTs, slot, minHeightPx = 6) {
  * 30-minute entry at whatever time that row's Y happened to map to.
  */
 export function gridTimeAt(clientX, clientY) {
-  const grid = document.getElementById('schedule-grid');
-  if (!grid) return null;
+  const gridEl = document.getElementById('schedule-grid');
+  if (!gridEl) return null;
 
-  const rect = grid.getBoundingClientRect();
+  const rect = gridEl.getBoundingClientRect();
   if (clientX < rect.left || clientX > rect.right) return null;
 
   const y = clientY - rect.top;
-  if (y < 0 || y > view.totalMinutes * view.pxPerMin) return null;
+  if (y < 0 || y > gridHeightPx()) return null;
 
-  return snapToQuarter(view.rangeStartMs + (y / view.pxPerMin) * 60_000, state.selectedDate);
+  return snapToQuarter(tsAtOffsetPx(y, state.selectedDate), state.selectedDate);
 }
 
 /**
@@ -241,17 +230,17 @@ export function gridTimeAt(clientX, clientY) {
  * sideways under the cursor.
  */
 export function showDropPlaceholder(startTs, endTs) {
-  const grid = document.getElementById('schedule-grid');
-  if (!grid) return;
+  const gridEl = document.getElementById('schedule-grid');
+  if (!gridEl) return;
 
-  let el = grid.querySelector('.sched-drop-preview');
+  let el = gridEl.querySelector('.sched-drop-preview');
   if (!el) {
     el = document.createElement('div');
     el.className = 'sched-drop-preview';
     const label = document.createElement('div');
     label.className = 'sched-entry-label';
     el.appendChild(label);
-    grid.appendChild(el);
+    gridEl.appendChild(el);
   }
 
   placeBlock(el, startTs, endTs, { col: 0, totalCols: 1 });
@@ -359,7 +348,7 @@ function onResize(event, entry, edge) {
     // Scaled by the current zoom, not the base — otherwise the block runs away
     // from the cursor at anything other than 1x. Left unrounded: the snap happens
     // on the resulting clock time, not on the drag distance.
-    const deltaMs = ((move.clientY - startY) / view.pxPerMin) * 60_000;
+    const deltaMs = ((move.clientY - startY) / grid.pxPerMin) * 60_000;
 
     if (edge === 'top') {
       let next = snapToQuarter(origStart + deltaMs, state.selectedDate);
@@ -420,7 +409,7 @@ function onMoveBlock(event, entry) {
   let moved = false;
 
   const onMouseMove = (move) => {
-    const deltaMs = ((move.clientY - startY) / view.pxPerMin) * 60_000;
+    const deltaMs = ((move.clientY - startY) / grid.pxPerMin) * 60_000;
     // Moving keeps the length and snaps the start to the clock grid, so a 47-minute
     // entry stays 47 minutes but always begins on a quarter hour.
     let start = snapToQuarter(origStart + deltaMs, state.selectedDate);
@@ -460,10 +449,9 @@ function onMoveBlock(event, entry) {
 // re-render, which would tear the element out from under the mouse.
 function liveUpdate(block, entry) {
   if (block) {
-    const offsetMin = (entry.startTs - view.rangeStartMs) / 60_000;
     const durMin = Math.max(1, (entry.endTs - entry.startTs) / 60_000);
-    block.style.top = `${offsetMin * view.pxPerMin}px`;
-    block.style.minHeight = `${Math.max(6, durMin * view.pxPerMin)}px`;
+    block.style.top = `${offsetPxOf(entry.startTs, state.selectedDate)}px`;
+    block.style.minHeight = `${Math.max(6, durMin * grid.pxPerMin)}px`;
   }
 
   const card = document.querySelector(`.entry-card[data-id="${CSS.escape(entry.id)}"]`);
@@ -730,21 +718,20 @@ function showQuickEntry(cx, cy, startTs, endTs) {
 
 export function updateNowMarkers() {
   if (!isToday()) return;
-  const grid = document.getElementById('schedule-grid');
-  if (!grid) return;
+  const gridEl = document.getElementById('schedule-grid');
+  if (!gridEl) return;
 
-  const line = grid.querySelector('.sched-now-line');
-  const nowMin = (Date.now() - view.rangeStartMs) / 60_000;
-  if (line && nowMin >= 0 && nowMin <= view.totalMinutes) {
-    line.style.top = `${nowMin * view.pxPerMin}px`;
+  const line = gridEl.querySelector('.sched-now-line');
+  const nowPx = offsetPxOf(Date.now(), state.selectedDate);
+  if (line && nowPx >= 0 && nowPx <= gridHeightPx()) {
+    line.style.top = `${nowPx}px`;
   }
 
-  const live = grid.querySelector('.sched-entry-block.live');
+  const live = gridEl.querySelector('.sched-entry-block.live');
   if (live && state.timer) {
-    const offsetMin = (state.timer.startTs - view.rangeStartMs) / 60_000;
     const durMin = Math.max(1, (Date.now() - state.timer.startTs) / 60_000);
-    live.style.top = `${offsetMin * view.pxPerMin}px`;
-    live.style.minHeight = `${Math.max(20, durMin * view.pxPerMin)}px`;
+    live.style.top = `${offsetPxOf(state.timer.startTs, state.selectedDate)}px`;
+    live.style.minHeight = `${Math.max(20, durMin * grid.pxPerMin)}px`;
   }
 }
 
@@ -752,6 +739,6 @@ export function scrollToNow() {
   if (dateKey() !== state.selectedDate) return;
   const panel = document.getElementById('right-panel');
   if (!panel) return;
-  const nowMin = (Date.now() - view.rangeStartMs) / 60_000;
-  panel.scrollTop = Math.max(0, nowMin * view.pxPerMin - panel.clientHeight / 3);
+  const nowPx = offsetPxOf(Date.now(), state.selectedDate);
+  panel.scrollTop = Math.max(0, nowPx - panel.clientHeight / 3);
 }

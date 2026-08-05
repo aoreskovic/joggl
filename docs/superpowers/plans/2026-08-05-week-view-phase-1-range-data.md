@@ -1156,11 +1156,25 @@ export async function loadDay(date) {
 Replace the body of `loadExternalWorklogs` (lines 157–189) with a call through the range path, keeping its exported name, its guard clauses and its state flags — `state.externalState` and `state.externalError` stay exactly as they are, because `entries.js` renders from them:
 
 ```js
+/**
+ * Pull one day's Jira-side worklogs. Failure is non-fatal: the local day still works.
+ *
+ * Answers from the cache when that day is already held. Every day change calls this,
+ * and without the check, stepping back and forth over a week would re-read days whose
+ * rows are already on screen — the cache would hold everything and save nothing.
+ * Anything that changes what Jira holds calls `invalidateExternal` first, which is
+ * what makes the cached answer safe to trust.
+ */
 export async function loadExternalWorklogs(date = state.selectedDate) {
   if (!state.settings.baseUrl || !state.settings.tokenConfigured) {
     state.externalEntries = [];
     state.externalState = 'idle';
     return [];
+  }
+
+  if (state.external.has(date)) {
+    if (date === state.selectedDate) state.externalState = 'loaded';
+    return state.external.get(date);
   }
 
   const dayStartTs = startOfDayMs(date);
@@ -1171,13 +1185,15 @@ export async function loadExternalWorklogs(date = state.selectedDate) {
     const worklogs = await api.jira.rangeWorklogs(date, date, dayStartTs, dayStartTs + DAY);
     // A day change mid-request must not drop yesterday's answer onto today — but the
     // answer is filed under the day it was asked for, so it is kept rather than
-    // discarded, and only the status flags are left alone.
+    // discarded, and only the status flags belonging to the screen are left alone.
     state.external.set(date, externalToEntries(worklogs));
     if (date !== state.selectedDate) return [];
     state.externalState = 'loaded';
     return state.externalEntries;
   } catch (err) {
-    state.external.set(date, []);
+    // Deliberately *not* cached: a failed read must be retried on the next visit,
+    // not remembered as "this day has nothing on it".
+    state.external.delete(date);
     if (date !== state.selectedDate) return [];
     state.externalState = 'error';
     state.externalError = err.message;
@@ -1190,23 +1206,9 @@ export async function loadExternalWorklogs(date = state.selectedDate) {
 
 In `persistDayNow`, after the save:
 
-```js
-export async function persistDayNow() {
-  await api.days.save(state.selectedDate, state.entries);
-}
-```
+`persistDayNow` is **left alone**: writing a day log changes nothing about what Jira holds, so the cached rows stay true. Only Finish Day does, and Task 9 handles it.
 
-becomes
-
-```js
-export async function persistDayNow() {
-  await api.days.save(state.selectedDate, state.entries);
-  // Nothing local changes what Jira holds, so the cached rows stay true. This is
-  // here as the single place to add that invalidation when Sync gains a range.
-}
-```
-
-and in `writeDay`:
+In `writeDay`, keep the returned entries in the map so a write through it does not leave the cache stale:
 
 ```js
 export async function writeDay(date, entries) {
@@ -1391,7 +1393,24 @@ function refreshRange(from, to) {
 }
 ```
 
-- [ ] **Step 2: Leave `refreshRange` unwired**
+- [ ] **Step 2: Make Finish Day drop the cache before it re-reads**
+
+`loadExternalWorklogs` now answers from the cache, so the one caller that runs *after* Jira has changed must clear that day first or it will read back its own stale answer. In the `finish-day-btn` handler (around line 306), the existing comment already says why the re-read exists; the call becomes:
+
+```js
+  $('finish-day-btn').addEventListener('click', async () => {
+    await finishDay();
+    // Newly created worklogs are now claimed by local entries; re-reading keeps
+    // the two views from disagreeing about what is in Jira. The cached rows are
+    // stale by definition here — Finish Day is the one thing that changes them.
+    invalidateExternal(state.selectedDate);
+    await refreshExternal();
+  });
+```
+
+Add `invalidateExternal` to the `state.js` import list at the top of `app.js`. This is the call that stops `invalidateExternal` being dead code in this phase.
+
+- [ ] **Step 3: Leave `refreshRange` unwired**
 
 `app.js` is the entry module and exports nothing; leave `refreshRange` unexported and add the comment above it that Phase 3's week view is its first caller. Nothing calls it in this phase, and wiring it to a view that does not exist yet would be untestable code.
 
@@ -1399,12 +1418,12 @@ Add `loadDays` to the `state.js` import list at the top of `app.js`.
 
 Node will not warn about an unused function, so confirm by eye that `refreshExternal` still has exactly its two existing callers — `selectDate` (line ~225) and the Finish Day handler (line ~310) — and that both still work through `track`.
 
-- [ ] **Step 3: Run the tests and both UI checks**
+- [ ] **Step 4: Run the tests and the fast UI check**
 
 Run: `npm test` — 283 passing.
 Run: `npm run uicheck:fast` — 82 green.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add renderer/js/app.js
@@ -1426,7 +1445,9 @@ git commit -m "Let whenIdle settle on a range read as well as a day read"
 In `scripts/ui-check.mjs`, add to the *Copying a day, and clearing one* group:
 
 - **Copy previous day answers without a per-day wait.** Click **Copy previous day** on a day with an empty one before it, assert the confirm dialog appears, and assert the button never showed a `Looking… Nd` label — the progress text is gone because there is no longer anything to report. Cancel the dialog.
-- **A day's Jira-side rows survive stepping away and back.** Note the count of `.entry-card.external` on today, step back a day, step forward, and assert the count is the same **without** waiting on `whenIdle()` — they are cached per day now rather than cleared on the way out.
+- **A day's Jira-side rows survive stepping away and back, without a second Jira read.** Note the count of `.entry-card.external` on today and the value of `window.__jogglTest.renders`. Step back a day (`H.goDay`), then forward to today again. Assert the external row count is the same **without** awaiting `whenIdle()` — the rows are cached per day now rather than cleared on the way out — and that the return trip resolved from cache. Under `--uicheck-fast` the fake answers only for today, so the check must step to *yesterday and back*, not forward past today, which `next-day` refuses anyway.
+
+  To prove the second read did not happen rather than merely that it was fast, count it: in `renderer/js/state.js`, increment a renderer-local counter beside the `api.jira.rangeWorklogs` call in `loadExternalWorklogs` and expose it as `window.__jogglTest.jiraReads` in `installTestHook` (a fourth field, still renderer-local, still no IPC and no preload change). The check asserts `jiraReads` is unchanged across the round trip. A check that only asserts the rows are present would pass just as well against the old always-refetch code, which is no check at all.
 
 Both must pass under `uicheck` and `uicheck:fast` and be counted in both.
 

@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { localDayKey } from '../main/jira/time.js';
+import { buildWorklogRangeJql, JiraError } from '../main/jira/client.js';
 
 /** Local midnight, so these tests say the same thing in every timezone. */
 const at = (y, m, d, hh = 0, mm = 0) => new Date(y, m - 1, d, hh, mm, 0, 0).getTime();
@@ -33,4 +34,28 @@ test('single-digit months and days are padded', () => {
 test('a non-timestamp throws rather than producing a plausible-looking key', () => {
   assert.throws(() => localDayKey(undefined), TypeError);
   assert.throws(() => localDayKey(Number.NaN), TypeError);
+});
+
+test('a range asks for every day between the two, inclusive', () => {
+  assert.equal(
+    buildWorklogRangeJql('2026-07-06', '2026-08-05'),
+    'worklogAuthor = currentUser() AND worklogDate >= "2026-07-06" AND worklogDate <= "2026-08-05"',
+  );
+});
+
+test('a single day is a range of one, so the day read and the range read agree', () => {
+  assert.equal(
+    buildWorklogRangeJql('2026-08-05', '2026-08-05'),
+    'worklogAuthor = currentUser() AND worklogDate >= "2026-08-05" AND worklogDate <= "2026-08-05"',
+  );
+});
+
+test('a malformed date fails loudly rather than building a query that finds nothing', () => {
+  assert.throws(() => buildWorklogRangeJql('5 August 2026', '2026-08-05'), JiraError);
+  assert.throws(() => buildWorklogRangeJql('2026-08-05', ''), JiraError);
+  assert.throws(() => buildWorklogRangeJql('2026-08-05', '2026-8-5'), JiraError);
+});
+
+test('a range running backwards is refused', () => {
+  assert.throws(() => buildWorklogRangeJql('2026-08-05', '2026-07-06'), JiraError);
 });

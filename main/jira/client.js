@@ -441,6 +441,32 @@ export async function deleteWorklog(creds, { issueIdOrKey, worklogId }) {
   return { worklogId: String(worklogId) };
 }
 
+const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The JQL that finds every issue this account logged time against between two days.
+ *
+ * One query for the whole range rather than one per day: reading a month used to
+ * cost thirty of these plus their per-issue follow-ups, which is what made *Copy
+ * previous day* crawl.
+ *
+ * The dates come from Joggl, never from a user, so a malformed one is a bug and is
+ * thrown rather than escaped. Failing loudly matters more than it looks: a bad date
+ * here does not error at Jira, it returns a plausible empty result, and an empty
+ * result reads as "no time logged" rather than as "the query was wrong".
+ */
+export function buildWorklogRangeJql(from, to) {
+  if (!DAY_KEY.test(String(from)) || !DAY_KEY.test(String(to))) {
+    throw new JiraError(`Worklog range needs YYYY-MM-DD dates — got "${from}" to "${to}".`);
+  }
+  if (to < from) {
+    throw new JiraError(`Worklog range runs backwards: "${from}" to "${to}".`);
+  }
+  return (
+    `worklogAuthor = currentUser() AND worklogDate >= "${from}" AND worklogDate <= "${to}"`
+  );
+}
+
 /**
  * Every worklog the current user has on a given local day, wherever it was
  * entered — including straight into the Jira web UI, which Joggl knows nothing

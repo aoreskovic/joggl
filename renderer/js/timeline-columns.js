@@ -22,6 +22,18 @@ export function setColumns(pairs) {
   for (const [dateKey, el] of pairs) if (el) columns.set(dateKey, el);
 }
 
+/**
+ * Forget every column, for a render that is not going to draw any.
+ *
+ * `renderTimeline` returns early when its grid element is missing, and until this
+ * existed that early return left the previous render's columns registered — a map
+ * pointing at elements no longer on the page. Unreachable while the grid is static
+ * markup; the week view is what makes columns come and go.
+ */
+export function clearColumns() {
+  columns.clear();
+}
+
 export function columnFor(dayKey) {
   return columns.get(dayKey) ?? null;
 }

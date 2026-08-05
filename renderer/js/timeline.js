@@ -21,7 +21,7 @@ import {
   visibleEntries,
 } from './state.js';
 import { createIssueLookup, searchIssues } from './tasks.js';
-import { columnAt, placeBlock, setColumns } from './timeline-columns.js';
+import { clearColumns, columnAt, placeBlock, setColumns } from './timeline-columns.js';
 import { isClickSuppressed, onMoveBlock, onResize } from './timeline-drag.js';
 import {
   computeRange,
@@ -85,7 +85,12 @@ export function computeColumns(entries) {
 
 export function renderTimeline() {
   const gridEl = document.getElementById('schedule-grid');
-  if (!gridEl) return;
+  if (!gridEl) {
+    // Nothing was drawn, so nothing is a column. Leaving the last render's map in
+    // place would have `columnAt` answering from elements no longer on the page.
+    clearColumns();
+    return;
+  }
 
   // One column today. The map is what a week view fills with five or seven, and it
   // is registered before anything is drawn so a gesture arriving mid-render still

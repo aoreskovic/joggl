@@ -304,12 +304,17 @@ function wireDayNav() {
     if (picked && picked !== state.selectedDate) selectDate(picked);
   });
   $('finish-day-btn').addEventListener('click', async () => {
+    // Read before the await, not after. A sync takes seconds, nothing suppresses the
+    // bare `[` and `]` day shortcuts while it runs, and re-reading afterwards would
+    // invalidate whichever day the user had stepped to — leaving the day that was
+    // actually synced holding its pre-sync cache.
+    const day = state.selectedDate;
     await finishDay();
     // Newly created worklogs are now claimed by local entries; re-reading keeps
     // the two views from disagreeing about what is in Jira. The cached rows are
     // stale by definition here — Finish Day is the one thing that changes them.
-    invalidateExternal(state.selectedDate);
-    await refreshExternal();
+    invalidateExternal(day);
+    await refreshExternal(day);
   });
   $('refresh-tasks-btn').addEventListener('click', async () => {
     // Pressing ↻ Refresh is the user saying "I know something changed", which is the

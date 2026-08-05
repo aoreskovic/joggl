@@ -79,6 +79,13 @@ export function isToday() {
 // a write and the important moments (stop, merge, sync) force one immediately.
 
 export async function loadDay(date) {
+  // The same flush `loadDays` does, and for a much likelier reason: this runs on
+  // *every* day change. Edit a time field, click ‹ before the 500ms debounce fires,
+  // click › straight back, and without this the disk read installs the version the
+  // edit had not reached yet — and the queued write then saves that stale array back
+  // over it. The edit is gone from screen and disk, with nothing said.
+  await flushDayWrites();
+
   const day = await api.days.get(date);
   state.selectedDate = date;
   state.days.set(date, day.entries);
@@ -114,10 +121,18 @@ export function flushDayWrites() {
 }
 
 export async function readDay(date) {
+  // Same reason as `loadDay`: a read that has not seen a pending write returns a day
+  // the user has already changed, and `stopTimer` merges the timed block onto it.
+  await flushDayWrites();
   return api.days.get(date);
 }
 
 export async function writeDay(date, entries) {
+  // Filed in memory before the save, not after. `stopTimer` calls this with the day's
+  // entries plus the block it has just stopped, and if the save throws, that block
+  // must still be on screen — losing it from memory as well as from disk would look
+  // exactly like the timer having run for nothing.
+  state.days.set(date, entries);
   const saved = await api.days.save(date, entries);
   state.days.set(date, saved.entries);
   return saved;
@@ -139,9 +154,6 @@ export function entriesFor(dayKey) {
 export function visibleEntriesFor(dayKey) {
   return copyableEntries(state.days.get(dayKey) ?? [], state.external.get(dayKey) ?? []);
 }
-
-/** The explicit-day form of `persistDayNow`, kept as a name that says so. */
-export const persistDayFor = persistDayNow;
 
 /** Replace one day's entries, whether or not it is the day on screen. */
 export function setEntriesFor(dayKey, entries) {

@@ -138,6 +138,26 @@ test('a failing save does not leave the day owing forever', async () => {
 });
 
 /**
+ * A bare `for … await` abandoned everything behind the first rejection — and those
+ * days had already been taken off the queue, so a transient failure on the first
+ * silently lost the second with nothing said about it.
+ */
+test('one failing save does not abandon the days behind it', async () => {
+  const timers = fakeTimers();
+  const attempts = [];
+  const writer = createDayWriter(async (dayKey) => {
+    attempts.push(dayKey);
+    if (dayKey === '2026-07-28') throw new Error('disk full');
+  }, timers);
+
+  writer.queue('2026-07-28');
+  writer.queue('2026-07-29');
+
+  await assert.rejects(() => writer.flush(), /disk full/, 'the first failure is what the caller sees');
+  assert.deepEqual(attempts, ['2026-07-28', '2026-07-29'], 'both were attempted');
+});
+
+/**
  * The bug this module exists for. The old debounce closed over nothing: it fired
  * after 500ms and saved "the selected day", so an edit made on Tuesday and a step
  * to Wednesday inside that half second wrote Wednesday's entries under Wednesday's

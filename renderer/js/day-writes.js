@@ -31,7 +31,20 @@ export function createDayWriter(
     // the day owing, or the next flush retries it silently and the caller that was
     // told about the failure has no say in it.
     owing.clear();
-    for (const dayKey of days) await save(dayKey);
+
+    // Every day is attempted, even after one fails. A bare `for … await` abandoned
+    // the days behind the first rejection — and they had already been taken off the
+    // queue, so two days edited in one window and a transient failure on the first
+    // silently lost the second. The first error is still what the caller sees.
+    let failure = null;
+    for (const dayKey of days) {
+      try {
+        await save(dayKey);
+      } catch (err) {
+        failure ??= err;
+      }
+    }
+    if (failure) throw failure;
   }
 
   return {

@@ -344,6 +344,26 @@ Nothing open.
 
 Fixed on 2026-08-05:
 
+- **An inline edit could be lost by stepping a day and stepping back.** The day log is
+  written 500 ms after an edit. `loadDay` runs on every day change and overwrites
+  `state.days` straight from disk, so editing a time field, clicking `‹` and clicking
+  `›` back inside that window installed the version the edit had not reached yet —
+  and the queued write then saved that stale array back over it. Gone from screen and
+  from disk, with nothing said. `loadDay` and `readDay` now flush the pending writes
+  first, as `loadDays` already did.
+
+  Not covered by a UI check. The window is 500 ms and closing it needs two day
+  changes, each of which waits on a Jira read — a check for it would pass or fail on
+  timing rather than on behaviour, which is trap 8's whole lesson. The part that can
+  be pinned down is pinned down: `test/day-writes.test.js` proves a queued write names
+  its day and cannot be redirected by what happens next.
+
+- **A save that failed abandoned every day queued behind it.** `flush()` takes the
+  days off the queue and then writes them in a loop, so one rejection skipped the
+  rest — two days edited inside one debounce window and a transient failure on the
+  first silently lost the second. Every day is attempted now, and the first error is
+  still what the caller sees.
+
 - **After deleting a worklog from Jira, the day briefly showed no Jira-side rows at
   all.** Not just the deleted one — every **Manual Jira entry** on that day vanished
   for one network round trip, then came back minus the deleted one. `deleteEntry`

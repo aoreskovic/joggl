@@ -102,7 +102,7 @@ been exercised end to end, not just written.
 | Finish Day | Confirmed against real Jira — worklog `60504` on `EHW-70` |
 | Jira-side worklogs | Time logged in the Jira web UI is read back and counted |
 | Logging | `logs/joggl.log`, credential-redacted |
-| Tests | 283 passing, `npm test`; 84 UI checks, `npm run uicheck` (or `:fast`) |
+| Tests | 283 passing, `npm test`; 85 UI checks, `npm run uicheck` (or `:fast`) |
 | Shell | Collapsible sidebar with a view registry; week and month tabs present but disabled |
 | Drag to day view | An issue dragged from the task list becomes a 30-minute pending entry |
 | Keyboard | Every list arrow-navigable, every menu and dialog reachable — see below |

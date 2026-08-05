@@ -38,5 +38,7 @@ Thumbs.db
 # Claude Code local overrides
 .claude/settings.local.json
 
-# Brainstorming companion mockups — working material, not part of the app.
+# Working material from the planning and review workflow — brainstorming mockups,
+# the execution ledger, per-task briefs and reports, review findings. Useful while a
+# change is being built, and not part of the app. What is worth keeping goes to docs/.
 .superpowers/

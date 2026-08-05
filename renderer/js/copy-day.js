@@ -3,11 +3,12 @@
 // Filling in a day that looks like the last one worked meant dragging every issue
 // across by hand; emptying one meant deleting entries a row at a time.
 //
-// The awkward part is finding the day to copy. Jira-side entries are not stored —
-// `state.externalEntries` holds them only for the day on screen — so "the most
-// recent day with anything on it" cannot be answered from the day logs alone. A day
-// worked entirely through the Jira web UI has no local entries at all, and skipping
-// it would copy the wrong day without saying so.
+// The awkward part is finding the day to copy. Jira-side entries are never persisted,
+// so "the most recent day with anything on it" cannot be answered from the day logs
+// alone: a day worked entirely through the Jira web UI has no local entries at all,
+// and skipping it would copy the wrong day without saying so. `state.external` now
+// holds a day at a time across the whole lookback window rather than just the day on
+// screen, which is what lets one range read answer the entire search below.
 
 import { findLastDayWithEntries, MAX_LOOKBACK_DAYS } from './day-search.js';
 import { copiedToDay } from './entry-ops.js';

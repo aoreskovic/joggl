@@ -2493,6 +2493,32 @@ async function externals() {
       return d.label === 'Manual Jira entry' && d.inputsDisabled === true && d.hasDelete === false;
     },
   );
+
+  await check(
+    '↻ Refresh really does re-read Jira, rather than answering from the day cache',
+    `await H.resetDay();
+     // Nothing to measure without credentials: loadExternalWorklogs stops at the
+     // "not configured" guard before it would ever count a read.
+     if (/not connected/i.test(H.q('#conn-label').textContent)) return JSON.stringify({ skip: true });
+     // Today's rows are already cached by now — boot selected the day and read them,
+     // which is precisely the state that made this button a no-op.
+     const cached = H.all('.entry-card.external').length;
+     const before = window.__jogglTest.jiraReads;
+     H.q('#refresh-tasks-btn').click();
+     await H.settle();
+     const after = window.__jogglTest.jiraReads;
+     const rows = H.all('.entry-card.external').length;
+     await H.resetDay();
+     return JSON.stringify({ cached, before, after, rows })`,
+    (v) => {
+      const d = JSON.parse(v);
+      if (d.skip) return 'skipped';
+      // The row count is the mirror image of the counter and passes either way — a
+      // cache hit redraws exactly the same rows, which is how this went unnoticed.
+      // `after > before` is the whole check: it says the button reached Jira.
+      return d.after > d.before && d.rows === d.cached;
+    },
+  );
 }
 
 // ── Entry point ────────────────────────────────────────────────────────────

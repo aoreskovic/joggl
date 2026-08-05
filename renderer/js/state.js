@@ -25,8 +25,14 @@ export const state = {
   /**
    * Worklogs this account has in Jira that Joggl did not create — time booked
    * straight into the Jira web UI. Read-only, **never persisted**, merged in only at
-   * render time so they cannot contaminate a day log. A session cache: keyed by day
-   * and dropped when that day is written to.
+   * render time so they cannot contaminate a day log.
+   *
+   * A session cache, keyed by day. A day is dropped from it only by
+   * `invalidateExternal`, which every path that changes what Jira holds calls — Sync,
+   * a worklog deleted from Jira, and ↻ Refresh, which is the user saying something
+   * changed that Joggl has no way to know about. Writing a *day log* deliberately
+   * does not drop it: a local edit changes nothing on Jira's side, so `persistDayNow`
+   * has no business throwing this away.
    */
   external: new Map(),
   externalState: 'idle', // idle | loading | loaded | error
@@ -107,11 +113,19 @@ export function entriesFor(dayKey) {
   return state.days.get(dayKey) ?? [];
 }
 
-/** One day as it should be shown: local entries plus unclaimed Jira-side worklogs. */
+/**
+ * One day as it should be shown: local entries plus unclaimed Jira-side worklogs.
+ *
+ * No callers yet, and deliberately so — this and `persistDayFor` below are the
+ * explicit-day forms of `visibleEntries` and `persistDayNow`, which phase 2 converts
+ * the week view's call sites to when "the day on screen" stops being the only day
+ * being drawn. Not dead code awaiting deletion.
+ */
 export function visibleEntriesFor(dayKey) {
   return copyableEntries(state.days.get(dayKey) ?? [], state.external.get(dayKey) ?? []);
 }
 
+/** The explicit-day form of `persistDayNow`. No callers until phase 2 — see above. */
 export async function persistDayFor(dayKey) {
   await api.days.save(dayKey, entriesFor(dayKey));
 }
@@ -131,6 +145,20 @@ export function invalidateExternal(...dayKeys) {
  * The Jira read is one request for the whole range. Reading it a day at a time is
  * what made *Copy previous day* crawl, and it is the thing this whole phase exists
  * to stop.
+ *
+ * Two things a caller has to know, both of them true today and neither of them
+ * enforced here:
+ *
+ * 1. **This overwrites `state.days` for every day in the range**, straight from
+ *    disk. Safe only because the one caller that does not go through `refreshRange`
+ *    — *Copy previous day* — asks for `[from-30, from-1]`, which excludes the
+ *    selected day. Phase 3 draws a month including today and must guard this, or an
+ *    unsaved edit on screen is replaced by what is on disk.
+ * 2. **Called directly, it is not covered by `whenIdle()`.** `refreshRange` wraps it
+ *    in `track`, this does not, so *Copy previous day* is the one range read a UI
+ *    check cannot wait on. Swapping it for `refreshRange` is not free: `track`
+ *    swallows the rejection, so a Jira failure would turn into a silent "nothing to
+ *    copy" instead of propagating to the caller that reports it.
  */
 export async function loadDays(from, to) {
   const logs = await api.days.getRange(from, to);

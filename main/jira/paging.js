@@ -2,9 +2,9 @@
 //
 // `search/jql` pages with `nextPageToken` and is handled in client.js. The worklog
 // endpoint is the older kind — `startAt`, `maxResults`, `total` — and asking for one
-// page of 200 and stopping, which is what fetchDayWorklogs used to do, silently
-// truncates any issue with more worklogs than that. One shared issue on this site
-// holds 660, so a thirty-day read of it would have lost two thirds of the day.
+// page of 200 and stopping, which is what the old day read did, silently truncates
+// any issue with more worklogs than that. One shared issue on this site holds 660,
+// so a thirty-day read of it would have lost two thirds of the day.
 //
 // Its own module, taking the page fetcher as an argument, because every interesting
 // case needs hundreds of worklogs to reach and none of them can be tested through a

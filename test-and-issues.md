@@ -19,9 +19,13 @@ short-dependency rule in `CLAUDE.md`.
 
 That makes this file the other half of the test suite. Keep it current.
 
-**Last full pass: 2026-08-05, all 84 green**, in **1m 57s** against the live Jira and **1m 55s**
-against fixtures — both reporting the same counts. Driven by dispatching real
-mouse events into the renderer from the main process against a throwaway
+**Last full pass: 2026-08-05, 85 checks.** Against the live Jira: **80 passed, 0 failed,
+5 skipped**, in **1m 58s**. Against fixtures: **85 passed, 0 failed, 0 skipped**, in
+**1m 55s**. Both report the same total, which is the only thing keeping `main/jira/fake.js`
+honest; the five live skips are the checks that need a Jira-side worklog on a
+particular day, which against a real site depends on what happened to be booked that
+week. A skip is not a pass — read the split, not the headline. Driven by dispatching
+real mouse events into the renderer from the main process against a throwaway
 `--user-data-dir`. See *The script* at the end for how, and for what it does not cover.
 
 ---
@@ -161,7 +165,7 @@ The point of these is that **nothing** should end up offered for a re-sync.
 | Check Jira afterwards | Every worklog is still there. Clear day never deletes anything from Jira. |
 | Press either header button | The panel does not collapse, even though the header around them is itself a toggle. |
 | Press **Copy previous day** and watch the button while it looks | It never shows a countdown like `Looking… 12d`. The whole 30-day window is read in one request now, so there is nothing left to count as it goes — the confirm just appears. |
-| Step away from a day holding **Manual Jira entry** rows, then step back to it | The rows are there again at once, with no second Jira read behind them — they were cached per day rather than cleared on the way out. |
+| Step away from a day holding **Manual Jira entry** rows, then step back to it | The rows are there again at once, with no second Jira read behind them — they were cached per day rather than cleared on the way out. Scripted, but **skip-prone against the live Jira**: it needs a Jira-side row on today to have anything to prove, and against a real site that depends on what was actually booked. A skip here is not a pass. |
 
 ### The Sync button
 
@@ -319,7 +323,7 @@ on Jira.
 | Drop a block in the future, then edit its start time on the entry card | It lets you. A future start is allowed on a hand-drawn entry — that is how leave and out-of-office get booked. |
 | Set a **running timer's** start to a future time in the omnibar | Refused with a warning. A running timer with a future start measures negative time. |
 | Drop a block in the future, press Finish Day | It syncs and comes back as a real Jira worklog. |
-| Log time in the Jira web UI for today, then refresh in Joggl | It appears dashed in cyan, labelled "Manual Jira entry", read-only, and counted in the day total. |
+| Log time in the Jira web UI for today, then press **↻ Refresh** in Joggl | It appears dashed in cyan, labelled "Manual Jira entry", read-only, and counted in the day total. The button must genuinely reach Jira: the day's rows are cached, and ↻ Refresh is the one gesture that says "I know something changed", so it drops that day from the cache first. |
 | Edit an already-synced entry, press Finish Day | The existing worklog is rewritten. A second worklog must **not** appear on the issue. |
 
 ### Persistence

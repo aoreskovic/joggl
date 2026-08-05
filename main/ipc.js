@@ -103,13 +103,10 @@ const handlers = {
   'jira:deleteWorklog': async ({ issueIdOrKey, worklogId } = {}) =>
     jira.deleteWorklog(await resolveCreds(), { issueIdOrKey, worklogId }),
 
-  // Everything this account logged on a day, including time entered straight into
-  // the Jira web UI, which Joggl otherwise cannot see.
-  'jira:dayWorklogs': async ({ date, dayStartTs, dayEndTs } = {}) =>
-    jira.fetchDayWorklogs(await resolveCreds(), { date, dayStartTs, dayEndTs }),
-
-  // A whole range in one pass, for the week and month views and for finding the
-  // last day worth copying. One JQL rather than one per day.
+  // Everything this account logged between two days, including time entered straight
+  // into the Jira web UI, which Joggl otherwise cannot see. One JQL for the whole
+  // span rather than one per day — and a single day is asked for as a range of one,
+  // so there is no second channel that could come to disagree with this one.
   'jira:rangeWorklogs': async ({ from, to, rangeStartTs, rangeEndTs } = {}) =>
     jira.fetchRangeWorklogs(await resolveCreds(), { from, to, rangeStartTs, rangeEndTs }),
 

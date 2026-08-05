@@ -1,6 +1,7 @@
 // Day logs. One store key per day — `day:2026-07-28` — never all history in one.
 
 import * as store from './store.js';
+import { localDayKey } from './jira/time.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const STATUSES = new Set(['pending', 'synced', 'error', 'local']);
@@ -81,7 +82,11 @@ export async function getDays(from, to) {
     if (i >= MAX_RANGE_DAYS) {
       throw new Error(`Day range ${from} to ${to} is longer than ${MAX_RANGE_DAYS} days.`);
     }
-    const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`;
+    // `localDayKey`, not a third inline copy of this. Main formats day keys in one
+    // place and it is tested there, because the mistake it exists to prevent — using
+    // toISOString and handing anyone east of Greenwich tomorrow's key — reads exactly
+    // like correct code.
+    const key = localDayKey(cursor.getTime());
     out[key] = await getDay(key);
     cursor.setDate(cursor.getDate() + 1);
   }

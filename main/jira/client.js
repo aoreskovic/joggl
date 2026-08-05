@@ -516,11 +516,29 @@ export async function fetchRangeWorklogs(creds, { from, to, rangeStartTs, rangeE
       return { items: data?.worklogs ?? [], total: data?.total ?? null };
     });
 
+    // Paging this endpoint means trusting `startAt` to index the *filtered* set,
+    // and there is no way to establish that short of probing a live site — the
+    // widely reported behaviour that `total` here ignores startedAfter/Before
+    // suggests it may well page the raw list and filter each page instead. If it
+    // does, an offset advanced by "items received" re-scans ground already covered
+    // and the same worklog comes back on several pages. Every one of them would be
+    // drawn as its own block and counted in the day's total, because
+    // `externalToEntries` keys on the worklog id and nothing downstream dedupes
+    // external rows against each other. Cheap here, and correct whichever way Jira
+    // actually behaves — which is worth more than an answer that holds only for
+    // today's Jira version. Do not remove it as redundant.
+    const seen = new Set();
+
     for (const worklog of worklogs) {
       if (worklog.author?.accountId !== me.accountId) continue;
+      if (seen.has(worklog.id)) continue;
+      seen.add(worklog.id);
+
       const startTs = Date.parse(worklog.started);
-      // The server-side bound is inclusive at both ends and the JQL matches whole
-      // days, so the range is re-checked here rather than trusted.
+      // The server-side bound is treated as inclusive at both ends, and the JQL
+      // matches whole days either way, so the range is re-checked here rather than
+      // trusted. That recheck is not belt and braces: it is what actually delivers
+      // the half-open range the callers bucket by.
       if (!Number.isFinite(startTs) || startTs < rangeStartTs || startTs >= rangeEndTs) continue;
 
       found.push({
@@ -538,20 +556,4 @@ export async function fetchRangeWorklogs(creds, { from, to, rangeStartTs, rangeE
   }
 
   return found.sort((a, b) => a.startTs - b.startTs);
-}
-
-/**
- * One day's worklogs — a range of one.
- *
- * Kept as its own export because the day view has no business knowing about ranges,
- * and sharing the implementation is what stops the two views coming to disagree
- * about what a day holds.
- */
-export async function fetchDayWorklogs(creds, { date, dayStartTs, dayEndTs }) {
-  return fetchRangeWorklogs(creds, {
-    from: date,
-    to: date,
-    rangeStartTs: dayStartTs,
-    rangeEndTs: dayEndTs,
-  });
 }

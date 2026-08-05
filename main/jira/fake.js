@@ -126,15 +126,6 @@ export async function fetchRangeWorklogs(_creds, { rangeStartTs, rangeEndTs } = 
   ];
 }
 
-export async function fetchDayWorklogs(creds, { date, dayStartTs, dayEndTs } = {}) {
-  return fetchRangeWorklogs(creds, {
-    from: date,
-    to: date,
-    rangeStartTs: dayStartTs,
-    rangeEndTs: dayEndTs,
-  });
-}
-
 // No script presses Sync — that rule is unchanged and is not enforced here. These
 // exist so the channel is registered and a stray call fails loudly rather than
 // silently reporting success.

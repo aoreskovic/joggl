@@ -186,10 +186,11 @@ function installTestHook() {
     /**
      * Re-read the day log and repaint, **without** touching Jira.
      *
-     * Deliberately not `selectDate`: that goes through `loadDay`, which clears the
-     * Jira-side rows because they belong to the day being left. Reloading through it
-     * would wipe every read-only row, and the checks that need one would lose their
-     * premise. Nothing here writes to Jira, so the rows on screen are still true.
+     * Deliberately not `selectDate`. That is a day *change*: it clears the selection
+     * and asks for the day's Jira-side rows, and while the per-day cache usually
+     * answers that without a request, "usually" is not a property a harness called a
+     * hundred times a run should rest on. This never touches Jira by construction.
+     * Nothing in a run writes to Jira, so the rows already on screen are still true.
      */
     async reloadDay() {
       const day = await window.joggl.days.get(state.selectedDate);
@@ -309,6 +310,12 @@ function wireDayNav() {
     await refreshExternal();
   });
   $('refresh-tasks-btn').addEventListener('click', async () => {
+    // Pressing ↻ Refresh is the user saying "I know something changed", which is the
+    // one thing the per-day cache cannot know. Without dropping the day first,
+    // `refreshExternal` answers from that cache and the only button labelled
+    // "Reload from Jira" never reaches Jira at all — leaving time booked in the web
+    // UI invisible until a restart.
+    invalidateExternal(state.selectedDate);
     await Promise.allSettled([loadIssues(), refreshExternal()]);
   });
 }

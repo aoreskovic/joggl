@@ -21,12 +21,11 @@ import { renderAll } from './render.js';
 import { applySelection, clearSelection, select } from './selection.js';
 import {
   deleteWorklog,
+  dropExternalWorklog,
   entriesFor,
-  invalidateExternal,
   isToday,
   persistDay,
   persistDayNow,
-  refreshExternal,
   setEntriesFor,
   state,
   visibleEntries,
@@ -417,8 +416,6 @@ export async function deleteEntry(id) {
     return;
   }
 
-  let deletedInJira = false;
-
   // Deleting locally would leave the time booked in Jira with nothing on screen
   // to show for it, so the worklog is the decision, not an afterthought.
   if (entry.worklogId) {
@@ -442,14 +439,16 @@ export async function deleteEntry(id) {
         return;
       }
       toastOk(`Worklog removed from ${entry.issueKey}.`);
-      // The cached Jira-side rows for this day were read before the DELETE and one
-      // of them stands for the worklog now gone. That is known to be wrong the
-      // instant the DELETE returns, so it is dropped here rather than after the
-      // refetch is decided — it is a synchronous Map delete, so it widens no window,
-      // and it means nothing below can draw a row for a worklog Joggl has just
-      // removed. The *refetch* is the display concern and waits until the end.
-      invalidateExternal(day);
-      deletedInJira = true;
+      // The cached Jira-side rows for this day were read before the DELETE, and one
+      // of them stands for the worklog now gone. It is taken out here, next to the
+      // DELETE that made it false — a synchronous Map write, so it widens no window,
+      // and nothing below can draw a row for a worklog Joggl has just removed.
+      //
+      // Exactly that row, rather than the whole day: dropping the day left every
+      // other Manual Jira entry on it blank until a refetch landed, which is
+      // bug-worthy on one day and unacceptable across a week. The rest of the cache
+      // is still true, so there is no refetch at all.
+      dropExternalWorklog(day, entry.worklogId);
     }
   }
 
@@ -457,24 +456,13 @@ export async function deleteEntry(id) {
   // and the DELETE. Once Jira has dropped the worklog, an entry still carrying its
   // worklogId is the dangerous state: a day change or a crash before this line
   // leaves it on the original day, and the next Sync would PUT to a worklog that no
-  // longer exists. It also reads as a failed delete while it sits there. The refetch
-  // below used to run in this gap, which put a whole Jira round trip inside it.
+  // longer exists. It also reads as a failed delete while it sits there. A refetch
+  // used to run in this gap, which put a whole Jira round trip inside it; there is
+  // no refetch now, because the cache was corrected rather than thrown away.
   if (state.timer?.entryId === id) await stopTimer({ save: false });
   setEntriesFor(day, entriesFor(day).filter((e) => e.id !== id));
   await persistDayNow(day);
   renderAll();
-
-  if (deletedInJira) {
-    // Invalidating alone would leave the day showing zero Manual Jira entries until
-    // something unrelated happened to refetch it — an understated total, which is
-    // the worse of the two lies. Refetched through the same tracked
-    // `refreshExternal` a day change uses, and outside the delete's own try/catch: a
-    // failed refetch must not read as a failed delete. It cannot throw out of this
-    // handler either — `track` in state.js catches internally — and if it does fail,
-    // `renderEntryList` shows the same "could not read this day's worklogs from
-    // Jira" note a failed day-change read shows.
-    await refreshExternal(day);
-  }
 }
 
 /**

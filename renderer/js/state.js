@@ -7,6 +7,7 @@ import {
   externalToEntries,
   installDayAccessors,
   missingDays,
+  withoutWorklog,
 } from './day-range.js';
 import { createDayWriter } from './day-writes.js';
 import { copyableEntries } from './entry-ops.js';
@@ -153,6 +154,20 @@ export function setEntriesFor(dayKey, entries) {
  */
 export function invalidateExternal(...dayKeys) {
   for (const key of dayKeys) state.external.delete(key);
+}
+
+/**
+ * Forget one Jira-side row, because the worklog behind it has just been deleted.
+ *
+ * The surgical form of `invalidateExternal`, and the reason there is one: dropping
+ * the whole day made every **Manual Jira entry** on it vanish until a refetch landed,
+ * which over a week would be a whole week's rows. Taking out the row that is
+ * genuinely gone leaves the rest of the cache true, so nothing has to be re-read —
+ * one fewer Jira round trip on a path the user is waiting on.
+ */
+export function dropExternalWorklog(dayKey, worklogId) {
+  if (!state.external.has(dayKey)) return;
+  state.external.set(dayKey, withoutWorklog(state.external.get(dayKey), worklogId));
 }
 
 /**

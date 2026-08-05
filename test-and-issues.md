@@ -340,20 +340,29 @@ on Jira.
 
 ### Confirmed bugs
 
-- **After deleting a worklog from Jira, the day briefly shows no Jira-side rows at all.**
-  Not just the deleted one — every **Manual Jira entry** on that day disappears for one
-  network round trip, then comes back minus the deleted one. `deleteEntry` invalidates
-  the day's cache next to the successful `DELETE`, and the `renderAll()` that follows
-  paints before the refetch lands, so it reads an empty cache.
+Nothing open.
 
-  Left alone deliberately. Rendering after the refetch instead means the deleted
-  worklog's cached row stops being claimed by any local entry and is drawn as a genuine
-  Manual Jira entry for time that no longer exists anywhere — briefly claiming time
-  exists is worse than briefly not showing it. Moving the invalidate later reopens the
-  window between the Jira delete and the local removal, which is the data-integrity bug
-  0.16.1 closed. Fixing it properly means removing one row from the cache rather than
-  dropping the day, which is worth doing when the week view makes a whole week's rows
-  vanish instead of a day's.
+Fixed on 2026-08-05:
+
+- **After deleting a worklog from Jira, the day briefly showed no Jira-side rows at
+  all.** Not just the deleted one — every **Manual Jira entry** on that day vanished
+  for one network round trip, then came back minus the deleted one. `deleteEntry`
+  dropped the whole day from the external cache next to the successful `DELETE`, and
+  the `renderAll()` after it painted from an empty cache.
+
+  Fixed as the entry itself said to: by taking the one row that is genuinely gone out
+  of the cache (`withoutWorklog` in `renderer/js/day-range.js`, via
+  `dropExternalWorklog` in `state.js`) rather than dropping the day. The rest of the
+  cache is still true, so the refetch that used to follow is gone entirely — one fewer
+  Jira round trip on a path the user is waiting on. Neither of the two things that
+  made this hard to fix before applies any more: nothing renders a stale row for time
+  that no longer exists, and the invalidate still sits next to the `DELETE`, so the
+  window the 0.16.1 fix closed stays closed.
+
+  Not covered by a UI check, deliberately. Reaching it means deleting a real Jira
+  worklog, and the live and fixture runs must report the same counts — so a check that
+  could only run against the fake would break the one thing keeping the fake honest.
+  The pure helper carries the test; the wiring is three lines.
 
 Fixed on 2026-07-29, in the order found:
 

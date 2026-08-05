@@ -25,6 +25,7 @@ import {
   isToday,
   persistDay,
   persistDayNow,
+  refreshExternal,
   state,
   visibleEntries,
 } from './state.js';
@@ -429,15 +430,23 @@ export async function deleteEntry(id) {
     if (answer === 'jira') {
       try {
         await deleteWorklog(entry);
-        toastOk(`Worklog removed from ${entry.issueKey}.`);
-        // The day's cached external list was fetched before this delete and still
-        // holds a row for the worklog now gone. Without this, the phantom Manual
-        // Jira entry survives every day change and lasts the session.
-        invalidateExternal(state.selectedDate);
       } catch (err) {
         toastErr(`Could not delete the worklog in Jira — ${err.message}`);
         return;
       }
+      toastOk(`Worklog removed from ${entry.issueKey}.`);
+      // The day's cached external list was fetched before this delete and still
+      // holds a row for the worklog now gone. Invalidating alone would show zero
+      // Manual Jira entries for the whole day until something unrelated happened to
+      // refetch it — trading a phantom row for an understated total, which is worse.
+      // Refetch through the same tracked `refreshExternal` a day change uses, kept
+      // outside the delete's own try/catch: the delete has already succeeded by this
+      // point, and a failed refetch here must not read as a failed delete. It also
+      // cannot throw out of this handler — `track` in state.js catches internally —
+      // and if it does fail, `renderEntryList` already shows the same "could not
+      // read this day's worklogs from Jira" note a failed day-change read shows.
+      invalidateExternal(state.selectedDate);
+      await refreshExternal(state.selectedDate);
     }
   }
 

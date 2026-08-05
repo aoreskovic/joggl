@@ -24,17 +24,17 @@ import { clearSelection } from './selection.js';
 import { registerView, setActiveView, wireShell } from './shell.js';
 import {
   appVersion,
+  externalPending,
   invalidateExternal,
   isToday,
   loadDay,
-  loadDays,
-  loadExternalWorklogs,
   loadPins,
   loadSettings,
   loadTimer,
   loadUi,
   logToFile,
   persistTimer,
+  refreshExternal,
   saveUi,
   state,
   ZOOM_LEVELS,
@@ -225,38 +225,6 @@ async function selectDate(date) {
   // Time booked straight into Jira belongs in this day's total too. Fetched after
   // the first paint, and never allowed to break the local view if Jira is down.
   refreshExternal(date);
-}
-
-/**
- * The Jira read that is in flight, or null.
- *
- * Held rather than dropped so something can wait for it. Nothing in the app needs
- * that — every caller here is fire-and-forget — but the UI check does, and the
- * alternative is what it used to do: sleep for a second and a half and hope.
- *
- * One field for both the day read and the range read, because `whenIdle()` means
- * "the Jira read in flight", and a check waiting on the wrong one of two fields is
- * worse than no hook at all.
- */
-let externalPending = null;
-
-function track(promise) {
-  externalPending = promise
-    .then(() => renderAll())
-    .catch(() => renderAll())
-    .finally(() => {
-      externalPending = null;
-    });
-  return externalPending;
-}
-
-function refreshExternal(date = state.selectedDate) {
-  return track(loadExternalWorklogs(date));
-}
-
-/** Load a span of days and their Jira-side rows. For the week and month views. */
-function refreshRange(from, to) {
-  return track(loadDays(from, to));
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   missingDays,
 } from './day-range.js';
 import { copyableEntries } from './entry-ops.js';
+import { renderAll } from './render.js';
 import { addDays, debounce, startOfDayMs, todayKey } from './util.js';
 
 const api = window.joggl;
@@ -276,6 +277,42 @@ export async function loadExternalWorklogs(date = state.selectedDate) {
     state.externalError = err.message;
     throw err;
   }
+}
+
+/**
+ * The Jira read that is in flight, or null.
+ *
+ * Held rather than dropped so something can wait for it. Nothing in the app needs
+ * that — every caller here is fire-and-forget — but the UI check does, and the
+ * alternative is what it used to do: sleep for a second and a half and hope.
+ *
+ * One field for both the day read and the range read, because `whenIdle()` means
+ * "the Jira read in flight", and a check waiting on the wrong one of two fields is
+ * worse than no hook at all. Lives here rather than in `app.js` so every caller of
+ * `refreshExternal` — including ones outside `app.js`, like a delete that has just
+ * changed what Jira holds — goes through the same tracked read `whenIdle()` covers,
+ * rather than a plain untracked `loadExternalWorklogs` that a UI check could race.
+ */
+export let externalPending = null;
+
+function track(promise) {
+  externalPending = promise
+    .then(() => renderAll())
+    .catch(() => renderAll())
+    .finally(() => {
+      externalPending = null;
+    });
+  return externalPending;
+}
+
+/** Pull one day's Jira-side rows and repaint. Answers from the cache; see above. */
+export function refreshExternal(date = state.selectedDate) {
+  return track(loadExternalWorklogs(date));
+}
+
+/** Load a span of days and their Jira-side rows. For the week and month views. */
+export function refreshRange(from, to) {
+  return track(loadDays(from, to));
 }
 
 /**

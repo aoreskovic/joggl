@@ -102,7 +102,7 @@ been exercised end to end, not just written.
 | Finish Day | Confirmed against real Jira — worklog `60504` on `EHW-70` |
 | Jira-side worklogs | Time logged in the Jira web UI is read back and counted |
 | Logging | `logs/joggl.log`, credential-redacted |
-| Tests | 306 passing, `npm test`; 85 UI checks, `npm run uicheck` (or `:fast`) |
+| Tests | 308 passing, `npm test`; 85 UI checks, `npm run uicheck` (or `:fast`) |
 | Shell | Collapsible sidebar with a view registry; week and month tabs present but disabled |
 | Drag to day view | An issue dragged from the task list becomes a 30-minute pending entry |
 | Keyboard | Every list arrow-navigable, every menu and dialog reachable — see below |
@@ -687,8 +687,11 @@ Never probe the environment. If something above appears missing, say so and stop
   happens, not when the timer fires, so an edit made on one day and a step to the next
   inside the 500 ms window can no longer write the wrong day's entries under the wrong
   key. Renders are the exception and stay as they are — "the day on screen" is exactly
-  what they mean. `loadDays` flushes the queue before it reads, so a range read cannot
-  overwrite an edit that has not reached disk.
+  what they mean. Every read of a day log — `loadDay`, `readDay`, `loadDays` — flushes
+  the queue first, so a read cannot install a version older than what is on screen.
+  That flush is reported and let go rather than propagated: a background save that
+  fails must not stop a day change, and must not abort `stopTimer` after it has
+  already cleared the timer, which would drop the block just timed.
 - **A day's bounds are `addDays`, not a fixed 86,400,000 ms.** `loadDays` and
   `loadExternalWorklogs` both compute the end of a range as `startOfDayMs(addDays(day,
   1))`, never `startOfDayMs(day) + DAY`. A day is not always 24 hours — the autumn

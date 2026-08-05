@@ -182,3 +182,24 @@ test('a write queued for one day is not redirected by what happens next', async 
 
   assert.deepEqual(written, [['2026-07-28', ['tuesday work']]]);
 });
+
+/**
+ * A debounced write is not awaited by anyone, so its failure has to be reported
+ * rather than returned. The reporter is injected because state.js cannot import
+ * toast.js — that would close a cycle — and the log file is where this belongs.
+ */
+test('a failed debounced write is reported, not thrown at nobody', async () => {
+  const timers = fakeTimers();
+  const seen = [];
+  const writer = createDayWriter(
+    async () => {
+      throw new Error('disk full');
+    },
+    { ...timers, onError: (err) => seen.push(err.message) },
+  );
+
+  writer.queue('2026-07-28');
+  await timers.run(); // must not reject
+
+  assert.deepEqual(seen, ['disk full']);
+});

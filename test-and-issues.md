@@ -364,6 +364,14 @@ Fixed on 2026-08-05:
   first silently lost the second. Every day is attempted now, and the first error is
   still what the caller sees.
 
+- **The flush above, added to two reads, turned a background failure into a blocking
+  one.** Found reviewing that fix rather than in use. A save that failed while
+  `loadDay` was flushing rejected out through `selectDate`, so the day arrows did
+  nothing at all; the same failure inside `readDay` aborted `stopTimer` after it had
+  already cleared the timer, so the block just timed had nowhere to land. Both reads
+  now report the failure to the log and carry on — the write is already lost by then,
+  and refusing to navigate or to finish stopping a timer does not bring it back.
+
 - **After deleting a worklog from Jira, the day briefly showed no Jira-side rows at
   all.** Not just the deleted one — every **Manual Jira entry** on that day vanished
   for one network round trip, then came back minus the deleted one. `deleteEntry`

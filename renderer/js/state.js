@@ -84,7 +84,10 @@ export async function loadDay(date) {
   // click › straight back, and without this the disk read installs the version the
   // edit had not reached yet — and the queued write then saves that stale array back
   // over it. The edit is gone from screen and disk, with nothing said.
-  await flushDayWrites();
+  //
+  // Reported rather than propagated: a background save that fails must not leave the
+  // day arrows doing nothing at all.
+  await flushDayWrites().catch(reportDayWriteFailure);
 
   const day = await api.days.get(date);
   state.selectedDate = date;
@@ -100,10 +103,31 @@ export async function loadDay(date) {
 }
 
 /**
+ * A day log that could not be written.
+ *
+ * Reported and then let go, never rethrown at a caller who cannot act on it. Two of
+ * the three callers are reads — `loadDay` and `readDay` flush before they read — and
+ * a flush that rejected there used to stop the read: refusing to change day because
+ * a *background* save failed reads as the arrows being broken, and refusing to
+ * finish `stopTimer` drops the block that was just timed. Both are worse than the
+ * failure being recorded and the work continuing.
+ *
+ * No toast, deliberately: `toast.js` imports `logToFile` from this module, so
+ * importing it back would close a cycle. The log file is where this belongs anyway —
+ * it is the thing you ask someone to send you.
+ */
+function reportDayWriteFailure(err) {
+  console.error('Failed to save day log:', err);
+  logToFile('error', `Failed to save day log: ${err?.message ?? err}`);
+}
+
+/**
  * Every day write goes through one queue, so a write decided now cannot land on
  * whichever day happens to be selected when it runs. See day-writes.js.
  */
-const dayWriter = createDayWriter((dayKey) => api.days.save(dayKey, entriesFor(dayKey)));
+const dayWriter = createDayWriter((dayKey) => api.days.save(dayKey, entriesFor(dayKey)), {
+  onError: reportDayWriteFailure,
+});
 
 /** Write this day within half a second. Defaults to the day on screen. */
 export function persistDay(dayKey = state.selectedDate) {
@@ -123,7 +147,10 @@ export function flushDayWrites() {
 export async function readDay(date) {
   // Same reason as `loadDay`: a read that has not seen a pending write returns a day
   // the user has already changed, and `stopTimer` merges the timed block onto it.
-  await flushDayWrites();
+  // Reported rather than propagated, and here it matters most: `stopTimer` has
+  // already cleared `state.timer` by this point, so throwing would drop the block
+  // that was just timed with nowhere for it to land.
+  await flushDayWrites().catch(reportDayWriteFailure);
   return api.days.get(date);
 }
 

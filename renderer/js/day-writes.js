@@ -16,7 +16,12 @@
  */
 export function createDayWriter(
   save,
-  { wait = 500, setTimer = setTimeout, clearTimer = clearTimeout } = {},
+  {
+    wait = 500,
+    onError = (err) => console.error('Failed to save day log:', err),
+    setTimer = setTimeout,
+    clearTimer = clearTimeout,
+  } = {},
 ) {
   const owing = new Set();
   let handle = null;
@@ -57,7 +62,9 @@ export function createDayWriter(
       // what was written and asserting what had been written by the first microtask.
       handle = setTimer(() => {
         handle = null;
-        return flush().catch((err) => console.error('Failed to save day log:', err));
+        // Nobody is awaiting a debounced write, so its failure has to be reported
+        // rather than returned.
+        return flush().catch(onError);
       }, wait);
     },
 

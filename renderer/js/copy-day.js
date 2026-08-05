@@ -13,16 +13,26 @@ import { findLastDayWithEntries, MAX_LOOKBACK_DAYS } from './day-search.js';
 import { copiedToDay } from './entry-ops.js';
 import { askModal } from './modal.js';
 import { renderAll } from './render.js';
-import { persistDayNow, readDay, state } from './state.js';
+import { entriesFor, loadDays, persistDayNow, state } from './state.js';
 import { toast, toastOk } from './toast.js';
-import { DAY, esc, formatDateLabel, msToDur, startOfDayMs } from './util.js';
+import { addDays, esc, formatDateLabel, msToDur } from './util.js';
 
-/** Reads one day's Jira worklogs. Answers [] rather than throwing when Jira is off. */
-function jiraReader() {
-  if (!state.settings.baseUrl || !state.settings.tokenConfigured) return async () => [];
-  return async (dayKey) => {
-    const dayStartTs = startOfDayMs(dayKey);
-    return window.joggl.jira.dayWorklogs(dayKey, dayStartTs, dayStartTs + DAY);
+/**
+ * Pull the whole lookback window in one go, then answer from it.
+ *
+ * The search itself is unchanged — it still walks back a day at a time and still
+ * stops at the first day with anything on it. What changed is what a step costs:
+ * each one used to be a JQL plus a worklog read per issue it found, so a fortnight
+ * off meant fourteen sequential round trips and a visible wait. One range read
+ * covers all thirty days for the price of one, and the walk becomes arithmetic.
+ */
+async function prefetchedReaders(from) {
+  const oldest = addDays(from, -MAX_LOOKBACK_DAYS);
+  const newest = addDays(from, -1);
+  await loadDays(oldest, newest);
+  return {
+    readLocal: async (key) => entriesFor(key),
+    readJira: async (key) => state.external.get(key) ?? [],
   };
 }
 
@@ -34,17 +44,14 @@ export async function copyPreviousDay() {
   const target = state.selectedDate;
   busy = true;
 
+  if (button) {
+    button.textContent = 'Looking…';
+    button.disabled = true;
+  }
+
   try {
-    const found = await findLastDayWithEntries({
-      from: target,
-      readLocal: async (key) => (await readDay(key)).entries,
-      readJira: jiraReader(),
-      // Says how far it has got, because a fortnight off means a real wait and a
-      // button that only says "Looking…" gives no reason to believe it is working.
-      onProgress: (back) => {
-        if (button) button.textContent = `Looking… ${back}d`;
-      },
-    });
+    const { readLocal, readJira } = await prefetchedReaders(target);
+    const found = await findLastDayWithEntries({ from: target, readLocal, readJira });
 
     if (!found) {
       toast(`Nothing to copy — no entries in the last ${MAX_LOOKBACK_DAYS} days.`);
@@ -65,7 +72,10 @@ export async function copyPreviousDay() {
     toastOk(`${plural(copies.length)} copied from ${formatDateLabel(found.dayKey)}.`);
   } finally {
     busy = false;
-    if (button) button.textContent = 'Copy previous day';
+    if (button) {
+      button.textContent = 'Copy previous day';
+      button.disabled = false;
+    }
     renderAll();
   }
 }

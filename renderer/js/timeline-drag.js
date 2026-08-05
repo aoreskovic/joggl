@@ -82,7 +82,7 @@ export function onResize(event, entry, edge, dayKey) {
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseup', onMouseUp);
     block?.classList.remove('dragging');
-    await commitDrag(entry, { startTs: origStart, endTs: origEnd });
+    await commitDrag(entry, dayKey, { startTs: origStart, endTs: origEnd });
   };
 
   document.addEventListener('mousemove', onMouseMove);
@@ -143,7 +143,12 @@ export function onMoveBlock(event, entry, dayKey) {
     document.removeEventListener('mouseup', onMouseUp);
     block?.classList.remove('dragging', 'moving');
     if (moved) suppressClickUntil = Date.now() + CLICK_TAIL_MS;
-    await commitDrag(entry, { startTs: origStart, endTs: origStart + duration }, { touched: moved });
+    await commitDrag(
+      entry,
+      dayKey,
+      { startTs: origStart, endTs: origStart + duration },
+      { touched: moved },
+    );
   };
 
   document.addEventListener('mousemove', onMouseMove);
@@ -200,7 +205,7 @@ function liveUpdate(block, entry, dayKey) {
  * the click had just focused, so focus would fall back to `<body>` and Tab would
  * restart from the top of the list.
  */
-async function commitDrag(entry, before, { touched = true } = {}) {
+async function commitDrag(entry, dayKey, before, { touched = true } = {}) {
   if (sameTimes(entry, before)) {
     // Dragged out and back: liveUpdate moved the element by hand, so the true
     // layout has to be restored even though the times are unchanged.
@@ -208,6 +213,6 @@ async function commitDrag(entry, before, { touched = true } = {}) {
     return;
   }
   markDirty(entry);
-  await persistDayNow();
+  await persistDayNow(dayKey);
   renderAll();
 }

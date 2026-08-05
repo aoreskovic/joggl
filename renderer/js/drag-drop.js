@@ -21,7 +21,7 @@ import {
 import { markDirty } from './entries.js';
 import { renderAll } from './render.js';
 import { setDragging } from './shell.js';
-import { persistDayNow, state } from './state.js';
+import { entriesFor, persistDayNow, setEntriesFor, state } from './state.js';
 import { gridTimeAt, hideDropPlaceholder, showDropPlaceholder } from './timeline.js';
 import { esc, startOfDayMs, uuid } from './util.js';
 
@@ -282,10 +282,14 @@ async function onMouseUp() {
   // Released somewhere the grid cannot turn into a time: cancel, quietly.
   if (startTs === null) return;
 
-  const dayStartTs = startOfDayMs(state.selectedDate);
+  // The day the drop landed on. Read once, so the write below cannot be redirected
+  // by a day change — and so phase 3 has one place to make it the *target column's*
+  // day rather than the selected one.
+  const day = state.selectedDate;
+  const dayStartTs = startOfDayMs(day);
 
   if (payload.kind === 'entry') {
-    const entry = state.entries.find((e) => e.id === payload.entryId);
+    const entry = entriesFor(day).find((e) => e.id === payload.entryId);
     // It could have been deleted, or the day changed, while the drag was running.
     if (!entry) return;
     const moved = movedEntry(entry, startTs, dayStartTs);
@@ -294,12 +298,15 @@ async function onMouseUp() {
     if (sameTimes(moved, entry)) return;
     // A move needs syncing again for exactly the reason a block drag does.
     markDirty(moved);
-    state.entries = state.entries.map((e) => (e.id === moved.id ? moved : e));
+    setEntriesFor(day, entriesFor(day).map((e) => (e.id === moved.id ? moved : e)));
   } else {
-    state.entries = [...state.entries, dropEntryFor(payload.issue, uuid(), startTs, dayStartTs)];
+    setEntriesFor(day, [
+      ...entriesFor(day),
+      dropEntryFor(payload.issue, uuid(), startTs, dayStartTs),
+    ]);
   }
 
-  await persistDayNow();
+  await persistDayNow(day);
   renderAll();
 }
 

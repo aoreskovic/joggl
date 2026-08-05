@@ -21,11 +21,13 @@ import { renderAll } from './render.js';
 import { applySelection, clearSelection, select } from './selection.js';
 import {
   deleteWorklog,
+  entriesFor,
   invalidateExternal,
   isToday,
   persistDay,
   persistDayNow,
   refreshExternal,
+  setEntriesFor,
   state,
   visibleEntries,
 } from './state.js';
@@ -361,7 +363,7 @@ function handleInlineEdit(event) {
   if (sameTimes(entry, before)) return;
 
   markDirty(entry);
-  persistDay();
+  persistDay(state.selectedDate);
   renderAll();
 }
 
@@ -404,6 +406,9 @@ async function handleEntryAction(event) {
 
 /** Shared by the entry list and the day-view context menu. */
 export async function deleteEntry(id) {
+  // Fixed before the confirmation modal and the Jira DELETE, both of which the day
+  // can be stepped underneath. The entry belongs to the day it was found on.
+  const day = state.selectedDate;
   const entry = currentEntry(id);
   if (!entry) return;
 
@@ -443,7 +448,7 @@ export async function deleteEntry(id) {
       // refetch is decided — it is a synchronous Map delete, so it widens no window,
       // and it means nothing below can draw a row for a worklog Joggl has just
       // removed. The *refetch* is the display concern and waits until the end.
-      invalidateExternal(state.selectedDate);
+      invalidateExternal(day);
       deletedInJira = true;
     }
   }
@@ -455,8 +460,8 @@ export async function deleteEntry(id) {
   // longer exists. It also reads as a failed delete while it sits there. The refetch
   // below used to run in this gap, which put a whole Jira round trip inside it.
   if (state.timer?.entryId === id) await stopTimer({ save: false });
-  state.entries = state.entries.filter((e) => e.id !== id);
-  await persistDayNow();
+  setEntriesFor(day, entriesFor(day).filter((e) => e.id !== id));
+  await persistDayNow(day);
   renderAll();
 
   if (deletedInJira) {
@@ -468,7 +473,7 @@ export async function deleteEntry(id) {
     // handler either — `track` in state.js catches internally — and if it does fail,
     // `renderEntryList` shows the same "could not read this day's worklogs from
     // Jira" note a failed day-change read shows.
-    await refreshExternal(state.selectedDate);
+    await refreshExternal(day);
   }
 }
 
@@ -478,12 +483,13 @@ export async function deleteEntry(id) {
  * belongs — moving it is the expected next step, not a correction.
  */
 export async function duplicateEntry(id) {
+  const day = state.selectedDate;
   const entry = currentEntry(id);
   if (!entry || entry.endTs === null) return;
 
   const copy = duplicateOf(entry, uuid());
-  state.entries = sortEntries([...state.entries, copy]);
-  await persistDayNow();
+  setEntriesFor(day, sortEntries([...entriesFor(day), copy]));
+  await persistDayNow(day);
   renderAll();
 
   toast(
@@ -497,6 +503,7 @@ export async function duplicateEntry(id) {
  * that is the point, and it is why this is not just delete-and-redraw.
  */
 export async function editEntryTask(id) {
+  const day = state.selectedDate;
   const entry = currentEntry(id);
   if (!entry) return;
 
@@ -532,8 +539,8 @@ export async function editEntryTask(id) {
   if (picked.issueKey === entry.issueKey) return;
 
   const next = retargetEntry(entry, picked);
-  state.entries = state.entries.map((e) => (e.id === next.id ? next : e));
-  await persistDayNow();
+  setEntriesFor(day, entriesFor(day).map((e) => (e.id === next.id ? next : e)));
+  await persistDayNow(day);
   renderAll();
   toastOk(`Moved ${tsToHHMM(next.startTs)}–${tsToHHMM(next.endTs)} to ${next.issueKey}.`);
 }
@@ -547,6 +554,7 @@ export async function editEntryTask(id) {
  * description of an existing worklog is exactly what PUT .../worklog/{id} is for.
  */
 export async function editEntryComment(id) {
+  const day = state.selectedDate;
   const entry = currentEntry(id);
   if (!entry) return;
 
@@ -596,11 +604,12 @@ export async function editEntryComment(id) {
 
   Object.assign(entry, next);
   markDirty(entry);
-  await persistDayNow();
+  await persistDayNow(day);
   renderAll();
 }
 
 export async function splitEntry(id) {
+  const day = state.selectedDate;
   const entry = currentEntry(id);
   if (!entry || entry.endTs === null) return;
   if (isExternal(entry)) {
@@ -617,7 +626,7 @@ export async function splitEntry(id) {
     return;
   }
 
-  const midpoint = snapToQuarter((entry.startTs + entry.endTs) / 2, state.selectedDate);
+  const midpoint = snapToQuarter((entry.startTs + entry.endTs) / 2, day);
   if (midpoint <= entry.startTs || midpoint >= entry.endTs) {
     toastWarn('Entry is too short to split.');
     return;
@@ -625,7 +634,7 @@ export async function splitEntry(id) {
 
   const second = { ...entry, id: uuid(), startTs: midpoint, worklogId: null };
   entry.endTs = midpoint;
-  state.entries = sortEntries([...state.entries, second]);
-  await persistDayNow();
+  setEntriesFor(day, sortEntries([...entriesFor(day), second]));
+  await persistDayNow(day);
   renderAll();
 }

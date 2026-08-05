@@ -11,7 +11,15 @@ import { editEntryComment } from './entries.js';
 import { createRowNav, wireRovingList } from './keynav.js';
 import { renderAll } from './render.js';
 import { applySelection, clearSelection, select } from './selection.js';
-import { isToday, persistDayNow, pxPerMin, state, visibleEntries } from './state.js';
+import {
+  entriesFor,
+  isToday,
+  persistDayNow,
+  pxPerMin,
+  setEntriesFor,
+  state,
+  visibleEntries,
+} from './state.js';
 import { createIssueLookup, searchIssues } from './tasks.js';
 import { columnAt, placeBlock, setColumns } from './timeline-columns.js';
 import { isClickSuppressed, onMoveBlock, onResize } from './timeline-drag.js';
@@ -300,8 +308,11 @@ export function onGridClick(event) {
   // as the empty space below the entry rows.
   clearSelection();
 
-  const rawStartTs = gridTimeAt(event.clientX, event.clientY);
-  if (rawStartTs === null) return;
+  // `columnAt` rather than `gridTimeAt`: the popup writes to a day log, so it needs
+  // the day the click landed in, not the day that happens to be selected when the
+  // user finishes typing into it.
+  const at = columnAt(event.clientX, event.clientY);
+  if (at === null) return;
 
   const duration = 30 * 60_000;
   // Same rule dropEntryFor applies, and for the same reason: pull the start back
@@ -310,13 +321,13 @@ export function onGridClick(event) {
   // this the block would commit as 00:00–00:30 of *tomorrow* under today's key.
   // A 30-minute click silently becoming a 15-minute entry would be a worse
   // surprise than one that lands a quarter hour earlier than clicked.
-  const latestStart = startOfDayMs(state.selectedDate) + 86_400_000 - duration;
-  const startTs = Math.min(rawStartTs, latestStart);
+  const latestStart = startOfDayMs(at.dateKey) + 86_400_000 - duration;
+  const startTs = Math.min(at.ts, latestStart);
 
-  showQuickEntry(event.clientX, event.clientY, startTs, startTs + duration);
+  showQuickEntry(event.clientX, event.clientY, at.dateKey, startTs, startTs + duration);
 }
 
-function showQuickEntry(cx, cy, startTs, endTs) {
+function showQuickEntry(cx, cy, dayKey, startTs, endTs) {
   hideQuickEntry();
 
   const wrap = document.createElement('div');
@@ -339,8 +350,8 @@ function showQuickEntry(cx, cy, startTs, endTs) {
 
   const commit = async (issueKey, issueId, title) => {
     hideQuickEntry();
-    state.entries = [
-      ...state.entries,
+    setEntriesFor(dayKey, [
+      ...entriesFor(dayKey),
       {
         id: uuid(),
         issueKey: issueKey ?? null,
@@ -352,8 +363,8 @@ function showQuickEntry(cx, cy, startTs, endTs) {
         worklogId: null,
         errorMsg: null,
       },
-    ];
-    await persistDayNow();
+    ]);
+    await persistDayNow(dayKey);
     renderAll();
   };
 

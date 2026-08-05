@@ -10,7 +10,7 @@ import {
 } from './finish-day.js';
 import { askModal } from './modal.js';
 import { renderAll } from './render.js';
-import { isToday, persistDayNow, state, submitWorklog } from './state.js';
+import { entriesFor, isToday, persistDayNow, setEntriesFor, state, submitWorklog } from './state.js';
 import { toast, toastOk, toastWarn } from './toast.js';
 import { esc, msToDur } from './util.js';
 
@@ -31,7 +31,11 @@ export function updateFinishButton() {
 export async function finishDay() {
   if (running) return;
 
-  const plan = planFinishDay(state.entries);
+  // The day this sync is about, fixed before anything is awaited. A sync takes
+  // seconds and the day can be stepped while it runs; the results belong to the day
+  // whose entries were submitted, not to whatever is on screen when Jira answers.
+  const day = state.selectedDate;
+  const plan = planFinishDay(entriesFor(day));
 
   if (plan.toSubmit.length === 0 && plan.toMarkLocal.length === 0) {
     toast(
@@ -55,15 +59,15 @@ export async function finishDay() {
   updateFinishButton();
 
   try {
-    const result = await runFinishDay(state.entries, submitWorklog, {
+    const result = await runFinishDay(entriesFor(day), submitWorklog, {
       onProgress: (done, total) => {
         const button = document.getElementById('finish-day-btn');
         if (button) button.textContent = syncLabel(plan, { busy: true, done, total });
       },
     });
 
-    state.entries = result.entries;
-    await persistDayNow();
+    setEntriesFor(day, result.entries);
+    await persistDayNow(day);
 
     if (result.markedLocal.length > 0) {
       toast(
@@ -83,7 +87,7 @@ export async function finishDay() {
       return;
     }
 
-    await showFailureSummary(result);
+    await showFailureSummary(result, day);
   } finally {
     running = false;
     updateFinishButton();
@@ -92,7 +96,10 @@ export async function finishDay() {
 }
 
 // No automatic retry. The user sees exactly what failed and decides.
-async function showFailureSummary(result) {
+//
+// `day` is carried in rather than read again: this modal stays open for as long as
+// the user reads it, and the entries it is about belong to the day that was synced.
+async function showFailureSummary(result, day) {
   const body = document.createElement('div');
   const list = document.createElement('ul');
   list.className = 'fail-list';
@@ -125,8 +132,8 @@ async function showFailureSummary(result) {
 
   if (answer !== 'retry') return;
 
-  state.entries = resetFailedForRetry(state.entries);
-  await persistDayNow();
+  setEntriesFor(day, resetFailedForRetry(entriesFor(day)));
+  await persistDayNow(day);
   renderAll();
 
   // running is still true here, so clear it before recursing into the next attempt.

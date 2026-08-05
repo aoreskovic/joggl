@@ -14,7 +14,7 @@ import { findLastDayWithEntries, MAX_LOOKBACK_DAYS } from './day-search.js';
 import { copiedToDay } from './entry-ops.js';
 import { askModal } from './modal.js';
 import { renderAll } from './render.js';
-import { entriesFor, loadDays, persistDayNow, state } from './state.js';
+import { entriesFor, loadDays, persistDayNow, setEntriesFor, state } from './state.js';
 import { toast, toastOk } from './toast.js';
 import { addDays, esc, formatDateLabel, msToDur } from './util.js';
 
@@ -67,8 +67,8 @@ export async function copyPreviousDay() {
 
     if ((await confirmCopy(found, copies, target)) !== 'copy') return;
 
-    state.entries = [...state.entries, ...copies];
-    await persistDayNow();
+    setEntriesFor(target, [...entriesFor(target), ...copies]);
+    await persistDayNow(target);
     renderAll();
     toastOk(`${plural(copies.length)} copied from ${formatDateLabel(found.dayKey)}.`);
   } finally {
@@ -95,11 +95,12 @@ function confirmCopy(found, copies, target) {
     ' They arrive unsynced, so nothing reaches Jira until you press Sync.';
   body.appendChild(lede);
 
-  if (state.entries.length > 0) {
+  const already = entriesFor(target);
+  if (already.length > 0) {
     const warn = document.createElement('p');
     warn.className = 'panel-lede';
     warn.innerHTML =
-      `<strong>${esc(formatDateLabel(target))} already has ${plural(state.entries.length)}.</strong> ` +
+      `<strong>${esc(formatDateLabel(target))} already has ${plural(already.length)}.</strong> ` +
       'The copies are added to them, not put in their place.';
     body.appendChild(warn);
   }
@@ -116,16 +117,20 @@ function confirmCopy(found, copies, target) {
 }
 
 export async function clearDay() {
-  const synced = state.entries.filter((e) => e.worklogId);
-  const rest = state.entries.filter((e) => !e.worklogId);
+  // Fixed before the modal opens: it stays up for as long as the user reads it, and
+  // clearing must empty the day they were looking at when they pressed the button.
+  const day = state.selectedDate;
+  const entries = entriesFor(day);
+  const synced = entries.filter((e) => e.worklogId);
+  const rest = entries.filter((e) => !e.worklogId);
 
-  if (state.entries.length === 0) {
+  if (entries.length === 0) {
     toast('Nothing to clear on this day.');
     return;
   }
 
   const answer = await askModal({
-    title: `Clear ${formatDateLabel(state.selectedDate)}?`,
+    title: `Clear ${formatDateLabel(day)}?`,
     body: clearBody(synced, rest),
     buttons: [
       { label: 'Cancel', value: 'cancel' },
@@ -138,8 +143,8 @@ export async function clearDay() {
   });
   if (answer === 'cancel') return;
 
-  state.entries = answer === 'unsynced' ? synced : [];
-  await persistDayNow();
+  setEntriesFor(day, answer === 'unsynced' ? synced : []);
+  await persistDayNow(day);
   renderAll();
   toastOk(answer === 'unsynced' ? `${plural(rest.length)} cleared.` : 'Day cleared.');
 }

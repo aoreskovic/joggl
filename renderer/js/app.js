@@ -37,6 +37,7 @@ import {
   persistTimer,
   refreshExternal,
   saveUi,
+  setEntriesFor,
   state,
   ZOOM_LEVELS,
 } from './state.js';
@@ -193,8 +194,9 @@ function installTestHook() {
      * Nothing in a run writes to Jira, so the rows already on screen are still true.
      */
     async reloadDay() {
-      const day = await window.joggl.days.get(state.selectedDate);
-      state.entries = day.entries;
+      const key = state.selectedDate;
+      const day = await window.joggl.days.get(key);
+      setEntriesFor(key, day.entries);
       renderAll();
     },
 

@@ -96,13 +96,13 @@ been exercised end to end, not just written.
 | Process split | `main` / `preload` / `renderer` as specified, `sandbox: true` |
 | Store | Own atomic writer, one file per key (see deviations) |
 | Credentials | `safeStorage`, token never crosses into the renderer |
-| Jira client | `myself`, `search/jql` with `nextPageToken`, worklog create / update / delete / read |
+| Jira client | `myself`, `search/jql` with `nextPageToken`, worklog create / update / delete / read; `fetchRangeWorklogs` reads a whole span in one JQL and pages each issue's worklogs to the end |
 | Setup wizard | First run, with a working `Test connection` |
 | Timer, merge, day view | Ported, including overlap columns, drag, resize, split |
 | Finish Day | Confirmed against real Jira — worklog `60504` on `EHW-70` |
 | Jira-side worklogs | Time logged in the Jira web UI is read back and counted |
 | Logging | `logs/joggl.log`, credential-redacted |
-| Tests | 251 passing, `npm test`; 82 UI checks, `npm run uicheck` (or `:fast`) |
+| Tests | 283 passing, `npm test`; 84 UI checks, `npm run uicheck` (or `:fast`) |
 | Shell | Collapsible sidebar with a view registry; week and month tabs present but disabled |
 | Drag to day view | An issue dragged from the task list becomes a 30-minute pending entry |
 | Keyboard | Every list arrow-navigable, every menu and dialog reachable — see below |
@@ -145,13 +145,24 @@ a reason.
 7. **Day keys are local dates.** The plugin used `toISOString().slice(0,10)`, which is
    UTC and hands anyone east of Greenwich tomorrow's key late in the evening.
 
+8. **A day's entries live in a Map, and `state.entries` is a view onto it.**
+   Week view needs several days at once, and `state.entries` is read in about forty
+   places that all mean "the day on screen". Rewriting them to take a day argument
+   would be a large change for no user-visible gain, so the storage moved to
+   `state.days` and the name stayed — `installDayAccessors` in `day-range.js`
+   defines it as a live getter/setter over the selected day. Jira-side rows are
+   cached the same way, per day, so stepping back to a day just visited no longer
+   blanks and refetches it.
+
 ### Next, roughly in order
 
 1. **Week view** — phase 2 of the sidebar work. Day columns, a work-week / 7-day
    toggle, a week stepper that names the week of the month, and dragging entries
    between days. Needs the multi-day state and the generalised timeline column that
    phase 1 deliberately left alone: the `view` singleton in `timeline.js` still ties
-   every drag handler to one column.
+   every drag handler to one column. The range data layer it needs — a multi-day
+   store, a single range read for a span of Jira worklogs, and the per-day cache —
+   landed in 0.16.0.
 2. **Month view** — phase 3. A calendar grid with hours logged per day, and the day
    view beside it showing whichever day was clicked.
 3. **Tray icon states** — the icon should show at a glance whether a timer is running.
@@ -160,18 +171,16 @@ a reason.
    window (see *Keyboard*), but reaching it still means giving Joggl focus first. A
    `globalShortcut` that resumes the last task with the window hidden is what would
    make it keyboard-first, and it needs a main↔renderer signal it does not have.
-5. **Pagination for busy issues** — `fetchDayWorklogs` asks for `maxResults=200` per
-   issue and does not follow `startAt`. Fine at present volumes, wrong eventually.
-6. **Which days are not worked is a toggle, not a schedule.** The weekend tint is
+5. **Which days are not worked is a toggle, not a schedule.** The weekend tint is
    hardcoded to Saturday and Sunday; anyone whose week runs otherwise switches it off.
    A per-day working-week setting is the obvious next step if that is not enough.
-7. **Splitting a synced entry, and repointing one at another issue** — both refused,
+6. **Splitting a synced entry, and repointing one at another issue** — both refused,
    for the same reason: a worklogId is only valid on the issue it was created against,
    so either needs a delete plus a create with its own partial-failure story. Until
    someone actually misses them, deleting the entry (which offers to remove the Jira
    worklog too) and re-adding it is the honest path, and both messages say so.
-8. **macOS build** — a GitHub Actions job with a macOS runner, no code changes.
-9. **Auto-update** — still not worth it for ten users. Revisit if handing out installers
+7. **macOS build** — a GitHub Actions job with a macOS runner, no code changes.
+8. **Auto-update** — still not worth it for ten users. Revisit if handing out installers
    becomes the annoying part.
 
 Deliberately **not** planned: everything under *Out of scope* at the end of this file.
@@ -347,10 +356,18 @@ Rules:
 
 Time booked straight into the Jira web UI is read back per day and shown alongside the
 local entries, so the daily total is not a lie. These are **never persisted** — they
-live only in `state.externalEntries` and are merged in at render time, so a stale copy
-can never end up in a day log. They are read-only: no drag, no edit, no delete, and
-Finish Day does not see them. A Jira worklog whose id already appears on a local entry
-is dropped, so Joggl's own synced entries are not shown twice.
+live only in `state.external`, a per-day session cache (see deviation 8) merged in at
+render time via `state.externalEntries`, so a stale copy can never end up in a day log.
+They are read-only: no drag, no edit, no delete, and Finish Day does not see them. A
+Jira worklog whose id already appears on a local entry is dropped, so Joggl's own
+synced entries are not shown twice.
+
+Anything that changes what Jira holds for a day calls `invalidateExternal(dayKey)`
+first, so the next read is a real one instead of answering from the cache. Finish Day
+does this after a successful sync, and deleting a worklog does it too — without that,
+a per-day cache would otherwise leave a deleted worklog sitting on screen as a phantom
+**Manual Jira entry** for the rest of the session, since nothing would ever ask Jira
+about that day again.
 
 They are drawn dashed and unfilled in the `--external` cyan, labelled **Manual Jira
 entry** beneath the issue title. Cyan because it has to sit clearly apart from the
@@ -646,6 +663,11 @@ Never probe the environment. If something above appears missing, say so and stop
   empty day says so in both places. The grid's hint is `pointer-events: none`, or it would
   sit over the hours it is telling people to click. A day holding only read-only Jira rows
   is **not** empty: the hint keys off what is rendered, not off what the store holds.
+- **A day's bounds are `addDays`, not a fixed 86,400,000 ms.** `loadDays` and
+  `loadExternalWorklogs` both compute the end of a range as `startOfDayMs(addDays(day,
+  1))`, never `startOfDayMs(day) + DAY`. A day is not always 24 hours — the autumn
+  clock change makes one 25 — and adding a constant would cut that day's last hour off
+  the range a moment before midnight actually arrives.
 
 ### Tests
 

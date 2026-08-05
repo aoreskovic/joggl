@@ -2,22 +2,24 @@
 
 What to test by hand, how to test it, and what is known to be broken.
 
-Joggl has 251 unit tests (`npm test`) covering the things where a silent failure loses
+Joggl has 283 unit tests (`npm test`) covering the things where a silent failure loses
 time data: the worklog timestamp formatter, merge decisions at the 30-minute boundary,
 Finish Day's partial-failure transitions, the day-log round trip, quarter-hour snapping,
 what a duplicate, a moved and a repointed entry inherit,
 when a touch counts as an edit, weekend detection, pin labelling, the ADF a worklog
 comment becomes and back again, the search box's remote-lookup loop, arrow-key
 navigation over a list of results, the calendar grid behind "Jump to a date", which
-editor a double click opens, and the search for the last day worth copying — including
-the cases nobody reaches twice, like a fortnight off or a first run with no history.
+editor a double click opens, the search for the last day worth copying — including
+the cases nobody reaches twice, like a fortnight off or a first run with no history —
+following a paginated Jira endpoint to the end, which local day a worklog belongs to,
+and the day-range arithmetic behind the multi-day state.
 Everything else — the whole UI — is verified against the checklist below, because the
 project deliberately has no DOM test harness and adding one would break the
 short-dependency rule in `CLAUDE.md`.
 
 That makes this file the other half of the test suite. Keep it current.
 
-**Last full pass: 2026-07-31, all 82 green**, in **2m 33s** against the live Jira and **1m 54s**
+**Last full pass: 2026-08-05, all 84 green**, in **1m 57s** against the live Jira and **1m 55s**
 against fixtures — both reporting the same counts. Driven by dispatching real
 mouse events into the renderer from the main process against a throwaway
 `--user-data-dir`. See *The script* at the end for how, and for what it does not cover.
@@ -28,7 +30,7 @@ mouse events into the renderer from the main process against a throwaway
 
 ```
 npm start           # the app
-npm test            # 251 tests, must be 0 failures
+npm test            # 283 tests, must be 0 failures
 npm run uicheck     # the checklist below as a script, against the live Jira (~2m)
 npm run uicheck:fast # the same, against fixtures — no network, no credentials (~2m)
 ```
@@ -158,6 +160,8 @@ The point of these is that **nothing** should end up offered for a re-sync.
 | Choose *Clear all* | The day's own entries go. **Manual Jira entry** rows stay — they are not Joggl's to remove. |
 | Check Jira afterwards | Every worklog is still there. Clear day never deletes anything from Jira. |
 | Press either header button | The panel does not collapse, even though the header around them is itself a toggle. |
+| Press **Copy previous day** and watch the button while it looks | It never shows a countdown like `Looking… 12d`. The whole 30-day window is read in one request now, so there is nothing left to count as it goes — the confirm just appears. |
+| Step away from a day holding **Manual Jira entry** rows, then step back to it | The rows are there again at once, with no second Jira read behind them — they were cached per day rather than cleared on the way out. |
 
 ### The Sync button
 

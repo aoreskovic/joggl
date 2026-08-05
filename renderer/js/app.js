@@ -27,6 +27,7 @@ import {
   externalPending,
   invalidateExternal,
   isToday,
+  jiraReads,
   loadDay,
   loadPins,
   loadSettings,
@@ -171,7 +172,7 @@ async function boot() {
  * signal for "the work finished", every wait it made was a fixed sleep sized for the
  * worst case — which is where five and a half minutes of a twenty-minute run went.
  *
- * Three fields, no IPC and no preload change: this is renderer-local, and the harness
+ * Four fields, no IPC and no preload change: this is renderer-local, and the harness
  * already runs arbitrary JS here, so the narrow allowlist in `CLAUDE.md` is untouched.
  */
 function installTestHook() {
@@ -194,6 +195,19 @@ function installTestHook() {
       const day = await window.joggl.days.get(state.selectedDate);
       state.entries = day.entries;
       renderAll();
+    },
+
+    /**
+     * How many live `rangeWorklogs` requests `loadExternalWorklogs` has made, total.
+     *
+     * A getter rather than a copied number: `jiraReads` is a live import binding from
+     * `state.js`, and a plain property here would have frozen it at zero. It is what
+     * lets a check prove a day's Jira-side rows came back from cache on a return
+     * visit rather than merely arriving fast — counting is the only way to tell the
+     * two apart, since both look the same on screen.
+     */
+    get jiraReads() {
+      return jiraReads;
     },
   };
   registerRenderer(() => {

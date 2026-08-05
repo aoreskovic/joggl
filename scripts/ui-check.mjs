@@ -1878,6 +1878,75 @@ async function copyAndClear() {
       return /copy previous day/i.test(d.label ?? '');
     },
   );
+
+  await check(
+    'Copy previous day answers from one prefetched window, never counting days on the button',
+    `await H.resetDay();
+     const p = (n) => String(n).padStart(2, '0');
+     // Leave yesterday empty and put the only entry two days back, so the search has
+     // to walk past at least one day — exactly the walk the old per-day version used
+     // to narrate with "Looking… Nd" as each read came back. A single prefetch has
+     // nothing left to count as it goes.
+     const y = new Date(); y.setDate(y.getDate() - 1);
+     const yKey2 = y.getFullYear() + '-' + p(y.getMonth() + 1) + '-' + p(y.getDate());
+     await window.joggl.days.save(yKey2, []);
+     const back2 = new Date(); back2.setDate(back2.getDate() - 2);
+     const back2Key = back2.getFullYear() + '-' + p(back2.getMonth() + 1) + '-' + p(back2.getDate());
+     const at3 = new Date(back2); at3.setHours(9, 0, 0, 0);
+     await window.joggl.days.save(back2Key, [{
+       id: 'src3', issueKey: 'X-COPY3', issueId: null, title: 'Two days back',
+       startTs: at3.getTime(), endTs: at3.getTime() + 1800000,
+       status: 'pending', worklogId: null, comment: null, errorMsg: null }]);
+
+     const seenLabels = new Set();
+     H.q('#copy-day-btn').click();
+     const deadline = Date.now() + 20000;
+     while (H.q('#modal-overlay').classList.contains('hidden') && Date.now() < deadline) {
+       seenLabels.add(H.q('#copy-day-btn').textContent);
+       await H.sleep(10);
+     }
+     const opened = !H.q('#modal-overlay').classList.contains('hidden');
+     // Cancel — nothing here should reach Jira, and leaving the copy in place would
+     // disturb whatever check runs next.
+     H.all('#modal-buttons button').find(b => /cancel/i.test(b.textContent))?.click();
+     await H.sleep(500);
+     const afterCancel = H.entries().length;
+     await window.joggl.days.save(back2Key, []);
+     await H.resetDay();
+     return JSON.stringify({ opened, afterCancel, labels: [...seenLabels] })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.opened === true && d.afterCancel === 0 &&
+        d.labels.every((l) => !/Looking.*\d/.test(l));
+    },
+  );
+
+  await check(
+    "a day's Jira-side rows survive stepping away and back, without a second Jira read",
+    `await H.resetDay();
+     const before = H.all('.entry-card.external').length;
+     // Nothing to prove without at least one Jira-side row on today. Live, whether
+     // there is one depends on what was actually booked; fast always has two.
+     if (before === 0) return JSON.stringify({ skip: true });
+     // Never forward past today — next-day refuses that anyway, and under
+     // --uicheck-fast the fake only answers for today, so yesterday and back is the
+     // only round trip that has a today to return to.
+     await H.goDay('#prev-day');
+     const readsOnYesterday = window.__jogglTest.jiraReads;
+     await H.goDay('#next-day');
+     const readsOnReturn = window.__jogglTest.jiraReads;
+     const after = H.all('.entry-card.external').length;
+     await H.resetDay();
+     return JSON.stringify({ before, after, readsOnYesterday, readsOnReturn })`,
+    (v) => {
+      const d = JSON.parse(v);
+      if (d.skip) return 'skipped';
+      // The row count alone would pass just as well against the old always-refetch
+      // code, since a fresh read of the same day answers the same rows. The counter
+      // is what proves the return leg never asked Jira again.
+      return d.before > 0 && d.after === d.before && d.readsOnReturn === d.readsOnYesterday;
+    },
+  );
 }
 
 async function overlapNotice() {

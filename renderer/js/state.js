@@ -260,6 +260,7 @@ export async function loadExternalWorklogs(date = state.selectedDate) {
   state.externalError = null;
 
   try {
+    jiraReads++;
     const worklogs = await api.jira.rangeWorklogs(date, date, dayStartTs, startOfDayMs(addDays(date, 1)));
     // A day change mid-request must not drop yesterday's answer onto today — but the
     // answer is filed under the day it was asked for, so it is kept rather than
@@ -294,6 +295,15 @@ export async function loadExternalWorklogs(date = state.selectedDate) {
  * rather than a plain untracked `loadExternalWorklogs` that a UI check could race.
  */
 export let externalPending = null;
+
+/**
+ * Counts every live `rangeWorklogs` request `loadExternalWorklogs` actually makes —
+ * the cache-hit branch above deliberately never touches it. Renderer-local, exposed
+ * as `window.__jogglTest.jiraReads` in `app.js`'s `installTestHook`, so a UI check
+ * can prove a day round trip answered the second time from cache rather than merely
+ * answering fast: counting the reads is the only way to tell those two apart.
+ */
+export let jiraReads = 0;
 
 function track(promise) {
   externalPending = promise

@@ -73,9 +73,13 @@ export async function loadDay(date) {
   const day = await api.days.get(date);
   state.selectedDate = date;
   state.days.set(date, day.entries);
-  // Deliberately *not* cleared any more. The rows belong to the day, not to the
-  // screen, and they are held per day now — so stepping back to a day just visited
-  // shows its Jira-side rows at once instead of blanking and refetching.
+  // The rows themselves are deliberately *not* cleared any more — they are held per
+  // day, so stepping back to a day just visited shows its Jira-side rows at once
+  // instead of blanking and refetching. The flags are another matter: they describe
+  // the day on screen, so carrying them across would render the previous day's error
+  // note against this day until the new read lands.
+  state.externalState = state.external.has(date) ? 'loaded' : 'idle';
+  state.externalError = null;
   return state.entries;
 }
 

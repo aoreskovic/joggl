@@ -1149,9 +1149,16 @@ export async function loadDay(date) {
   const day = await api.days.get(date);
   state.selectedDate = date;
   state.days.set(date, day.entries);
-  // Deliberately *not* cleared any more. The rows belong to the day, not to the
-  // screen, and they are held per day now — so stepping back to a day just visited
-  // shows its Jira-side rows at once instead of blanking and refetching.
+  // The rows themselves are deliberately *not* cleared any more. They belong to the
+  // day, not to the screen, and they are held per day now — so stepping back to a day
+  // just visited shows its Jira-side rows at once instead of blanking and refetching.
+  //
+  // The flags are another matter: they describe the day *on screen*, so carrying them
+  // across would render the day just left's error note against this one until the new
+  // read lands. `loaded` rather than `idle` for a cached day, because `idle` on a day
+  // whose rows are already up is the same lie in the other direction.
+  state.externalState = state.external.has(date) ? 'loaded' : 'idle';
+  state.externalError = null;
   return state.entries;
 }
 ```
@@ -1170,7 +1177,11 @@ Replace the body of `loadExternalWorklogs` (lines 157–189) with a call through
  */
 export async function loadExternalWorklogs(date = state.selectedDate) {
   if (!state.settings.baseUrl || !state.settings.tokenConfigured) {
-    state.externalEntries = [];
+    // `delete`, not `state.externalEntries = []`. Assigning would file an empty list
+    // under this day and mark it *held*, so finishing the setup wizard — which never
+    // reloads the day — would leave today's Jira rows missing for the rest of the
+    // session. Deleting reads back as [] just the same and poisons nothing.
+    state.external.delete(date);
     state.externalState = 'idle';
     return [];
   }

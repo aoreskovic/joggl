@@ -20,8 +20,8 @@ import {
   gridHeightPx,
   offsetPxOf,
   setGrid,
-  tsAtOffsetPx,
 } from './timeline-geometry.js';
+import { columnAt, placeBlock, setColumns } from './timeline-columns.js';
 import { toastWarn } from './toast.js';
 import {
   dateKey,
@@ -40,7 +40,6 @@ import {
 // sliver that is impossible to grab again.
 const MIN_DURATION_MS = QUARTER;
 const EDGE_SNAP_MS = 8 * 60_000;
-const GUTTER_PX = 40;
 
 // One tab stop for the whole grid, arrow keys between blocks. Lazy because the
 // grid exists before this module runs but renderTimeline may be called first.
@@ -88,6 +87,11 @@ export function computeColumns(entries) {
 export function renderTimeline() {
   const gridEl = document.getElementById('schedule-grid');
   if (!gridEl) return;
+
+  // One column today. The map is what a week view fills with five or seven, and it
+  // is registered before anything is drawn so a gesture arriving mid-render still
+  // resolves to a day.
+  setColumns([[state.selectedDate, gridEl]]);
 
   const entries = visibleEntries().filter((e) => e.endTs !== null);
 
@@ -141,7 +145,7 @@ export function renderTimeline() {
     const slot = columns.get('__live__') ?? { col: 0, totalCols: 1 };
     const block = document.createElement('div');
     block.className = 'sched-entry-block live';
-    placeBlock(block, live.startTs, live.endTs, slot, 20);
+    placeBlock(block, live.startTs, live.endTs, state.selectedDate, slot, 20);
     const label = document.createElement('div');
     label.className = 'sched-entry-label';
     label.textContent =
@@ -178,50 +182,13 @@ export function renderTimeline() {
   applySelection();
 }
 
-function placeBlock(el, startTs, endTs, slot, minHeightPx = 6) {
-  const durMin = Math.max(1, (endTs - startTs) / 60_000);
-  el.style.top = `${offsetPxOf(startTs, state.selectedDate)}px`;
-  el.style.minHeight = `${Math.max(minHeightPx, durMin * grid.pxPerMin)}px`;
-
-  if (slot.totalCols === 1) {
-    el.style.left = `${GUTTER_PX}px`;
-    el.style.right = '4px';
-    el.style.width = '';
-  } else {
-    const span = `(100% - ${GUTTER_PX + 4}px)`;
-    el.style.left = `calc(${GUTTER_PX}px + ${slot.col / slot.totalCols} * ${span})`;
-    el.style.width = `calc(${1 / slot.totalCols} * ${span} - 1px)`;
-    el.style.right = 'auto';
-  }
-}
-
 /**
  * The snapped timestamp a cursor position points at, or null when it falls outside
- * the grid.
- *
- * getBoundingClientRect is viewport-relative and already accounts for the panel's
- * scroll position. Adding scrollTop on top of it — as the plugin did — counted the
- * scroll twice, so once the view had auto-scrolled to now, a click at 16:00 landed
- * somewhere around 21:00. That is why this arithmetic exists exactly once.
- *
- * The bound is the full rect, horizontal included. When only `onGridClick` called
- * this, X was already constrained by event dispatch — the listener is on the grid,
- * so nothing outside it ever arrived. The issue drag calls it from document-level
- * handlers where nothing constrains X, and with only the vertical test a press on a
- * task row, a few pixels sideways, and a release still over the task list booked a
- * 30-minute entry at whatever time that row's Y happened to map to.
+ * the grid. The single-day form of `columnAt`, kept because `drag-drop.js` asks
+ * "what time" and, until there is more than one column, that is the whole question.
  */
 export function gridTimeAt(clientX, clientY) {
-  const gridEl = document.getElementById('schedule-grid');
-  if (!gridEl) return null;
-
-  const rect = gridEl.getBoundingClientRect();
-  if (clientX < rect.left || clientX > rect.right) return null;
-
-  const y = clientY - rect.top;
-  if (y < 0 || y > gridHeightPx()) return null;
-
-  return snapToQuarter(tsAtOffsetPx(y, state.selectedDate), state.selectedDate);
+  return columnAt(clientX, clientY)?.ts ?? null;
 }
 
 /**
@@ -243,7 +210,7 @@ export function showDropPlaceholder(startTs, endTs) {
     gridEl.appendChild(el);
   }
 
-  placeBlock(el, startTs, endTs, { col: 0, totalCols: 1 });
+  placeBlock(el, startTs, endTs, state.selectedDate, { col: 0, totalCols: 1 });
   el.querySelector('.sched-entry-label').textContent =
     `${tsToHHMM(startTs)} – ${tsToHHMM(endTs)}`;
 }
@@ -262,7 +229,7 @@ function buildBlock(entry, slot) {
   // Focusable for the same reason the entry rows are: the Menu key fires
   // contextmenu on whatever has focus. The tab stop is roved, not one per block.
   block.tabIndex = -1;
-  placeBlock(block, entry.startTs, entry.endTs, slot);
+  placeBlock(block, entry.startTs, entry.endTs, state.selectedDate, slot);
 
   const label = document.createElement('div');
   label.className = 'sched-entry-label';

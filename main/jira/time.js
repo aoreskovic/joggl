@@ -43,3 +43,21 @@ export function formatWorklogStarted(ts, d = new Date(ts)) {
 export function worklogSeconds(ms) {
   return Math.max(60, Math.round(ms / 1000));
 }
+
+/**
+ * The local day a timestamp falls in, as a `YYYY-MM-DD` key.
+ *
+ * Local, never UTC. `toISOString().slice(0, 10)` hands anyone east of Greenwich
+ * tomorrow's key late in the evening, which would file a 23:45 worklog under a day
+ * it was not worked on — the same mistake CLAUDE.md records for day keys generally.
+ * The range read buckets hundreds of worklogs with this, so it is tested rather than
+ * written inline.
+ *
+ * @param {number} ts epoch ms
+ * @returns {string}
+ */
+export function localDayKey(ts) {
+  if (!Number.isFinite(ts)) throw new TypeError(`localDayKey: not a timestamp: ${ts}`);
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}

@@ -292,8 +292,11 @@ export async function collectPaged(fetchPage, { pageLimit = DEFAULT_PAGE_LIMIT }
 
     all.push(...items);
 
-    const total = Number(data?.total);
-    if (Number.isFinite(total) && all.length >= total) break;
+    // `typeof` first, and not `Number(data?.total)`: `Number(null)` is 0, not NaN,
+    // so a missing total would read as "the total is zero" and break after the very
+    // first page — silently truncating exactly what this module exists to read whole.
+    const total = data?.total;
+    if (typeof total === 'number' && Number.isFinite(total) && all.length >= total) break;
   }
 
   return all;

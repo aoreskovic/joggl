@@ -340,7 +340,20 @@ on Jira.
 
 ### Confirmed bugs
 
-None open right now.
+- **After deleting a worklog from Jira, the day briefly shows no Jira-side rows at all.**
+  Not just the deleted one — every **Manual Jira entry** on that day disappears for one
+  network round trip, then comes back minus the deleted one. `deleteEntry` invalidates
+  the day's cache next to the successful `DELETE`, and the `renderAll()` that follows
+  paints before the refetch lands, so it reads an empty cache.
+
+  Left alone deliberately. Rendering after the refetch instead means the deleted
+  worklog's cached row stops being claimed by any local entry and is drawn as a genuine
+  Manual Jira entry for time that no longer exists anywhere — briefly claiming time
+  exists is worse than briefly not showing it. Moving the invalidate later reopens the
+  window between the Jira delete and the local removal, which is the data-integrity bug
+  0.16.1 closed. Fixing it properly means removing one row from the cache rather than
+  dropping the day, which is worth doing when the week view makes a whole week's rows
+  vanish instead of a day's.
 
 Fixed on 2026-07-29, in the order found:
 

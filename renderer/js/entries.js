@@ -21,6 +21,7 @@ import { renderAll } from './render.js';
 import { applySelection, clearSelection, select } from './selection.js';
 import {
   deleteWorklog,
+  invalidateExternal,
   isToday,
   persistDay,
   persistDayNow,
@@ -429,6 +430,10 @@ export async function deleteEntry(id) {
       try {
         await deleteWorklog(entry);
         toastOk(`Worklog removed from ${entry.issueKey}.`);
+        // The day's cached external list was fetched before this delete and still
+        // holds a row for the worklog now gone. Without this, the phantom Manual
+        // Jira entry survives every day change and lasts the session.
+        invalidateExternal(state.selectedDate);
       } catch (err) {
         toastErr(`Could not delete the worklog in Jira — ${err.message}`);
         return;

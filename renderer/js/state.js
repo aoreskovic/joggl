@@ -9,7 +9,7 @@ import {
   missingDays,
 } from './day-range.js';
 import { copyableEntries } from './entry-ops.js';
-import { DAY, debounce, startOfDayMs, todayKey } from './util.js';
+import { addDays, debounce, startOfDayMs, todayKey } from './util.js';
 
 const api = window.joggl;
 
@@ -149,7 +149,7 @@ export async function loadDays(from, to) {
     first,
     last,
     startOfDayMs(first),
-    startOfDayMs(last) + DAY,
+    startOfDayMs(addDays(last, 1)),
   );
 
   const buckets = bucketByDay(worklogs);
@@ -259,7 +259,7 @@ export async function loadExternalWorklogs(date = state.selectedDate) {
   state.externalError = null;
 
   try {
-    const worklogs = await api.jira.rangeWorklogs(date, date, dayStartTs, dayStartTs + DAY);
+    const worklogs = await api.jira.rangeWorklogs(date, date, dayStartTs, startOfDayMs(addDays(date, 1)));
     // A day change mid-request must not drop yesterday's answer onto today — but the
     // answer is filed under the day it was asked for, so it is kept rather than
     // discarded, and only the status flags belonging to the screen are left alone.

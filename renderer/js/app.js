@@ -24,8 +24,10 @@ import { clearSelection } from './selection.js';
 import { registerView, setActiveView, wireShell } from './shell.js';
 import {
   appVersion,
+  invalidateExternal,
   isToday,
   loadDay,
+  loadDays,
   loadExternalWorklogs,
   loadPins,
   loadSettings,
@@ -226,22 +228,35 @@ async function selectDate(date) {
 }
 
 /**
- * The read that is in flight, or null.
+ * The Jira read that is in flight, or null.
  *
  * Held rather than dropped so something can wait for it. Nothing in the app needs
  * that — every caller here is fire-and-forget — but the UI check does, and the
  * alternative is what it used to do: sleep for a second and a half and hope.
+ *
+ * One field for both the day read and the range read, because `whenIdle()` means
+ * "the Jira read in flight", and a check waiting on the wrong one of two fields is
+ * worse than no hook at all.
  */
 let externalPending = null;
 
-function refreshExternal(date = state.selectedDate) {
-  externalPending = loadExternalWorklogs(date)
+function track(promise) {
+  externalPending = promise
     .then(() => renderAll())
     .catch(() => renderAll())
     .finally(() => {
       externalPending = null;
     });
   return externalPending;
+}
+
+function refreshExternal(date = state.selectedDate) {
+  return track(loadExternalWorklogs(date));
+}
+
+/** Load a span of days and their Jira-side rows. For the week and month views. */
+function refreshRange(from, to) {
+  return track(loadDays(from, to));
 }
 
 /**
@@ -306,7 +321,9 @@ function wireDayNav() {
   $('finish-day-btn').addEventListener('click', async () => {
     await finishDay();
     // Newly created worklogs are now claimed by local entries; re-reading keeps
-    // the two views from disagreeing about what is in Jira.
+    // the two views from disagreeing about what is in Jira. The cached rows are
+    // stale by definition here — Finish Day is the one thing that changes them.
+    invalidateExternal(state.selectedDate);
     await refreshExternal();
   });
   $('refresh-tasks-btn').addEventListener('click', async () => {

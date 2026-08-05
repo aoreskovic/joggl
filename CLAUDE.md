@@ -102,7 +102,7 @@ been exercised end to end, not just written.
 | Finish Day | Confirmed against real Jira — worklog `60504` on `EHW-70` |
 | Jira-side worklogs | Time logged in the Jira web UI is read back and counted |
 | Logging | `logs/joggl.log`, credential-redacted |
-| Tests | 283 passing, `npm test`; 85 UI checks, `npm run uicheck` (or `:fast`) |
+| Tests | 306 passing, `npm test`; 85 UI checks, `npm run uicheck` (or `:fast`) |
 | Shell | Collapsible sidebar with a view registry; week and month tabs present but disabled |
 | Drag to day view | An issue dragged from the task list becomes a 30-minute pending entry |
 | Keyboard | Every list arrow-navigable, every menu and dialog reachable — see below |
@@ -154,16 +154,26 @@ a reason.
    cached the same way, per day, so stepping back to a day just visited no longer
    blanks and refetches it.
 
+9. **The shared timeline geometry holds an hour, not a timestamp.** The week-view
+   spec named it `{ rangeStartMs, pxPerMin, totalMinutes }`, which is the shape the
+   day view's singleton had. One absolute `rangeStartMs` cannot serve several
+   columns: each day's hour 7 is a different instant, and across a clock change two
+   of them are not even a constant apart. So `timeline-geometry.js` holds `startHour`
+   and every conversion — `rangeStartMs(day)`, `offsetPxOf(ts, day)`,
+   `tsAtOffsetPx(px, day)` — takes the day it is about. With one column it computes
+   exactly what the singleton did.
+
 ### Next, roughly in order
 
-1. **Week view** — phase 2 of the sidebar work. Day columns, a work-week / 7-day
-   toggle, a week stepper that names the week of the month, and dragging entries
-   between days. Needs the multi-day state and the generalised timeline column that
-   phase 1 deliberately left alone: the `view` singleton in `timeline.js` still ties
-   every drag handler to one column. The range data layer it needs — a multi-day
-   store, a single range read for a span of Jira worklogs, and the per-day cache —
-   landed in 0.16.0.
-2. **Month view** — phase 3. A calendar grid with hours logged per day, and the day
+1. **Week view** — phase 3 of the sidebar work. Day columns, a work-week / 7-day
+   toggle, a week stepper that names the ISO week, and dragging entries between days.
+   The plumbing is in: the range data layer landed in 0.16.0, and the generalised
+   timeline in 0.17.0 — `timeline-geometry.js` holds one hour range for however many
+   columns are drawn, `timeline-columns.js` answers *which day* a point is in, and
+   `timeline-drag.js` takes the day as an argument rather than assuming the selected
+   one. What is left is the view itself: the layout, the header, and a `columns` map
+   with more than one entry in it.
+2. **Month view** — phase 4. A calendar grid with hours logged per day, and the day
    view beside it showing whichever day was clicked.
 3. **Tray icon states** — the icon should show at a glance whether a timer is running.
    Right now the only signal is opening the window.
@@ -667,6 +677,18 @@ Never probe the environment. If something above appears missing, say so and stop
   empty day says so in both places. The grid's hint is `pointer-events: none`, or it would
   sit over the hours it is telling people to click. A day holding only read-only Jira rows
   is **not** empty: the hint keys off what is rendered, not off what the store holds.
+- **A write names its day; a render reads the day on screen.** `state.entries` is a
+  live view onto the selected day, so any assignment to it after an `await` files the
+  result under whichever day is selected when the promise resolves — a sync that takes
+  seconds, a modal the user is reading, a Jira `DELETE`. Every such path now captures
+  `const day = state.selectedDate` before its first `await` and goes through
+  `entriesFor(day)` / `setEntriesFor(day, …)` / `persistDayNow(day)`. The debounced
+  write has the same rule in `day-writes.js`: what is owed is decided when the edit
+  happens, not when the timer fires, so an edit made on one day and a step to the next
+  inside the 500 ms window can no longer write the wrong day's entries under the wrong
+  key. Renders are the exception and stay as they are — "the day on screen" is exactly
+  what they mean. `loadDays` flushes the queue before it reads, so a range read cannot
+  overwrite an edit that has not reached disk.
 - **A day's bounds are `addDays`, not a fixed 86,400,000 ms.** `loadDays` and
   `loadExternalWorklogs` both compute the end of a range as `startOfDayMs(addDays(day,
   1))`, never `startOfDayMs(day) + DAY`. A day is not always 24 hours — the autumn

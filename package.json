@@ -1,6 +1,6 @@
 {
   "name": "joggl",
-  "version": "0.16.2",
+  "version": "0.17.0",
   "description": "Desktop time tracker with a Toggl-like timeline that logs worklogs to Jira Cloud",
   "license": "MIT",
   "private": true,

@@ -404,7 +404,7 @@ Every table above except the persistence rows is executed by `scripts/ui-check.m
 npm run uicheck
 ```
 
-46 checks, exits non-zero on failure. It needs **no dependency and no DevTools Protocol** —
+85 checks, exits non-zero on failure. It needs **no dependency and no DevTools Protocol** —
 the main process already holds `webContents.executeJavaScript`, which is enough to
 dispatch real `MouseEvent`s, read computed styles and element boxes, and drive the app end
 to end. `main/index.js` loads it only under `--uicheck`, which also redirects `userData` to

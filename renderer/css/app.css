@@ -136,7 +136,8 @@ button {
 }
 
 /* The rail is out of flow while collapsed, so the view host reserves its width. */
-.sidebar.collapsed ~ .app-layout {
+.sidebar.collapsed ~ .app-layout,
+.sidebar.collapsed ~ .week-layout {
   margin-left: 44px;
 }
 
@@ -2049,4 +2050,184 @@ body.is-dragging-issue * {
   font-size: 11px;
   color: var(--text-faint);
   padding-top: 2px;
+}
+
+/* ── Week view ─────────────────────────────────────────────────────────────
+   One grid holds the whole thing: row 1 is the sticky column heads, row 2 the
+   gutter and the day columns. Two separate grids would drift apart the moment a
+   scrollbar appeared, and the heads have to sit exactly over their columns. */
+
+.week-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  /* Matches .app-layout, so switching views does not change how the rail eases. */
+  transition: margin-left 120ms ease;
+}
+
+.week-topbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 0;
+}
+
+.week-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+}
+
+.week-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.week-label {
+  font-weight: 600;
+  min-width: 210px;
+  text-align: center;
+}
+
+.week-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.week-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.week-seg button {
+  padding: 2px 10px;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.week-seg button.is-active {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.week-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.week-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg-sunken);
+  display: grid;
+  grid-template-columns: 44px repeat(var(--week-col-count, 5), minmax(0, 1fr));
+  align-content: start;
+}
+
+.week-corner,
+.week-colhead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border);
+  padding: 5px 8px;
+  min-width: 0;
+}
+
+.week-colhead {
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.week-colhead.is-today .week-colhead-day {
+  color: var(--accent);
+}
+
+.week-colhead.is-selected {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.week-colhead-day {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.week-colhead-total {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.week-colhead-menu {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font: inherit;
+  line-height: 1;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.week-colhead-menu:hover {
+  color: var(--text);
+}
+
+.week-gutter {
+  position: relative;
+}
+
+.week-gutter .sched-hour-label {
+  position: absolute;
+  left: 0;
+  /* Pulled up half a line so the label straddles its hour line, as it does in the
+     day view where it sits on the line's own row. */
+  transform: translateY(-2px);
+}
+
+.week-col {
+  position: relative;
+  border-left: 1px solid var(--border);
+  min-width: 0;
+}
+
+/* A Saturday or Sunday, when the tint is switched on in Settings — the day view
+   tints the whole panel, and a week can only tint the columns it applies to. */
+.week-col.is-weekend,
+.week-colhead.is-weekend {
+  background-image: linear-gradient(var(--weekend-tint), var(--weekend-tint));
+}
+
+.week-empty-hint {
+  position: absolute;
+  left: 44px;
+  right: 0;
+  top: 35%;
+  text-align: center;
+  padding: 0 24px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-faint);
+  /* Never swallow the click it is describing. */
+  pointer-events: none;
 }

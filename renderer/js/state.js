@@ -7,10 +7,12 @@ import {
   externalToEntries,
   installDayAccessors,
   missingDays,
+  withoutWorklog,
 } from './day-range.js';
+import { createDayWriter } from './day-writes.js';
 import { copyableEntries } from './entry-ops.js';
 import { renderAll } from './render.js';
-import { addDays, debounce, startOfDayMs, todayKey } from './util.js';
+import { addDays, startOfDayMs, todayKey } from './util.js';
 
 const api = window.joggl;
 
@@ -77,6 +79,16 @@ export function isToday() {
 // a write and the important moments (stop, merge, sync) force one immediately.
 
 export async function loadDay(date) {
+  // The same flush `loadDays` does, and for a much likelier reason: this runs on
+  // *every* day change. Edit a time field, click ‹ before the 500ms debounce fires,
+  // click › straight back, and without this the disk read installs the version the
+  // edit had not reached yet — and the queued write then saves that stale array back
+  // over it. The edit is gone from screen and disk, with nothing said.
+  //
+  // Reported rather than propagated: a background save that fails must not leave the
+  // day arrows doing nothing at all.
+  await flushDayWrites().catch(reportDayWriteFailure);
+
   const day = await api.days.get(date);
   state.selectedDate = date;
   state.days.set(date, day.entries);
@@ -90,19 +102,64 @@ export async function loadDay(date) {
   return state.entries;
 }
 
-export async function persistDayNow() {
-  await api.days.save(state.selectedDate, state.entries);
+/**
+ * A day log that could not be written.
+ *
+ * Reported and then let go, never rethrown at a caller who cannot act on it. Two of
+ * the three callers are reads — `loadDay` and `readDay` flush before they read — and
+ * a flush that rejected there used to stop the read: refusing to change day because
+ * a *background* save failed reads as the arrows being broken, and refusing to
+ * finish `stopTimer` drops the block that was just timed. Both are worse than the
+ * failure being recorded and the work continuing.
+ *
+ * No toast, deliberately: `toast.js` imports `logToFile` from this module, so
+ * importing it back would close a cycle. The log file is where this belongs anyway —
+ * it is the thing you ask someone to send you.
+ */
+function reportDayWriteFailure(err) {
+  console.error('Failed to save day log:', err);
+  logToFile('error', `Failed to save day log: ${err?.message ?? err}`);
 }
 
-export const persistDay = debounce(() => {
-  persistDayNow().catch((err) => console.error('Failed to save day log:', err));
-}, 500);
+/**
+ * Every day write goes through one queue, so a write decided now cannot land on
+ * whichever day happens to be selected when it runs. See day-writes.js.
+ */
+const dayWriter = createDayWriter((dayKey) => api.days.save(dayKey, entriesFor(dayKey)), {
+  onError: reportDayWriteFailure,
+});
+
+/** Write this day within half a second. Defaults to the day on screen. */
+export function persistDay(dayKey = state.selectedDate) {
+  dayWriter.queue(dayKey);
+}
+
+/** Write this day now. Defaults to the day on screen. */
+export function persistDayNow(dayKey = state.selectedDate) {
+  return dayWriter.now(dayKey);
+}
+
+/** Write everything a debounce still owes. */
+export function flushDayWrites() {
+  return dayWriter.flush();
+}
 
 export async function readDay(date) {
+  // Same reason as `loadDay`: a read that has not seen a pending write returns a day
+  // the user has already changed, and `stopTimer` merges the timed block onto it.
+  // Reported rather than propagated, and here it matters most: `stopTimer` has
+  // already cleared `state.timer` by this point, so throwing would drop the block
+  // that was just timed with nowhere for it to land.
+  await flushDayWrites().catch(reportDayWriteFailure);
   return api.days.get(date);
 }
 
 export async function writeDay(date, entries) {
+  // Filed in memory before the save, not after. `stopTimer` calls this with the day's
+  // entries plus the block it has just stopped, and if the save throws, that block
+  // must still be on screen — losing it from memory as well as from disk would look
+  // exactly like the timer having run for nothing.
+  state.days.set(date, entries);
   const saved = await api.days.save(date, entries);
   state.days.set(date, saved.entries);
   return saved;
@@ -116,18 +173,18 @@ export function entriesFor(dayKey) {
 /**
  * One day as it should be shown: local entries plus unclaimed Jira-side worklogs.
  *
- * No callers yet, and deliberately so — this and `persistDayFor` below are the
- * explicit-day forms of `visibleEntries` and `persistDayNow`, which phase 2 converts
- * the week view's call sites to when "the day on screen" stops being the only day
- * being drawn. Not dead code awaiting deletion.
+ * No callers yet, and deliberately so: it is the explicit-day form of
+ * `visibleEntries`, waiting for the week view to draw a day that is not the one on
+ * screen. `onResize`'s edge snapping in timeline-drag.js is the first line that will
+ * take it. Not dead code awaiting deletion.
  */
 export function visibleEntriesFor(dayKey) {
   return copyableEntries(state.days.get(dayKey) ?? [], state.external.get(dayKey) ?? []);
 }
 
-/** The explicit-day form of `persistDayNow`. No callers until phase 2 — see above. */
-export async function persistDayFor(dayKey) {
-  await api.days.save(dayKey, entriesFor(dayKey));
+/** Replace one day's entries, whether or not it is the day on screen. */
+export function setEntriesFor(dayKey, entries) {
+  state.days.set(dayKey, entries ?? []);
 }
 
 /**
@@ -136,6 +193,20 @@ export async function persistDayFor(dayKey) {
  */
 export function invalidateExternal(...dayKeys) {
   for (const key of dayKeys) state.external.delete(key);
+}
+
+/**
+ * Forget one Jira-side row, because the worklog behind it has just been deleted.
+ *
+ * The surgical form of `invalidateExternal`, and the reason there is one: dropping
+ * the whole day made every **Manual Jira entry** on it vanish until a refetch landed,
+ * which over a week would be a whole week's rows. Taking out the row that is
+ * genuinely gone leaves the rest of the cache true, so nothing has to be re-read —
+ * one fewer Jira round trip on a path the user is waiting on.
+ */
+export function dropExternalWorklog(dayKey, worklogId) {
+  if (!state.external.has(dayKey)) return;
+  state.external.set(dayKey, withoutWorklog(state.external.get(dayKey), worklogId));
 }
 
 /**
@@ -150,10 +221,8 @@ export function invalidateExternal(...dayKeys) {
  * enforced here:
  *
  * 1. **This overwrites `state.days` for every day in the range**, straight from
- *    disk. Safe only because the one caller that does not go through `refreshRange`
- *    — *Copy previous day* — asks for `[from-30, from-1]`, which excludes the
- *    selected day. Phase 3 draws a month including today and must guard this, or an
- *    unsaved edit on screen is replaced by what is on disk.
+ *    disk. Any debounced edit is flushed first, so what is on disk is what was on
+ *    screen — but an edit made *during* the read still loses, which no caller does.
  * 2. **Called directly, it is not covered by `whenIdle()`.** `refreshRange` wraps it
  *    in `track`, this does not, so *Copy previous day* is the one range read a UI
  *    check cannot wait on. Swapping it for `refreshRange` is not free: `track`
@@ -161,6 +230,11 @@ export function invalidateExternal(...dayKeys) {
  *    copy" instead of propagating to the caller that reports it.
  */
 export async function loadDays(from, to) {
+  // A debounced edit not yet on disk would be replaced by what is on disk. Writing
+  // it out first is cheaper than deciding which days to skip, and leaves memory and
+  // disk agreeing rather than merely not fighting.
+  await flushDayWrites();
+
   const logs = await api.days.getRange(from, to);
   for (const key of eachDay(from, to)) state.days.set(key, logs[key]?.entries ?? []);
 

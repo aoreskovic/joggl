@@ -25,8 +25,7 @@
           <button class="sidebar-item" data-view="day">
             <span class="sidebar-icon"></span><span class="sidebar-label">Day View</span>
           </button>
-          <button class="sidebar-item" data-view="week" disabled aria-disabled="true"
-                  title="Not built yet">
+          <button class="sidebar-item" data-view="week" title="Week View">
             <span class="sidebar-icon"></span><span class="sidebar-label">Week View</span>
           </button>
           <button class="sidebar-item" data-view="month" disabled aria-disabled="true"
@@ -46,7 +45,7 @@
         </button>
       </nav>
 
-      <div class="app-layout" id="view-day">
+      <div class="app-layout" id="view-day" hidden>
         <!-- ── LEFT PANEL ── -->
         <div class="left-panel">
           <div class="omnibar">
@@ -150,6 +149,42 @@
             </div>
           </div>
           <div class="schedule-grid" id="schedule-grid"></div>
+        </div>
+      </div>
+
+      <!-- ── WEEK VIEW ── The omnibar and the pin bar are moved into #week-topbar
+           on mount and put back on unmount, so there is one of each in the DOM. -->
+      <div class="week-layout" id="view-week" hidden>
+        <div class="week-topbar" id="week-topbar"></div>
+
+        <div class="week-header">
+          <div class="week-nav">
+            <button id="prev-week" class="nav-btn" title="Previous week (Page Up)">‹</button>
+            <span id="week-label" class="week-label">—</span>
+            <button id="next-week" class="nav-btn" title="Next week (Page Down)">›</button>
+          </div>
+          <div class="week-header-right">
+            <div class="sched-zoom">
+              <span class="sched-zoom-icon" id="week-zoom-icon" title="Zoom the timeline"></span>
+              <button class="sched-zoom-btn" id="week-zoom-out" title="Zoom out">−</button>
+              <span class="sched-zoom-lbl" id="week-zoom-lbl">1×</span>
+              <button class="sched-zoom-btn" id="week-zoom-in" title="Zoom in">+</button>
+            </div>
+            <div class="week-seg" role="group" aria-label="Days shown">
+              <button id="week-5" title="Monday to Friday">5</button>
+              <button id="week-7" title="Monday to Sunday">7</button>
+            </div>
+            <span id="week-total" class="total-display">Total: 0m</span>
+            <!-- Labelled from planFinishDay on every render — see syncLabel. -->
+            <button id="week-sync-btn" class="btn-primary">Sync week</button>
+          </div>
+        </div>
+
+        <div class="week-body">
+          <div class="week-scroll" id="week-scroll"></div>
+          <div class="week-empty-hint" id="week-empty-hint" hidden>
+            Nothing on this week yet — click an hour to add time, or drag an issue onto a day.
+          </div>
         </div>
       </div>
     </div>
@@ -389,6 +424,29 @@
               Rows labelled <strong>Manual Jira entry</strong> were booked in the Jira web
               interface, not here. They are shown so the day's total is honest, and they are
               read-only — change them in Jira.
+            </li>
+          </ul>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Seeing the week</div>
+          <ul class="help-list">
+            <li>
+              <strong>Week View</strong> in the sidebar shows Monday to Friday side by
+              side — <strong>7</strong> adds the weekend, and a Saturday or Sunday with
+              time on it is shown either way, because time you cannot see is time that
+              never gets synced.
+            </li>
+            <li>
+              Every column does what the day view does: click an empty hour, drag and
+              resize blocks, right-click for the menu. <strong>Drag a block sideways</strong>
+              to move it to another day.
+            </li>
+            <li>
+              <strong>Sync week</strong> sends every pending entry across the columns
+              shown, and says how many before you press it. <strong>⋯</strong> on a
+              column head copies into that day, empties it, or empties the week —
+              none of which deletes anything from Jira.
             </li>
           </ul>
         </div>

@@ -4,7 +4,7 @@
 import { applyMerge, decideMerge, sortEntries, taskKeyOf } from './merge.js';
 import { askModal } from './modal.js';
 import { renderAll } from './render.js';
-import { isToday, persistDayNow, persistTimer, readDay, state, writeDay } from './state.js';
+import { entriesFor, isToday, persistTimer, readDay, state, writeDay } from './state.js';
 import { toast, toastOk, toastWarn } from './toast.js';
 import { dateKey, esc, msToDur, msToHHMMSS, todayKey, tsToHHMM, uuid } from './util.js';
 
@@ -151,8 +151,10 @@ export async function stopTimer({ save = true } = {}) {
     // The entry belongs to the day it started on, which is not necessarily the
     // day currently on screen — the user may have paged back while it ran.
     const targetDate = dateKey(timer.startTs);
-    const onScreen = targetDate === state.selectedDate;
-    const existing = onScreen ? state.entries : (await readDay(targetDate)).entries;
+    const existing =
+      targetDate === state.selectedDate
+        ? entriesFor(targetDate)
+        : (await readDay(targetDate)).entries;
 
     // A timer written by an older build has no stored bound; fall back to the
     // entry's start, which is what applyMerge used to derive on its own.
@@ -163,12 +165,12 @@ export async function stopTimer({ save = true } = {}) {
         ? sortEntries(applyMerge(existing, entry, notAfterTs))
         : sortEntries([...existing, entry]);
 
-    if (onScreen) {
-      state.entries = merged;
-      await persistDayNow();
-    } else {
-      await writeDay(targetDate, merged);
-    }
+    // One path for both cases now that the write names its day. `writeDay` files the
+    // result under `targetDate` and keeps what the store actually wrote, which is
+    // what the off-screen branch always did; the on-screen branch used to assign
+    // `state.entries` and save "the selected day" separately, which was the same
+    // thing only for as long as nobody stepped the day between the two lines.
+    await writeDay(targetDate, merged);
     toastOk(`Logged ${msToDur(elapsed)} on ${entry.issueKey ?? entry.title}.`);
   }
 

@@ -14,6 +14,7 @@ import {
   externalToEntries,
   installDayAccessors,
   missingDays,
+  withoutWorklog,
 } from '../renderer/js/day-range.js';
 
 test('a range lists every day between the two, inclusive', () => {
@@ -112,4 +113,30 @@ test('externalEntries is the same view over its own map', () => {
   assert.deepEqual(external.get('2026-08-05').map((e) => e.id), ['jira:1']);
   s.selectedDate = '2026-08-04';
   assert.deepEqual(s.externalEntries, []);
+});
+
+// ── Dropping one Jira-side row, rather than the whole day ──────────────────
+
+test('withoutWorklog removes exactly the row for that worklog', () => {
+  const rows = externalToEntries([
+    { worklogId: '101', startTs: 1, endTs: 2, dayKey: '2026-07-28' },
+    { worklogId: '102', startTs: 3, endTs: 4, dayKey: '2026-07-28' },
+  ]);
+
+  const left = withoutWorklog(rows, '102');
+  assert.equal(left.length, 1);
+  assert.equal(left[0].worklogId, '101');
+  assert.notEqual(left, rows, 'a new array, so nothing mutates the cache in place');
+});
+
+test('withoutWorklog compares worklog ids as strings', () => {
+  const rows = externalToEntries([{ worklogId: '102', startTs: 1, endTs: 2, dayKey: '2026-07-28' }]);
+  // Jira answers with a string; a local entry carries whatever the POST came back with.
+  assert.deepEqual(withoutWorklog(rows, 102), []);
+});
+
+test('withoutWorklog leaves a day it does not hold alone', () => {
+  const rows = externalToEntries([{ worklogId: '101', startTs: 1, endTs: 2, dayKey: '2026-07-28' }]);
+  assert.equal(withoutWorklog(rows, '999').length, 1);
+  assert.deepEqual(withoutWorklog(undefined, '999'), []);
 });

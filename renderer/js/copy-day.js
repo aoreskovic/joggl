@@ -11,11 +11,11 @@
 // screen, which is what lets one range read answer the entire search below.
 
 import { findLastDayWithEntries, MAX_LOOKBACK_DAYS } from './day-search.js';
-import { copiedToDay } from './entry-ops.js';
+import { copiedToDay, planClearWeek } from './entry-ops.js';
 import { askModal } from './modal.js';
 import { renderAll } from './render.js';
-import { entriesFor, loadDays, persistDayNow, state } from './state.js';
-import { toast, toastOk } from './toast.js';
+import { entriesFor, loadDays, persistDayNow, setEntriesFor, state } from './state.js';
+import { toast, toastErr, toastOk } from './toast.js';
 import { addDays, esc, formatDateLabel, msToDur } from './util.js';
 
 /**
@@ -39,10 +39,13 @@ async function prefetchedReaders(from) {
 
 let busy = false;
 
-export async function copyPreviousDay() {
+/**
+ * @param {string} [target] the day to fill. Defaults to the day on screen; the week
+ *   view passes the column's own day, which is usually not the same thing.
+ */
+export async function copyPreviousDay(target = state.selectedDate) {
   if (busy) return;
   const button = document.getElementById('copy-day-btn');
-  const target = state.selectedDate;
   busy = true;
 
   if (button) {
@@ -67,8 +70,8 @@ export async function copyPreviousDay() {
 
     if ((await confirmCopy(found, copies, target)) !== 'copy') return;
 
-    state.entries = [...state.entries, ...copies];
-    await persistDayNow();
+    setEntriesFor(target, [...entriesFor(target), ...copies]);
+    await persistDayNow(target);
     renderAll();
     toastOk(`${plural(copies.length)} copied from ${formatDateLabel(found.dayKey)}.`);
   } finally {
@@ -95,11 +98,12 @@ function confirmCopy(found, copies, target) {
     ' They arrive unsynced, so nothing reaches Jira until you press Sync.';
   body.appendChild(lede);
 
-  if (state.entries.length > 0) {
+  const already = entriesFor(target);
+  if (already.length > 0) {
     const warn = document.createElement('p');
     warn.className = 'panel-lede';
     warn.innerHTML =
-      `<strong>${esc(formatDateLabel(target))} already has ${plural(state.entries.length)}.</strong> ` +
+      `<strong>${esc(formatDateLabel(target))} already has ${plural(already.length)}.</strong> ` +
       'The copies are added to them, not put in their place.';
     body.appendChild(warn);
   }
@@ -115,17 +119,24 @@ function confirmCopy(found, copies, target) {
   });
 }
 
-export async function clearDay() {
-  const synced = state.entries.filter((e) => e.worklogId);
-  const rest = state.entries.filter((e) => !e.worklogId);
+/**
+ * @param {string} [day] the day to empty. Local only — this never issues a DELETE to
+ *   Jira, and cannot touch a Jira-side row because those are not `state.entries`.
+ */
+export async function clearDay(day = state.selectedDate) {
+  // Fixed before the modal opens: it stays up for as long as the user reads it, and
+  // clearing must empty the day the button was pressed on.
+  const entries = entriesFor(day);
+  const synced = entries.filter((e) => e.worklogId);
+  const rest = entries.filter((e) => !e.worklogId);
 
-  if (state.entries.length === 0) {
+  if (entries.length === 0) {
     toast('Nothing to clear on this day.');
     return;
   }
 
   const answer = await askModal({
-    title: `Clear ${formatDateLabel(state.selectedDate)}?`,
+    title: `Clear ${formatDateLabel(day)}?`,
     body: clearBody(synced, rest),
     buttons: [
       { label: 'Cancel', value: 'cancel' },
@@ -138,13 +149,68 @@ export async function clearDay() {
   });
   if (answer === 'cancel') return;
 
-  state.entries = answer === 'unsynced' ? synced : [];
-  await persistDayNow();
+  setEntriesFor(day, answer === 'unsynced' ? synced : []);
+  await persistDayNow(day);
   renderAll();
   toastOk(answer === 'unsynced' ? `${plural(rest.length)} cleared.` : 'Day cleared.');
 }
 
-function clearBody(synced, rest) {
+/**
+ * Empty a whole week.
+ *
+ * The same promise `clearDay` makes, seven times over: local only, nothing is deleted
+ * from Jira, and rows logged in the Jira web UI are not Joggl's to remove. Asked once
+ * rather than per day — seven modals is not a confirmation, it is an obstacle course
+ * — and the count in the question is what makes it answerable.
+ */
+export async function clearWeek(days) {
+  const plan = planClearWeek(days, entriesFor);
+
+  if (plan.all.length === 0) {
+    toast('Nothing to clear this week.');
+    return;
+  }
+
+  const body = clearBody(plan.synced, plan.unsynced, 'This week');
+  const days_ = document.createElement('p');
+  days_.className = 'panel-lede';
+  days_.textContent = `Across ${plan.days.length} day${plan.days.length === 1 ? '' : 's'}.`;
+  body.appendChild(days_);
+
+  const answer = await askModal({
+    title: 'Clear this week?',
+    body,
+    buttons: [
+      { label: 'Cancel', value: 'cancel' },
+      ...(plan.offerUnsyncedOnly ? [{ label: 'Clear unsynced only', value: 'unsynced' }] : []),
+      { label: 'Clear all', value: 'all', primary: true },
+    ],
+    dismissValue: 'cancel',
+  });
+  if (answer === 'cancel') return;
+
+  // Every day's result is computed and written to memory before any write to disk
+  // is attempted, so whatever happens next the screen — once `renderAll` runs in the
+  // `finally` below — shows every column cleared. A `persistDayNow` that throws
+  // partway through only risks that one day's clear not surviving a restart; it does
+  // not leave any column looking untouched on screen right now.
+  for (const day of plan.days) {
+    setEntriesFor(day, plan.resultFor(day, answer));
+  }
+
+  try {
+    for (const day of plan.days) {
+      await persistDayNow(day);
+    }
+    toastOk(answer === 'unsynced' ? `${plural(plan.unsynced.length)} cleared.` : 'Week cleared.');
+  } catch (err) {
+    toastErr(`Could not save clearing the week — ${err.message}`);
+  } finally {
+    renderAll();
+  }
+}
+
+function clearBody(synced, rest, subject = 'This day') {
   const body = document.createElement('div');
   const lines = [];
 
@@ -153,7 +219,7 @@ function clearBody(synced, rest) {
 
   const lede = document.createElement('p');
   lede.className = 'panel-lede';
-  lede.textContent = `This day holds ${lines.join(' and ')}.`;
+  lede.textContent = `${subject} holds ${lines.join(' and ')}.`;
   body.appendChild(lede);
 
   // Both of these have caught people out in the single-entry version, so they are

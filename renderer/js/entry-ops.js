@@ -1,7 +1,7 @@
 // Pure transforms on entries. No DOM, no IPC — the rules here decide what Jira
 // ends up holding, so they are kept testable.
 
-import { startOfDayMs, uuid } from './util.js';
+import { addDays, dateKey, startOfDayMs, uuid } from './util.js';
 
 /**
  * A day as it should be read: local entries, plus any Jira-side worklog that no
@@ -138,6 +138,23 @@ export function retargetEntry(entry, issue) {
   };
 }
 
+/**
+ * The entry, marked as needing to reach Jira again.
+ *
+ * The rule `markDirty` has always applied, pulled out of `entries.js` so a move that
+ * changes day can be tested without a DOM. The worklogId is deliberately kept: an
+ * entry edited after syncing is *rewritten* with `PUT .../worklog/{id}`, never posted
+ * a second time. A Jira-side row is returned untouched — it is not Joggl's record.
+ */
+export function dirtiedEntry(entry) {
+  if (entry?.external) return entry;
+  if (!entry?.issueKey) return { ...entry, status: 'local', errorMsg: null };
+  if (entry.status === 'synced' || entry.status === 'error') {
+    return { ...entry, status: 'pending', errorMsg: null };
+  }
+  return entry;
+}
+
 /** A block drawn by hand on the day view is half an hour wherever it lands. */
 export const DEFAULT_DROP_MS = 30 * 60_000;
 
@@ -145,9 +162,18 @@ export const DEFAULT_DROP_MS = 30 * 60_000;
  * Keep a dropped block inside the day it is filed under, without changing how
  * long it is. Shared by every drop so creating and moving cannot disagree about
  * what happens at the edges of the day — see dropEntryFor for the reasoning.
+ *
+ * The day's end is derived, never assumed to be a fixed 86,400,000ms away: the
+ * autumn clock change makes one day 25 hours long, and a block legitimately
+ * dropped in that extra hour was, before this, silently pulled back to an hour
+ * earlier than the live drag preview had shown — the exact class of bug
+ * `timeline-drag.js`'s own end-of-day clamp already avoids with `addDays`.
+ * `dayStartTs` always arrives as `startOfDayMs(someKey)`, so recovering the key
+ * with `dateKey` and stepping it forward a day is exact, not an approximation.
  */
 export function clampDropStart(startTs, dayStartTs, durationMs) {
-  const latestStart = dayStartTs + 86_400_000 - durationMs;
+  const dayEndTs = startOfDayMs(addDays(dateKey(dayStartTs), 1));
+  const latestStart = dayEndTs - durationMs;
   return Math.min(Math.max(startTs, dayStartTs), latestStart);
 }
 
@@ -220,6 +246,44 @@ export function flaggedOverlaps(entries) {
     if (byId.get(id)?.external === true) ids.delete(id);
   }
   return ids;
+}
+
+/**
+ * The arithmetic behind Clear week: which days it touches, what is on them across
+ * all of them, and what each answer to the modal would leave on a given day.
+ *
+ * Pulled out of `copy-day.js` so the dedup-and-sort, the cross-day union, and the
+ * synced/unsynced split can be tested without a DOM — `clearWeek` itself only reads
+ * a modal answer and writes the days this decides on.
+ *
+ * @param {string[]} days the columns drawn — possibly out of order, possibly with a
+ *   duplicate if a caller ever passes the same day twice
+ * @param {(day: string) => object[]} entriesFor a per-day entry reader, e.g.
+ *   `entriesFor` from state.js
+ */
+export function planClearWeek(days, entriesFor) {
+  const targets = [...new Set(days)].sort();
+  // Read once per day and reused below, so "unsynced only" filters the same
+  // snapshot the totals were computed from rather than re-reading after `all` was
+  // built from it.
+  const perDay = new Map(targets.map((day) => [day, entriesFor(day)]));
+  const all = targets.flatMap((day) => perDay.get(day));
+  const synced = all.filter((e) => e.worklogId);
+
+  return {
+    days: targets,
+    all,
+    synced,
+    unsynced: all.filter((e) => !e.worklogId),
+    // Offered only when it would actually leave something different behind: not
+    // when every entry in the week is already synced (there is nothing unsynced to
+    // spare), and not when none is (it would be the same as "Clear all").
+    offerUnsyncedOnly: synced.length > 0 && synced.length < all.length,
+    /** What `day` is left holding if `answer` ('all' | 'unsynced') is applied. */
+    resultFor(day, answer) {
+      return answer === 'unsynced' ? (perDay.get(day) ?? []).filter((e) => e.worklogId) : [];
+    },
+  };
 }
 
 /** Ids of entries whose time ranges overlap. Allowed, but usually a mistake. */

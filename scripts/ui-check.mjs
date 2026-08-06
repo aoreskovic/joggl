@@ -287,6 +287,15 @@ window.H = {
     await H.settle();
     await window.__jogglTest.reloadDay();
   },
+  /** Empty some days and repaint, for the week checks that write to more than one. */
+  async clearDays(keys) {
+    for (const key of keys) await window.joggl.days.save(key, []);
+    await window.__jogglTest.reloadDay();
+  },
+  /** The day key a week column stands for. */
+  colDay(index) {
+    return H.all('.week-colhead')[index]?.dataset.day ?? null;
+  },
   /** The day header, read as a key. The label is "Thu, 30.07.2026". */
   onToday() {
     const m = H.q('#current-date-label').textContent.match(/(\\d{2})\\.(\\d{2})\\.(\\d{4})/);
@@ -407,18 +416,28 @@ async function sidebar() {
   );
 
   await check(
-    'sidebar: week and month disabled, "Not built yet"',
+    'sidebar: month still disabled, "Not built yet"',
     `return JSON.stringify(H.all('.sidebar-item[data-view]')
-       .filter(b => b.dataset.view !== 'day')
+       .filter(b => b.dataset.view === 'month')
        .map(b => ({ v: b.dataset.view, disabled: b.disabled, title: b.title })))`,
     (v) => JSON.parse(v).every((b) => b.disabled && b.title === 'Not built yet'),
   );
 
   await check(
-    'sidebar: clicking Week does nothing',
-    `H.q('.sidebar-item[data-view="week"]').click(); await H.sleep(200);
-     return H.q('.sidebar-item.is-active')?.dataset.view`,
-    eq('day'),
+    'sidebar: Week mounts and Day comes back',
+    `H.q('.sidebar-item[data-view="week"]').click();
+     await H.until(() => !H.q('#view-week').hidden, 8000, 'the week view');
+     const week = { active: H.q('.sidebar-item.is-active')?.dataset.view,
+                    dayHidden: H.q('#view-day').hidden,
+                    omnibarInWeek: !!H.q('#week-topbar #task-input') };
+     H.q('.sidebar-item[data-view="day"]').click();
+     await H.until(() => !H.q('#view-day').hidden, 8000, 'the day view');
+     return JSON.stringify({ ...week, backToDay: !!H.q('.left-panel > .omnibar #task-input'),
+                             weekHidden: H.q('#view-week').hidden })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.active === 'week' && d.dayHidden && d.omnibarInWeek && d.backToDay && d.weekHidden;
+    },
   );
 
   await check(
@@ -887,6 +906,326 @@ async function timeSafety() {
     (v) => {
       const d = JSON.parse(v);
       return d.chips === 1 && JSON.stringify(d.ranges) === JSON.stringify(['16:00-16:30']);
+    },
+  );
+}
+
+async function weekView() {
+  // Every check here leaves the app back on the day view, so nothing after this
+  // section has to know the week view exists.
+  const inWeek = (js) => `
+    H.q('.sidebar-item[data-view="week"]').click();
+    await H.until(() => !H.q('#view-week').hidden, 8000, 'the week view');
+    await H.settle();
+    try { ${js} } finally {
+      H.q('.sidebar-item[data-view="day"]').click();
+      await H.until(() => !H.q('#view-day').hidden, 8000, 'the day view');
+    }`;
+
+  await check(
+    'week: five columns by default, Monday first',
+    inWeek(`return JSON.stringify(H.all('.week-colhead').map(h => h.querySelector('.week-colhead-day').textContent));`),
+    (v) => {
+      const heads = JSON.parse(v);
+      // Exactly five: `>= 5` would still pass if the toggle were stuck on seven, or
+      // defaulted there, since the fifth head is 'Fri' either way.
+      return heads.length === 5 && heads[0].startsWith('Mon') && heads[4].startsWith('Fri');
+    },
+  );
+
+  await check(
+    'week: the 5|7 toggle shows the weekend, and sticks',
+    inWeek(`H.q('#week-7').click();
+            await H.until(() => H.all('.week-colhead').length === 7, 4000, 'seven columns');
+            const seven = H.all('.week-colhead').length;
+            const active = H.q('#week-7').classList.contains('is-active');
+            const stored = (await window.joggl.ui.get()).weekSevenDay;
+            H.q('#week-5').click();
+            await H.until(() => H.all('.week-colhead').length <= 6, 4000, 'back to five');
+            return JSON.stringify({ seven, active, stored, back: H.all('.week-colhead').length });`),
+    (v) => {
+      const d = JSON.parse(v);
+      // Exactly five once back: `<= 6` only catches a toggle stuck fully open, not
+      // one stuck one column short of closing.
+      return d.seven === 7 && d.active && d.stored === true && d.back === 5;
+    },
+  );
+
+  await check(
+    'week: the stepper names the ISO week and stops at this one',
+    inWeek(`const here = H.q('#week-label').textContent;
+            const stuck = H.q('#next-week').disabled;
+            H.q('#prev-week').click();
+            await H.until(() => H.q('#week-label').textContent !== here, 8000, 'the week to step');
+            await H.settle();
+            const back = H.q('#week-label').textContent;
+            const open = !H.q('#next-week').disabled;
+            H.q('#next-week').click();
+            await H.until(() => H.q('#week-label').textContent === here, 8000, 'the week to come back');
+            await H.settle();
+            return JSON.stringify({ here, back, stuck, open });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.stuck && d.open && d.back !== d.here && /· week \d+/.test(d.here);
+    },
+  );
+
+  await check(
+    'week: every column shares one hour range',
+    inWeek(`const tops = H.all('.week-col').map(c => Math.round(c.getBoundingClientRect().top));
+            const heights = H.all('.week-col').map(c => Math.round(c.getBoundingClientRect().height));
+            return JSON.stringify({ tops: [...new Set(tops)].length, heights: [...new Set(heights)].length });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.tops === 1 && d.heights === 1;
+    },
+  );
+
+  await check(
+    'week: today is marked, and the anchor column is the selected one',
+    inWeek(`return JSON.stringify({
+              today: H.all('.week-colhead.is-today').length,
+              selected: H.all('.week-colhead.is-selected').length,
+            });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.today === 1 && d.selected === 1;
+    },
+  );
+
+  await check(
+    'week: a pin dropped on a column lands on that column’s day',
+    inWeek(`await H.clearPins();
+            H.q('#add-pin-btn').click(); await H.sleep(200);
+            H.q('#pin-results .task-dd-item button')?.click(); await H.sleep(250);
+            H.q('#close-pin').click(); await H.sleep(150);
+            const chip = H.q('.pin-chip');
+            const col = H.all('.week-col')[1], day = H.colDay(1);
+            const box = col.getBoundingClientRect();
+            const y = Math.round(box.top + 120);
+            H.drag(chip, Math.round(box.left + box.width / 2), y);
+            await H.sleep(400);
+            const made = (await window.joggl.days.get(day)).entries.length;
+            const elsewhere = (await window.joggl.days.get(H.colDay(0))).entries.length;
+            await H.clearDays([day, H.colDay(0)]);
+            await H.clearPins();
+            return JSON.stringify({ made, elsewhere });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.made === 1 && d.elsewhere === 0;
+    },
+  );
+
+  await check(
+    'week: clicking an empty hour opens the popup for that column’s day',
+    inWeek(`const col = H.all('.week-col')[2], day = H.colDay(2);
+            const box = col.getBoundingClientRect();
+            H.mouse(col, 'click', Math.round(box.left + box.width / 2), Math.round(box.top + 160));
+            await H.until(() => !!H.q('.sched-quick-entry'), 4000, 'the quick-entry popup');
+            const input = H.q('.sched-quick-entry input');
+            input.value = 'week popup entry';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            await H.sleep(250);
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+            await H.until(() => !H.q('.sched-quick-entry'), 4000, 'the popup to close');
+            await H.sleep(200);
+            const made = (await window.joggl.days.get(day)).entries.map(e => e.title);
+            await H.clearDays([day]);
+            return JSON.stringify({ made });`),
+    (v) => JSON.parse(v).made.length === 1,
+  );
+
+  await check(
+    'week: a block selects, and its menu opens',
+    inWeek(`const day = H.colDay(1);
+            await window.joggl.days.save(day, [{
+              id: 'wk-sel-1', issueKey: 'GEN-1', issueId: null, title: 'Selectable',
+              startTs: new Date(day + 'T10:00:00').getTime(),
+              endTs: new Date(day + 'T11:00:00').getTime(),
+              status: 'pending', worklogId: null, comment: null, errorMsg: null,
+            }]);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('.week-col [data-id="wk-sel-1"]'), 4000, 'the block');
+            const block = H.q('.week-col [data-id="wk-sel-1"]');
+            H.click(block);
+            const selected = block.classList.contains('is-selected');
+            block.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 200 }));
+            await H.until(() => !H.q('#ctx-menu').classList.contains('hidden'), 4000, 'the menu');
+            const items = H.all('#ctx-menu .ctx-item').length;
+            H.q('#ctx-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            await H.clearDays([day]);
+            return JSON.stringify({ selected, items });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.selected && d.items === 6;
+    },
+  );
+
+  await check(
+    'week: a block dragged to another column changes day, and only once',
+    inWeek(`const from = H.colDay(0), to = H.colDay(2);
+            await window.joggl.days.save(from, [{
+              id: 'wk-move-1', issueKey: 'GEN-1', issueId: null, title: 'Travelling',
+              startTs: new Date(from + 'T10:00:00').getTime(),
+              endTs: new Date(from + 'T11:00:00').getTime(),
+              status: 'synced', worklogId: '99001', comment: null, errorMsg: null,
+            }]);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('.week-col [data-id="wk-move-1"]'), 4000, 'the block');
+            const target = H.all('.week-col')[2].getBoundingClientRect();
+            H.drag(H.q('.week-col [data-id="wk-move-1"]'),
+                   Math.round(target.left + target.width / 2),
+                   Math.round(target.top + 200));
+            await H.sleep(500);
+            const left = (await window.joggl.days.get(from)).entries.length;
+            const landed = (await window.joggl.days.get(to)).entries;
+            await H.clearDays([from, to]);
+            return JSON.stringify({
+              left,
+              landed: landed.length,
+              worklogId: landed[0]?.worklogId ?? null,
+              status: landed[0]?.status ?? null,
+            });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.left === 0 && d.landed === 1 && d.worklogId === '99001' && d.status === 'pending';
+    },
+  );
+
+  await check(
+    'week: Sync counts the whole week, and says so',
+    inWeek(`const a = H.colDay(0), b = H.colDay(2);
+            const block = (id, day, from, to) => ({
+              id, issueKey: 'GEN-1', issueId: null, title: 'Work',
+              startTs: new Date(day + 'T' + from).getTime(),
+              endTs: new Date(day + 'T' + to).getTime(),
+              status: 'pending', worklogId: null, comment: null, errorMsg: null,
+            });
+            await window.joggl.days.save(a, [block('wk-s-1', a, '09:00:00', '10:00:00')]);
+            await window.joggl.days.save(b, [block('wk-s-2', b, '09:00:00', '10:30:00')]);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => H.q('#week-sync-btn').textContent.includes('entries'), 4000, 'the label');
+            const label = H.q('#week-sync-btn').textContent;
+            const disabled = H.q('#week-sync-btn').disabled;
+            await H.clearDays([a, b]);
+            await H.until(() => H.q('#week-sync-btn').disabled, 4000, 'the button to go quiet');
+            return JSON.stringify({ label, disabled, empty: H.q('#week-sync-btn').textContent });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.label === 'Sync week · 2 entries, 2h 30m' && d.disabled === false &&
+        d.empty === 'Nothing to sync';
+    },
+  );
+
+  await check(
+    'week: an empty week says what to do, and stops saying it once there is time',
+    inWeek(`const day = H.colDay(1);
+            await H.clearDays(H.all('.week-colhead').map(h => h.dataset.day));
+            const hintShown = !H.q('#week-empty-hint').hidden;
+            await window.joggl.days.save(day, [{
+              id: 'wk-hint-1', issueKey: 'GEN-1', issueId: null, title: 'Something',
+              startTs: new Date(day + 'T09:00:00').getTime(),
+              endTs: new Date(day + 'T10:00:00').getTime(),
+              status: 'pending', worklogId: null, comment: null, errorMsg: null,
+            }]);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => H.q('#week-empty-hint').hidden, 4000, 'the hint to go');
+            await H.clearDays([day]);
+            return JSON.stringify({ hintShown, gone: H.q('#week-empty-hint').hidden });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.gone === true;
+    },
+  );
+
+  await check(
+    'week: the column menu clears that day and leaves the rest',
+    inWeek(`const a = H.colDay(0), b = H.colDay(1);
+            const block = (id, day) => ({
+              id, issueKey: 'GEN-1', issueId: null, title: 'Work',
+              startTs: new Date(day + 'T09:00:00').getTime(),
+              endTs: new Date(day + 'T10:00:00').getTime(),
+              status: 'pending', worklogId: null, comment: null, errorMsg: null,
+            });
+            await window.joggl.days.save(a, [block('wk-c-1', a)]);
+            await window.joggl.days.save(b, [block('wk-c-2', b)]);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('[data-id="wk-c-1"]'), 4000, 'the seeded blocks');
+
+            H.all('.week-colhead')[0].querySelector('.week-colhead-menu').click();
+            await H.until(() => !H.q('#ctx-menu').classList.contains('hidden'), 4000, 'the menu');
+            // Strips the leading icon glyph, same as every other check reading a
+            // .ctx-item's text — the icon is a separate span, not part of the label.
+            const labels = H.all('#ctx-menu .ctx-item').map(i => i.textContent.replace(/^\\W+/, ''));
+            H.all('#ctx-menu .ctx-item')[1].click();
+            await H.until(() => !H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the confirmation');
+            H.all('#modal-buttons button').find(b => b.textContent === 'Clear all').click();
+            await H.until(() => H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the modal to close');
+            await H.sleep(250);
+
+            const left = (await window.joggl.days.get(a)).entries.length;
+            const kept = (await window.joggl.days.get(b)).entries.length;
+            await H.clearDays([a, b]);
+            return JSON.stringify({ labels, left, kept });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.left === 0 && d.kept === 1 &&
+        JSON.stringify(d.labels) === JSON.stringify(['Copy previous day', 'Clear day', 'Clear week']);
+    },
+  );
+
+  await check(
+    'week: Clear week empties every column, wording says "week" not "day", and a Jira-side row survives it',
+    inWeek(`const days = H.all('.week-colhead').map(h => h.dataset.day);
+            const block = (id, day) => ({
+              id, issueKey: 'GEN-1', issueId: null, title: 'Work',
+              startTs: new Date(day + 'T09:00:00').getTime(),
+              endTs: new Date(day + 'T10:00:00').getTime(),
+              status: 'pending', worklogId: null, comment: null, errorMsg: null,
+            });
+            // One local entry on every drawn column, today included — the fake Jira
+            // client also books two worklogs on today, which is the row this check
+            // needs to still be on screen afterwards.
+            for (const [i, day] of days.entries()) {
+              await window.joggl.days.save(day, [block('wk-cw-' + i, day)]);
+            }
+            await window.__jogglTest.reloadDay();
+            await H.until(
+              () => H.all('#week-scroll .sched-entry-block:not(.live)').length >= days.length,
+              4000, 'the seeded blocks',
+            );
+            // Scoped to #week-scroll: the day view's own grid keeps its last render
+            // in the DOM, only hidden, while this view is up, and would otherwise be
+            // counted alongside it.
+            const externalBefore = H.all('#week-scroll .sched-entry-block.external').length;
+            if (externalBefore === 0) {
+              // No Jira-side row to prove survives — live mode against a site with
+              // nothing booked today. Nothing to assert; leave the days as found.
+              await H.clearDays(days);
+              return JSON.stringify({ skip: true });
+            }
+
+            H.all('.week-colhead')[0].querySelector('.week-colhead-menu').click();
+            await H.until(() => !H.q('#ctx-menu').classList.contains('hidden'), 4000, 'the menu');
+            H.all('#ctx-menu .ctx-item')[2].click();
+            await H.until(() => !H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the confirmation');
+            const bodyText = H.q('#modal-body').textContent;
+            H.all('#modal-buttons button').find(b => b.textContent === 'Clear all').click();
+            await H.until(() => H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the modal to close');
+            await H.sleep(250);
+
+            const left = [];
+            for (const day of days) left.push((await window.joggl.days.get(day)).entries.length);
+            const externalAfter = H.all('#week-scroll .sched-entry-block.external').length;
+            await H.clearDays(days);
+            return JSON.stringify({ left, bodyText, externalBefore, externalAfter, dayCount: days.length });`),
+    (v) => {
+      const d = JSON.parse(v);
+      if (d.skip) return 'skipped';
+      return d.left.every((n) => n === 0) &&
+        d.bodyText.includes('This week holds') && !d.bodyText.includes('This day holds') &&
+        d.bodyText.includes(`Across ${d.dayCount} day`) &&
+        d.externalBefore > 0 && d.externalAfter === d.externalBefore;
     },
   );
 }
@@ -1736,11 +2075,28 @@ async function help() {
      return JSON.stringify({ groups, rows, keys, text })`,
     (v) => {
       const d = JSON.parse(v);
-      // Every binding the app actually has must appear, or the help is a lie.
+      // Every binding the app actually has must appear, or the help is a lie. Exact
+      // counts, not a floor: a floor still passes if an entire group is deleted, as
+      // long as what's left clears the bar — see SHORTCUTS in help.js for the 7
+      // groups / 24 rows this counts.
       const wanted = ['Ctrl + L', 'Ctrl + Enter', 'F1', 'T', '[ or ]', 'Page Up / Page Down'];
-      return d.groups.length >= 5 && d.rows >= 18 &&
+      return d.groups.length === 7 && d.rows === 24 &&
         wanted.every((k) => d.keys.includes(k)) &&
         /Manual Jira entry/.test(d.text) && /Work description/.test(d.text);
+    },
+  );
+
+  await check(
+    'help: the week view has its own bindings',
+    `H.q('#help-btn').click(); await H.sleep(200);
+     const groups = H.all('#help-shortcuts .help-keys-group th').map(t => t.textContent);
+     const keys = H.all('#help-shortcuts kbd').map(k => k.textContent);
+     H.q('#close-help').click(); await H.sleep(150);
+     return JSON.stringify({ hasGroup: groups.includes('In the week view'),
+                             hasToggle: keys.includes('5 | 7') })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.hasGroup && d.hasToggle;
     },
   );
 }
@@ -2530,6 +2886,7 @@ export async function runChecks(mainWindow, app) {
     await waitForApp();
     await run(HELPERS);
     await sidebar();
+    await weekView();
     await quickEntry();
     await dayPanel();
     await dragging();

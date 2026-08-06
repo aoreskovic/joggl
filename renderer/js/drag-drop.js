@@ -1,16 +1,18 @@
-// Dragging onto the day view.
+// Dragging onto a day column — the day view's one, or whichever of the week's several
+// the cursor is over.
 //
-// Three sources, one gesture: an issue row from the task list, a pinned issue, or
-// an entry already logged today. The first two create a half-hour block; the
-// third moves the block it already has, keeping its length. What is being
-// dragged is settled once, at mousedown, and the rest of the gesture only cares
-// about the payload.
+// Four sources, one gesture: an issue row from the task list, a pinned issue, a
+// result from the omnibar's dropdown, or an entry already logged today. The first
+// three create a half-hour block; the last moves the block it already has, keeping
+// its length. What is being dragged is settled once, at mousedown, and the rest of
+// the gesture only cares about the payload — and, for an entry, the day it came from.
 //
 // Mouse events rather than HTML5 drag-and-drop: the day view's own move and resize
 // already work this way, the ghost is then ours to draw and position, and a small
 // movement threshold is what lets a single click on a task keep doing what it always
 // did, which is start a timer.
 
+import { commitCrossDayMove } from './cross-day-commit.js';
 import {
   clampDropStart,
   DEFAULT_DROP_MS,
@@ -21,8 +23,9 @@ import {
 import { markDirty } from './entries.js';
 import { renderAll } from './render.js';
 import { setDragging } from './shell.js';
-import { persistDayNow, state } from './state.js';
-import { gridTimeAt, hideDropPlaceholder, showDropPlaceholder } from './timeline.js';
+import { entriesFor, persistDayNow, setEntriesFor, state } from './state.js';
+import { hideDropPlaceholder, showDropPlaceholder } from './timeline.js';
+import { columnAt } from './timeline-columns.js';
 import { esc, startOfDayMs, uuid } from './util.js';
 
 /**
@@ -41,11 +44,11 @@ const SWALLOW_MS = 150;
 /** mousedown seen on a draggable row, threshold not yet crossed. */
 let pending = null;
 /**
- * A live drag: { payload, ghost, startTs, clientX, clientY, scrollFrame }.
+ * A live drag: { payload, ghost, at, clientX, clientY, scrollFrame }.
  *
- * Both coordinates are stored because autoScroll re-resolves the drop time from
- * them when the panel scrolls under a cursor that has not moved, and gridTimeAt
- * bounds the drop on the grid's full rect, X included.
+ * `at` is `columnAt`'s answer — `{ dateKey, ts }` or null — so the drop knows which
+ * day it landed on and not merely what time. Both coordinates are stored because
+ * autoScroll re-resolves it when the panel scrolls under a cursor that has not moved.
  */
 let drag = null;
 let swallowUntil = 0;
@@ -97,16 +100,33 @@ function payloadFromEntryList(target) {
   return {
     kind: 'entry',
     entryId: entry.id,
+    // The day this row belongs to, fixed at mousedown. The drop may land days away.
+    dayKey: state.selectedDate,
     label: entry.title,
     key: entry.issueKey,
     durationMs: entry.endTs - entry.startTs,
   };
 }
 
+/**
+ * A result row in the omnibar's dropdown.
+ *
+ * The row's own mousedown picks the issue and hides the list, which is what a click
+ * there has always meant; the drag continues regardless, because `begin` captured
+ * the payload before the list went away and the ghost is ours.
+ */
+function payloadFromDropdown(target) {
+  const row = target.closest('.task-dd-item');
+  if (!row?.dataset.issue) return null;
+  const issue = JSON.parse(row.dataset.issue);
+  return { kind: 'issue', issue, label: issue.title, key: issue.issueKey, durationMs: DEFAULT_DROP_MS };
+}
+
 const SOURCES = [
   ['task-list', payloadFromTaskList],
   ['pin-chips', payloadFromPins],
   ['entry-list', payloadFromEntryList],
+  ['task-dropdown', payloadFromDropdown],
 ];
 
 export function wireDayViewDrag() {
@@ -197,25 +217,39 @@ function begin(payload) {
   document.body.appendChild(ghost);
   document.body.classList.add('is-dragging-issue');
 
-  drag = { payload, ghost, startTs: null, clientX: 0, clientY: 0, scrollFrame: 0 };
+  drag = { payload, ghost, at: null, clientX: 0, clientY: 0, scrollFrame: 0 };
   // A peek opening under the cursor would slide over the grid and eat the drop.
   setDragging(true);
   drag.scrollFrame = requestAnimationFrame(autoScroll);
 }
 
 function updatePreview(clientX, clientY) {
-  const startTs = gridTimeAt(clientX, clientY);
-  drag.startTs = startTs;
+  const at = columnAt(clientX, clientY);
+  drag.at = at;
 
-  if (startTs === null) {
+  if (at === null) {
     hideDropPlaceholder();
     return;
   }
 
   // Clamped through the same helper the drop uses, so the preview is exactly what
-  // committing would produce rather than a second guess at the same rule.
-  const start = clampDropStart(startTs, startOfDayMs(state.selectedDate), drag.payload.durationMs);
-  showDropPlaceholder(start, start + drag.payload.durationMs);
+  // committing would produce rather than a second guess at the same rule. Against
+  // the target column's own midnight, never the selected day's.
+  const start = clampDropStart(at.ts, startOfDayMs(at.dateKey), drag.payload.durationMs);
+  showDropPlaceholder(start, start + drag.payload.durationMs, at.dateKey);
+}
+
+/**
+ * The scroll container the drag is over — the day view's panel, or the week's grid.
+ *
+ * Asked by which view is mounted rather than by hit-testing: at the moment the
+ * cursor is over the task list, no column is under it at all, and the whole point of
+ * the auto-scroll band is to work from outside the panel.
+ */
+function scrollHost() {
+  const week = document.getElementById('view-week');
+  if (week && !week.hidden) return document.getElementById('week-scroll');
+  return document.getElementById('right-panel');
 }
 
 /**
@@ -226,10 +260,10 @@ function autoScroll() {
   if (!drag) return; // the drag is over — this is the genuine terminator.
   drag.scrollFrame = requestAnimationFrame(autoScroll);
 
-  // #right-panel is static markup and never absent, but if it ever were, that is
-  // a reason to skip this one frame, not to stop rescheduling and silently kill
-  // auto-scroll for the rest of the drag.
-  const panel = document.getElementById('right-panel');
+  // The host is asked for fresh each frame rather than cached at drag start: a
+  // week/day switch mid-drag is not a gesture this app offers today, but resolving
+  // it live costs nothing and keeps this from being a trap for whoever adds one.
+  const panel = scrollHost();
   if (!panel) return;
 
   const rect = panel.getBoundingClientRect();
@@ -275,31 +309,45 @@ async function onMouseUp() {
     return;
   }
 
-  const { payload, startTs } = drag;
+  const { payload, at } = drag;
   teardown();
   swallowUntil = Date.now() + SWALLOW_MS;
 
-  // Released somewhere the grid cannot turn into a time: cancel, quietly.
-  if (startTs === null) return;
+  // Released somewhere no column covers: cancel, quietly.
+  if (at === null) return;
 
-  const dayStartTs = startOfDayMs(state.selectedDate);
+  // The day the drop landed on — the column's, not the one that happens to be
+  // selected. Read once, so the write below cannot be redirected by a day change.
+  const day = at.dateKey;
+  const dayStartTs = startOfDayMs(day);
 
   if (payload.kind === 'entry') {
-    const entry = state.entries.find((e) => e.id === payload.entryId);
+    const source = payload.dayKey ?? state.selectedDate;
+    const entry = entriesFor(source).find((e) => e.id === payload.entryId);
     // It could have been deleted, or the day changed, while the drag was running.
     if (!entry) return;
-    const moved = movedEntry(entry, startTs, dayStartTs);
+    if (day !== source) {
+      // Same gesture as a block dragged across the week view's columns, reached from
+      // the entry list instead — see cross-day-commit.js for the write order and
+      // what happens if the second write fails.
+      await commitCrossDayMove(entry, source, day, at.ts);
+      return;
+    }
+    const moved = movedEntry(entry, at.ts, dayStartTs);
     // Dropped back where it started: not a move, so do not mark it as needing a
     // re-sync. Same reason commitDrag checks.
     if (sameTimes(moved, entry)) return;
     // A move needs syncing again for exactly the reason a block drag does.
     markDirty(moved);
-    state.entries = state.entries.map((e) => (e.id === moved.id ? moved : e));
+    setEntriesFor(source, entriesFor(source).map((e) => (e.id === moved.id ? moved : e)));
   } else {
-    state.entries = [...state.entries, dropEntryFor(payload.issue, uuid(), startTs, dayStartTs)];
+    setEntriesFor(day, [
+      ...entriesFor(day),
+      dropEntryFor(payload.issue, uuid(), at.ts, dayStartTs),
+    ]);
   }
 
-  await persistDayNow();
+  await persistDayNow(day);
   renderAll();
 }
 

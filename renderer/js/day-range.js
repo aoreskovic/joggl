@@ -53,6 +53,18 @@ export function missingDays(from, to, have) {
 }
 
 /**
+ * One day's Jira-side rows with the row for `worklogId` taken out.
+ *
+ * A new array, never a splice: the cache holds these and a render may be reading the
+ * old one. Ids are compared as strings because Jira answers with strings and a local
+ * entry carries whatever the POST came back with.
+ */
+export function withoutWorklog(entries, worklogId) {
+  const wanted = String(worklogId);
+  return (entries ?? []).filter((e) => String(e.worklogId) !== wanted);
+}
+
+/**
  * Make `target.entries` and `target.externalEntries` live views onto the selected
  * day of two Maps.
  *

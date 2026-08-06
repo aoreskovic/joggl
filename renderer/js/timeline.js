@@ -7,35 +7,40 @@
 
 import { editorForTarget } from './click-actions.js';
 import { showContextMenu } from './context-menu.js';
-import { editEntryComment, markDirty } from './entries.js';
-import { sameTimes } from './entry-ops.js';
+import { editEntryComment } from './entries.js';
 import { createRowNav, wireRovingList } from './keynav.js';
 import { renderAll } from './render.js';
 import { applySelection, clearSelection, select } from './selection.js';
-import { isToday, persistDayNow, pxPerMin, state, visibleEntries } from './state.js';
+import { activeView } from './shell.js';
+import {
+  entriesFor,
+  isToday,
+  persistDayNow,
+  pxPerMin,
+  setEntriesFor,
+  state,
+  visibleEntriesFor,
+} from './state.js';
 import { createIssueLookup, searchIssues } from './tasks.js';
-import { toastWarn } from './toast.js';
+import { clearColumns, columnAt, columnFor, columnPairs, GUTTER_PX, placeBlock, setColumns } from './timeline-columns.js';
+import { isClickSuppressed, onMoveBlock, onResize } from './timeline-drag.js';
+import {
+  computeRange,
+  grid,
+  gridHeightPx,
+  offsetPxOf,
+  setGrid,
+} from './timeline-geometry.js';
 import {
   dateKey,
   esc,
   extractIssueKey,
-  msToDur,
-  QUARTER,
-  snapToQuarter,
   startOfDayMs,
   stripTrailingKey,
+  todayKey,
   tsToHHMM,
   uuid,
 } from './util.js';
-
-// Nothing shorter than one grid step, so a block can never be dragged into a
-// sliver that is impossible to grab again.
-const MIN_DURATION_MS = QUARTER;
-const EDGE_SNAP_MS = 8 * 60_000;
-const GUTTER_PX = 40;
-
-// Shared between a render and the drag handlers that run against it.
-const view = { rangeStartMs: 0, pxPerMin: 1.5, totalMinutes: 0 };
 
 // One tab stop for the whole grid, arrow keys between blocks. Lazy because the
 // grid exists before this module runs but renderTimeline may be called first.
@@ -81,180 +86,164 @@ export function computeColumns(entries) {
 }
 
 export function renderTimeline() {
-  const grid = document.getElementById('schedule-grid');
-  if (!grid) return;
+  // The week view registers its own columns, and both renders run on every
+  // renderAll. Whichever ran last would own the map, which is a rule nobody can
+  // read off the code — so each render draws only while its own view is up.
+  if (activeView() !== 'day') return;
 
-  const dayStart = startOfDayMs(state.selectedDate);
-  const entries = visibleEntries().filter((e) => e.endTs !== null);
-
-  // A full work day at minimum, auto-expanded to cover everything logged and,
-  // on today, the current hour.
-  let startHour = 7;
-  let endHour = 20;
-
-  if (isToday()) {
-    const nowHour = new Date().getHours();
-    endHour = Math.max(endHour, Math.min(24, nowHour + 2));
-    startHour = Math.min(startHour, Math.max(0, nowHour - 1));
+  const gridEl = document.getElementById('schedule-grid');
+  if (!gridEl) {
+    // Nothing was drawn, so nothing is a column. Leaving the last render's map in
+    // place would have `columnAt` answering from elements no longer on the page.
+    clearColumns();
+    return;
   }
 
-  const stamps = entries.flatMap((e) => [e.startTs, e.endTs]);
-  if (state.timer && isToday()) stamps.push(state.timer.startTs, Date.now());
-  if (stamps.length) {
-    startHour = Math.min(startHour, Math.max(0, Math.floor((Math.min(...stamps) - dayStart) / 3_600_000) - 1));
-    endHour = Math.max(endHour, Math.min(24, Math.ceil((Math.max(...stamps) - dayStart) / 3_600_000) + 1));
-  }
+  const day = state.selectedDate;
+  setColumns([[day, gridEl, GUTTER_PX]]);
 
-  const px = pxPerMin();
-  view.rangeStartMs = dayStart + startHour * 3_600_000;
-  view.pxPerMin = px;
-  view.totalMinutes = (endHour - startHour) * 60;
+  const entries = visibleEntriesFor(day).filter((e) => e.endTs !== null);
+  const { startHour, endHour } = computeRange(new Map([[day, entries]]), {
+    today: isToday() ? day : null,
+    timerStartTs: state.timer && isToday() ? state.timer.startTs : null,
+  });
+  setGrid({ startHour, endHour, pxPerMin: pxPerMin() });
 
-  grid.replaceChildren();
-  grid.style.height = `${view.totalMinutes * px}px`;
-
-  for (let h = startHour; h <= endHour; h++) {
-    const y = (h - startHour) * 60 * px;
-
-    const line = document.createElement('div');
-    line.className = 'sched-hour';
-    line.style.top = `${y}px`;
-    const label = document.createElement('span');
-    label.className = 'sched-hour-label';
-    label.textContent = `${String(h % 24).padStart(2, '0')}:00`;
-    line.appendChild(label);
-    grid.appendChild(line);
-
-    if (h < endHour) {
-      const half = document.createElement('div');
-      half.className = 'sched-half';
-      half.style.top = `${y + 30 * px}px`;
-      grid.appendChild(half);
-    }
-  }
-
-  // The live block is fed into the column solver as a synthetic entry so it
-  // shares columns with whatever it overlaps instead of covering it.
-  const live =
-    state.timer && isToday()
-      ? { id: '__live__', startTs: state.timer.startTs, endTs: Date.now() }
-      : null;
-  const columns = computeColumns(live ? [...entries, live] : entries);
-
-  for (const entry of entries) {
-    grid.appendChild(
-      buildBlock(entry, columns.get(entry.id) ?? { col: 0, totalCols: 1 }),
-    );
-  }
-
-  if (live) {
-    const slot = columns.get('__live__') ?? { col: 0, totalCols: 1 };
-    const block = document.createElement('div');
-    block.className = 'sched-entry-block live';
-    placeBlock(block, live.startTs, live.endTs, slot, 20);
-    const label = document.createElement('div');
-    label.className = 'sched-entry-label';
-    label.textContent =
-      (state.timer.issueKey ? `${state.timer.issueKey} ` : '') + state.timer.title;
-    block.appendChild(label);
-    grid.appendChild(block);
-  }
-
-  if (isToday()) {
-    const nowMin = (Date.now() - view.rangeStartMs) / 60_000;
-    if (nowMin >= 0 && nowMin <= view.totalMinutes) {
-      const nowLine = document.createElement('div');
-      nowLine.className = 'sched-now-line';
-      nowLine.style.top = `${nowMin * px}px`;
-      const dot = document.createElement('div');
-      dot.className = 'sched-now-dot';
-      nowLine.appendChild(dot);
-      grid.appendChild(nowLine);
-    }
-  }
-
-  // Same reasoning as the empty entry list: the two gestures are undiscoverable,
-  // and an empty grid is where there is room to name them. pointer-events off, or
-  // the hint would swallow the very click it is describing.
-  if (entries.length === 0 && !live) {
-    const hint = document.createElement('div');
-    hint.className = 'sched-empty-hint';
-    hint.textContent = 'Click an hour to add time, or drag an issue here';
-    grid.appendChild(hint);
-  }
+  gridEl.style.height = `${gridHeightPx()}px`;
+  paintDayColumn(gridEl, day, { showLabels: true, emptyHint: true });
 
   roving().refresh();
   // These blocks are new elements and know nothing about the selection.
   applySelection();
 }
 
-function placeBlock(el, startTs, endTs, slot, minHeightPx = 6) {
-  const offsetMin = (startTs - view.rangeStartMs) / 60_000;
-  const durMin = Math.max(1, (endTs - startTs) / 60_000);
-  el.style.top = `${offsetMin * view.pxPerMin}px`;
-  el.style.minHeight = `${Math.max(minHeightPx, durMin * view.pxPerMin)}px`;
+/**
+ * Draw one day into one column: hour lines, its blocks, the live timer block, the
+ * now line, and — when asked — the empty hint.
+ *
+ * The hour range is *not* computed here. Every column of a week shares one, or the
+ * rows do not line up across it, so `setGrid` is the caller's business and this only
+ * reads it. The live block belongs to today's column whatever day is selected, which
+ * is why the test is `todayKey()` and not `isToday()`.
+ *
+ * @returns {number} how many finished blocks were drawn
+ */
+export function paintDayColumn(host, dayKey, { showLabels = true, emptyHint = true } = {}) {
+  const px = grid.pxPerMin;
+  host.replaceChildren();
+  host.style.height = `${gridHeightPx()}px`;
 
-  if (slot.totalCols === 1) {
-    el.style.left = `${GUTTER_PX}px`;
-    el.style.right = '4px';
-    el.style.width = '';
-  } else {
-    const span = `(100% - ${GUTTER_PX + 4}px)`;
-    el.style.left = `calc(${GUTTER_PX}px + ${slot.col / slot.totalCols} * ${span})`;
-    el.style.width = `calc(${1 / slot.totalCols} * ${span} - 1px)`;
-    el.style.right = 'auto';
+  for (let h = grid.startHour; h <= grid.endHour; h++) {
+    const y = (h - grid.startHour) * 60 * px;
+
+    const line = document.createElement('div');
+    line.className = 'sched-hour';
+    line.style.top = `${y}px`;
+    if (showLabels) {
+      const label = document.createElement('span');
+      label.className = 'sched-hour-label';
+      label.textContent = `${String(h % 24).padStart(2, '0')}:00`;
+      line.appendChild(label);
+    }
+    host.appendChild(line);
+
+    if (h < grid.endHour) {
+      const half = document.createElement('div');
+      half.className = 'sched-half';
+      half.style.top = `${y + 30 * px}px`;
+      host.appendChild(half);
+    }
   }
+
+  const entries = visibleEntriesFor(dayKey).filter((e) => e.endTs !== null);
+
+  // The live block is fed into the column solver as a synthetic entry so it
+  // shares columns with whatever it overlaps instead of covering it.
+  const live =
+    state.timer && dayKey === todayKey()
+      ? { id: '__live__', startTs: state.timer.startTs, endTs: Date.now() }
+      : null;
+  const slots = computeColumns(live ? [...entries, live] : entries);
+
+  for (const entry of entries) {
+    host.appendChild(buildBlock(entry, dayKey, slots.get(entry.id) ?? { col: 0, totalCols: 1 }));
+  }
+
+  if (live) {
+    const slot = slots.get('__live__') ?? { col: 0, totalCols: 1 };
+    const block = document.createElement('div');
+    block.className = 'sched-entry-block live';
+    placeBlock(block, live.startTs, live.endTs, dayKey, slot, 20);
+    const label = document.createElement('div');
+    label.className = 'sched-entry-label';
+    label.textContent =
+      (state.timer.issueKey ? `${state.timer.issueKey} ` : '') + state.timer.title;
+    block.appendChild(label);
+    host.appendChild(block);
+  }
+
+  if (dayKey === todayKey()) {
+    const nowPx = offsetPxOf(Date.now(), dayKey);
+    if (nowPx >= 0 && nowPx <= gridHeightPx()) {
+      const nowLine = document.createElement('div');
+      nowLine.className = 'sched-now-line';
+      nowLine.style.top = `${nowPx}px`;
+      const dot = document.createElement('div');
+      dot.className = 'sched-now-dot';
+      nowLine.appendChild(dot);
+      host.appendChild(nowLine);
+    }
+  }
+
+  // Same reasoning as the empty entry list: the two gestures are undiscoverable,
+  // and an empty grid is where there is room to name them. pointer-events off, or
+  // the hint would swallow the very click it is describing.
+  if (emptyHint && entries.length === 0 && !live) {
+    const hint = document.createElement('div');
+    hint.className = 'sched-empty-hint';
+    hint.textContent = 'Click an hour to add time, or drag an issue here';
+    host.appendChild(hint);
+  }
+
+  return entries.length;
 }
 
 /**
  * The snapped timestamp a cursor position points at, or null when it falls outside
- * the grid.
- *
- * getBoundingClientRect is viewport-relative and already accounts for the panel's
- * scroll position. Adding scrollTop on top of it — as the plugin did — counted the
- * scroll twice, so once the view had auto-scrolled to now, a click at 16:00 landed
- * somewhere around 21:00. That is why this arithmetic exists exactly once.
- *
- * The bound is the full rect, horizontal included. When only `onGridClick` called
- * this, X was already constrained by event dispatch — the listener is on the grid,
- * so nothing outside it ever arrived. The issue drag calls it from document-level
- * handlers where nothing constrains X, and with only the vertical test a press on a
- * task row, a few pixels sideways, and a release still over the task list booked a
- * 30-minute entry at whatever time that row's Y happened to map to.
+ * the grid. The single-day form of `columnAt`, kept because `drag-drop.js` asks
+ * "what time" and, until there is more than one column, that is the whole question.
  */
 export function gridTimeAt(clientX, clientY) {
-  const grid = document.getElementById('schedule-grid');
-  if (!grid) return null;
-
-  const rect = grid.getBoundingClientRect();
-  if (clientX < rect.left || clientX > rect.right) return null;
-
-  const y = clientY - rect.top;
-  if (y < 0 || y > view.totalMinutes * view.pxPerMin) return null;
-
-  return snapToQuarter(view.rangeStartMs + (y / view.pxPerMin) * 60_000, state.selectedDate);
+  return columnAt(clientX, clientY)?.ts ?? null;
 }
 
 /**
  * Show what a drop would create. Always full width rather than fighting for an
  * overlap column: a preview that reflowed as it passed other blocks would jump
  * sideways under the cursor.
+ *
+ * The preview lives inside the column it is about, so crossing into another day
+ * moves it there rather than leaving it hanging over the day it started in.
  */
-export function showDropPlaceholder(startTs, endTs) {
-  const grid = document.getElementById('schedule-grid');
-  if (!grid) return;
+export function showDropPlaceholder(startTs, endTs, dayKey = state.selectedDate) {
+  const host = columnFor(dayKey);
+  if (!host) return;
 
-  let el = grid.querySelector('.sched-drop-preview');
+  let el = document.querySelector('.sched-drop-preview');
+  if (el && el.parentElement !== host) {
+    el.remove();
+    el = null;
+  }
   if (!el) {
     el = document.createElement('div');
     el.className = 'sched-drop-preview';
     const label = document.createElement('div');
     label.className = 'sched-entry-label';
     el.appendChild(label);
-    grid.appendChild(el);
+    host.appendChild(el);
   }
 
-  placeBlock(el, startTs, endTs, { col: 0, totalCols: 1 });
+  placeBlock(el, startTs, endTs, dayKey, { col: 0, totalCols: 1 });
   el.querySelector('.sched-entry-label').textContent =
     `${tsToHHMM(startTs)} – ${tsToHHMM(endTs)}`;
 }
@@ -263,7 +252,7 @@ export function hideDropPlaceholder() {
   document.querySelector('.sched-drop-preview')?.remove();
 }
 
-function buildBlock(entry, slot) {
+function buildBlock(entry, dayKey, slot) {
   const block = document.createElement('div');
   block.className = 'sched-entry-block';
   if (entry.status === 'synced') block.classList.add('st-synced');
@@ -273,7 +262,7 @@ function buildBlock(entry, slot) {
   // Focusable for the same reason the entry rows are: the Menu key fires
   // contextmenu on whatever has focus. The tab stop is roved, not one per block.
   block.tabIndex = -1;
-  placeBlock(block, entry.startTs, entry.endTs, slot);
+  placeBlock(block, entry.startTs, entry.endTs, dayKey, slot);
 
   const label = document.createElement('div');
   label.className = 'sched-entry-label';
@@ -288,20 +277,20 @@ function buildBlock(entry, slot) {
     for (const edge of ['top', 'bot']) {
       const handle = document.createElement('div');
       handle.className = `sched-handle sched-handle-${edge}`;
-      handle.addEventListener('mousedown', (event) => onResize(event, entry, edge));
+      handle.addEventListener('mousedown', (event) => onResize(event, entry, edge, dayKey));
       block.appendChild(handle);
     }
   }
 
   block.addEventListener('mousedown', (event) => {
     if (event.target.closest('.sched-handle')) return;
-    onMoveBlock(event, entry);
+    onMoveBlock(event, entry, dayKey);
   });
 
   block.addEventListener('click', (event) => {
     if (event.target.closest('.sched-handle')) return;
     // A move that actually moved is not a click, however it ends up on screen.
-    if (Date.now() < suppressClickUntil) return;
+    if (isClickSuppressed()) return;
     select(entry.id);
     // onMoveBlock calls preventDefault on mousedown, which suppresses the focus a
     // click would otherwise give, so the roving tab stop has to be set by hand.
@@ -332,187 +321,6 @@ function buildBlock(entry, slot) {
   return block;
 }
 
-// ── Dragging ───────────────────────────────────────────────────────────────
-
-// Joggl's own synced entries stay draggable; the move rewrites the worklog on the
-// next Finish Day. Worklogs made in Jira are not Joggl's to move.
-function locked(entry) {
-  if (entry.external) {
-    toastWarn('This worklog was made in Jira — change it there.');
-    return true;
-  }
-  return false;
-}
-
-function onResize(event, entry, edge) {
-  event.preventDefault();
-  event.stopPropagation();
-  if (locked(entry)) return;
-
-  const origStart = entry.startTs;
-  const origEnd = entry.endTs;
-  const startY = event.clientY;
-  const block = document.querySelector(`.sched-entry-block[data-id="${CSS.escape(entry.id)}"]`);
-  block?.classList.add('dragging');
-
-  const onMouseMove = (move) => {
-    // Scaled by the current zoom, not the base — otherwise the block runs away
-    // from the cursor at anything other than 1x. Left unrounded: the snap happens
-    // on the resulting clock time, not on the drag distance.
-    const deltaMs = ((move.clientY - startY) / view.pxPerMin) * 60_000;
-
-    if (edge === 'top') {
-      let next = snapToQuarter(origStart + deltaMs, state.selectedDate);
-      // Butting up against a neighbour beats the quarter-hour grid: closing a gap
-      // exactly is the thing the grid alone cannot express.
-      for (const other of visibleEntries()) {
-        if (other.id !== entry.id && other.endTs !== null && Math.abs(other.endTs - next) < EDGE_SNAP_MS) {
-          next = other.endTs;
-        }
-      }
-      if (next <= origEnd - MIN_DURATION_MS) entry.startTs = next;
-    } else {
-      let next = snapToQuarter(origEnd + deltaMs, state.selectedDate);
-      for (const other of visibleEntries()) {
-        if (other.id !== entry.id && Math.abs(other.startTs - next) < EDGE_SNAP_MS) {
-          next = other.startTs;
-        }
-      }
-      if (next >= origStart + MIN_DURATION_MS) entry.endTs = next;
-    }
-
-    liveUpdate(block, entry);
-  };
-
-  const onMouseUp = async () => {
-    document.removeEventListener('mousemove', onMouseMove);
-    document.removeEventListener('mouseup', onMouseUp);
-    block?.classList.remove('dragging');
-    await commitDrag(entry, { startTs: origStart, endTs: origEnd });
-  };
-
-  document.addEventListener('mousemove', onMouseMove);
-  document.addEventListener('mouseup', onMouseUp);
-}
-
-/**
- * Until when a click on a block is the tail of a move rather than a click.
- *
- * `preventDefault()` on mousedown stops focus and text selection but not the click,
- * so without this every completed drag would also read as "select this". Module
- * level rather than per-gesture because the commit re-renders: the click lands on
- * the *new* block, which knows nothing about the drag that produced it.
- */
-let suppressClickUntil = 0;
-const CLICK_TAIL_MS = 200;
-
-function onMoveBlock(event, entry) {
-  event.preventDefault();
-  event.stopPropagation();
-  if (locked(entry)) return;
-
-  const origStart = entry.startTs;
-  const duration = entry.endTs - origStart;
-  const startY = event.clientY;
-  const dayStart = startOfDayMs(state.selectedDate);
-  const block = document.querySelector(`.sched-entry-block[data-id="${CSS.escape(entry.id)}"]`);
-  block?.classList.add('dragging', 'moving');
-  let moved = false;
-
-  const onMouseMove = (move) => {
-    const deltaMs = ((move.clientY - startY) / view.pxPerMin) * 60_000;
-    // Moving keeps the length and snaps the start to the clock grid, so a 47-minute
-    // entry stays 47 minutes but always begins on a quarter hour.
-    let start = snapToQuarter(origStart + deltaMs, state.selectedDate);
-    let end = start + duration;
-
-    if (start < dayStart) {
-      start = dayStart;
-      end = start + duration;
-    }
-    if (end > dayStart + 86_400_000) {
-      end = dayStart + 86_400_000;
-      start = end - duration;
-    }
-
-    // Snapping means most small movements change nothing, and a gesture that never
-    // changed the start is exactly what a plain click is.
-    if (start !== origStart) moved = true;
-
-    entry.startTs = start;
-    entry.endTs = end;
-    liveUpdate(block, entry);
-  };
-
-  const onMouseUp = async () => {
-    document.removeEventListener('mousemove', onMouseMove);
-    document.removeEventListener('mouseup', onMouseUp);
-    block?.classList.remove('dragging', 'moving');
-    if (moved) suppressClickUntil = Date.now() + CLICK_TAIL_MS;
-    await commitDrag(entry, { startTs: origStart, endTs: origStart + duration }, { touched: moved });
-  };
-
-  document.addEventListener('mousemove', onMouseMove);
-  document.addEventListener('mouseup', onMouseUp);
-}
-
-// Mirror the drag into the block and the matching list card without a full
-// re-render, which would tear the element out from under the mouse.
-function liveUpdate(block, entry) {
-  if (block) {
-    const offsetMin = (entry.startTs - view.rangeStartMs) / 60_000;
-    const durMin = Math.max(1, (entry.endTs - entry.startTs) / 60_000);
-    block.style.top = `${offsetMin * view.pxPerMin}px`;
-    block.style.minHeight = `${Math.max(6, durMin * view.pxPerMin)}px`;
-  }
-
-  const card = document.querySelector(`.entry-card[data-id="${CSS.escape(entry.id)}"]`);
-  if (card) {
-    const set = (field, value) => {
-      const input = card.querySelector(`[data-f="${field}"]`);
-      if (input) input.value = value;
-    };
-    set('start', tsToHHMM(entry.startTs));
-    set('end', tsToHHMM(entry.endTs));
-    set('dur', msToDur(entry.endTs - entry.startTs));
-  }
-
-  const total = document.getElementById('total-display');
-  if (total) {
-    const ms = visibleEntries().reduce((sum, e) => sum + Math.max(0, (e.endTs ?? e.startTs) - e.startTs), 0);
-    total.textContent = `Total: ${msToDur(ms + (state.timer ? Date.now() - state.timer.startTs : 0))}`;
-  }
-}
-
-/**
- * End of a move or resize. `before` is where the block started the gesture.
- *
- * A plain click on a block runs this whole path — mousedown, no movement,
- * mouseup — so committing unconditionally flipped a synced entry back to
- * pending and had Finish Day offer to rewrite a worklog that was already right.
- * A render still happens: liveUpdate left inline styles on the block, and this
- * restores the canonical layout.
- */
-/**
- * End of a move or resize.
- *
- * `touched` is false for a gesture that never moved anything — a plain click on a
- * block. There is nothing to repaint then, and the render would replace the block
- * the click had just focused, so focus would fall back to `<body>` and Tab would
- * restart from the top of the list.
- */
-async function commitDrag(entry, before, { touched = true } = {}) {
-  if (sameTimes(entry, before)) {
-    // Dragged out and back: liveUpdate moved the element by hand, so the true
-    // layout has to be restored even though the times are unchanged.
-    if (touched) renderAll();
-    return;
-  }
-  markDirty(entry);
-  await persistDayNow();
-  renderAll();
-}
-
 // ── Quick entry on an empty part of the grid ───────────────────────────────
 
 let quickEntryEl = null;
@@ -529,13 +337,21 @@ function onQuickEntryOutside(event) {
 
 export function onGridClick(event) {
   if (event.target.closest('.sched-entry-block') || event.target.closest('.sched-handle')) return;
+  // The week's column heads are sticky, so once the grid is scrolled they sit *over*
+  // the top of their own column: a click on one is inside the column's rect, and
+  // without this it would open the quick-entry popup at whatever hour is hidden
+  // beneath the head.
+  if (event.target.closest('.week-colhead')) return;
 
   // Clicking away from every block is how you put the selection down here, the same
   // as the empty space below the entry rows.
   clearSelection();
 
-  const rawStartTs = gridTimeAt(event.clientX, event.clientY);
-  if (rawStartTs === null) return;
+  // `columnAt` rather than `gridTimeAt`: the popup writes to a day log, so it needs
+  // the day the click landed in, not the day that happens to be selected when the
+  // user finishes typing into it.
+  const at = columnAt(event.clientX, event.clientY);
+  if (at === null) return;
 
   const duration = 30 * 60_000;
   // Same rule dropEntryFor applies, and for the same reason: pull the start back
@@ -544,13 +360,13 @@ export function onGridClick(event) {
   // this the block would commit as 00:00–00:30 of *tomorrow* under today's key.
   // A 30-minute click silently becoming a 15-minute entry would be a worse
   // surprise than one that lands a quarter hour earlier than clicked.
-  const latestStart = startOfDayMs(state.selectedDate) + 86_400_000 - duration;
-  const startTs = Math.min(rawStartTs, latestStart);
+  const latestStart = startOfDayMs(at.dateKey) + 86_400_000 - duration;
+  const startTs = Math.min(at.ts, latestStart);
 
-  showQuickEntry(event.clientX, event.clientY, startTs, startTs + duration);
+  showQuickEntry(event.clientX, event.clientY, at.dateKey, startTs, startTs + duration);
 }
 
-function showQuickEntry(cx, cy, startTs, endTs) {
+function showQuickEntry(cx, cy, dayKey, startTs, endTs) {
   hideQuickEntry();
 
   const wrap = document.createElement('div');
@@ -573,8 +389,8 @@ function showQuickEntry(cx, cy, startTs, endTs) {
 
   const commit = async (issueKey, issueId, title) => {
     hideQuickEntry();
-    state.entries = [
-      ...state.entries,
+    setEntriesFor(dayKey, [
+      ...entriesFor(dayKey),
       {
         id: uuid(),
         issueKey: issueKey ?? null,
@@ -586,8 +402,8 @@ function showQuickEntry(cx, cy, startTs, endTs) {
         worklogId: null,
         errorMsg: null,
       },
-    ];
-    await persistDayNow();
+    ]);
+    await persistDayNow(dayKey);
     renderAll();
   };
 
@@ -728,23 +544,24 @@ function showQuickEntry(cx, cy, startTs, endTs) {
 
 // ── Cheap per-second updates between full renders ──────────────────────────
 
+// The old `if (!isToday()) return` guard is gone because the loop already only
+// touches today's column — and in the week view today's column is drawn while
+// another day is selected.
 export function updateNowMarkers() {
-  if (!isToday()) return;
-  const grid = document.getElementById('schedule-grid');
-  if (!grid) return;
+  const today = todayKey();
+  for (const [dayKey, host] of columnPairs()) {
+    if (dayKey !== today) continue;
 
-  const line = grid.querySelector('.sched-now-line');
-  const nowMin = (Date.now() - view.rangeStartMs) / 60_000;
-  if (line && nowMin >= 0 && nowMin <= view.totalMinutes) {
-    line.style.top = `${nowMin * view.pxPerMin}px`;
-  }
+    const line = host.querySelector('.sched-now-line');
+    const nowPx = offsetPxOf(Date.now(), dayKey);
+    if (line && nowPx >= 0 && nowPx <= gridHeightPx()) line.style.top = `${nowPx}px`;
 
-  const live = grid.querySelector('.sched-entry-block.live');
-  if (live && state.timer) {
-    const offsetMin = (state.timer.startTs - view.rangeStartMs) / 60_000;
-    const durMin = Math.max(1, (Date.now() - state.timer.startTs) / 60_000);
-    live.style.top = `${offsetMin * view.pxPerMin}px`;
-    live.style.minHeight = `${Math.max(20, durMin * view.pxPerMin)}px`;
+    const live = host.querySelector('.sched-entry-block.live');
+    if (live && state.timer) {
+      const durMin = Math.max(1, (Date.now() - state.timer.startTs) / 60_000);
+      live.style.top = `${offsetPxOf(state.timer.startTs, dayKey)}px`;
+      live.style.minHeight = `${Math.max(20, durMin * grid.pxPerMin)}px`;
+    }
   }
 }
 
@@ -752,6 +569,6 @@ export function scrollToNow() {
   if (dateKey() !== state.selectedDate) return;
   const panel = document.getElementById('right-panel');
   if (!panel) return;
-  const nowMin = (Date.now() - view.rangeStartMs) / 60_000;
-  panel.scrollTop = Math.max(0, nowMin * view.pxPerMin - panel.clientHeight / 3);
+  const nowPx = offsetPxOf(Date.now(), state.selectedDate);
+  panel.scrollTop = Math.max(0, nowPx - panel.clientHeight / 3);
 }

@@ -17,11 +17,13 @@ import {
   flaggedOverlaps,
   movedEntry,
   overlappingIds,
+  planClearWeek,
   retargetEntry,
   sameComment,
   sameTimes,
 } from '../renderer/js/entry-ops.js';
 import { planFinishDay } from '../renderer/js/finish-day.js';
+import { addDays, startOfDayMs } from '../renderer/js/util.js';
 
 const T = (h, m = 0) => new Date(2026, 6, 28, h, m, 0, 0).getTime();
 
@@ -470,4 +472,109 @@ test('creating and moving clamp by the same rule', () => {
 
   assert.equal(clampDropStart(T(23, 50), DAY_START, DEFAULT_DROP_MS), T(23, 30));
   assert.equal(clampDropStart(T(10), DAY_START, DEFAULT_DROP_MS), T(10), 'mid-day is untouched');
+});
+
+/**
+ * 2026-10-25 is when the clocks go back here, so the real gap between its midnight
+ * and the next day's is 25 hours, not the fixed 86,400,000ms `clampDropStart` used
+ * to assume. A block legitimately dropped in that extra hour — the live drag
+ * preview in timeline-drag.js already clamps against the day's real end — used to
+ * be silently pulled back to an hour earlier than the preview showed, on exactly
+ * this one day a year. Expressed as an offset from the day's own midnight so this
+ * still means something in a timezone with no clock change at all: there the real
+ * end simply coincides with the naive one, and the assertions still hold.
+ */
+test('a block dropped into the 25th hour of a clock-change day keeps the length and the clock time the preview showed', () => {
+  const dayKey = '2026-10-25';
+  const dayStart = startOfDayMs(dayKey);
+  const dayEnd = startOfDayMs(addDays(dayKey, 1)); // the day's real end, not dayStart + 86_400_000
+
+  // A half-hour block whose desired start is thirty minutes before the real end —
+  // past the old, naive 24-hour boundary on a day that is actually 25 hours long.
+  const desiredStart = dayEnd - 30 * 60_000;
+  const moved = movedEntry(entry({ startTs: T(9), endTs: T(9, 30) }), desiredStart, dayStart);
+
+  assert.equal(moved.startTs, desiredStart, 'not pulled back to the naive 24-hour boundary');
+  assert.equal(moved.endTs, dayEnd, "ends exactly at the day's real midnight");
+  assert.equal(moved.endTs - moved.startTs, 30 * 60_000, 'the length is untouched');
+});
+
+// ── The arithmetic behind Clear week ─────────────────────────────────────────
+
+/** A day → entries map turned into the `entriesFor` reader planClearWeek expects. */
+function readerOf(byDay) {
+  return (day) => byDay[day] ?? [];
+}
+
+test('days out of order and with a duplicate are deduped and sorted', () => {
+  const plan = planClearWeek(
+    ['2026-07-30', '2026-07-28', '2026-07-30', '2026-07-29'],
+    readerOf({
+      '2026-07-28': [entry({ id: 'a' })],
+      '2026-07-29': [entry({ id: 'b' })],
+      '2026-07-30': [entry({ id: 'c' })],
+    }),
+  );
+  assert.deepEqual(plan.days, ['2026-07-28', '2026-07-29', '2026-07-30']);
+  // A duplicated day must not have its entries counted twice.
+  assert.deepEqual(plan.all.map((e) => e.id).sort(), ['a', 'b', 'c']);
+});
+
+test('a week where every entry is synced offers no "unsynced only" button', () => {
+  const plan = planClearWeek(
+    ['2026-07-28', '2026-07-29'],
+    readerOf({
+      '2026-07-28': [entry({ id: 'a', worklogId: '900' })],
+      '2026-07-29': [entry({ id: 'b', worklogId: '901' })],
+    }),
+  );
+  assert.equal(plan.synced.length, plan.all.length);
+  assert.equal(plan.offerUnsyncedOnly, false, 'clearing unsynced-only would be the same as clearing all');
+});
+
+test('a week where nothing is synced offers no "unsynced only" button either', () => {
+  const plan = planClearWeek(
+    ['2026-07-28', '2026-07-29'],
+    readerOf({
+      '2026-07-28': [entry({ id: 'a' })],
+      '2026-07-29': [entry({ id: 'b' })],
+    }),
+  );
+  assert.equal(plan.synced.length, 0);
+  assert.equal(plan.offerUnsyncedOnly, false, 'there is nothing unsynced to spare');
+});
+
+test('a week with some of each offers the button', () => {
+  const plan = planClearWeek(
+    ['2026-07-28', '2026-07-29'],
+    readerOf({
+      '2026-07-28': [entry({ id: 'a', worklogId: '900' })],
+      '2026-07-29': [entry({ id: 'b' })],
+    }),
+  );
+  assert.equal(plan.offerUnsyncedOnly, true);
+});
+
+test('"unsynced only" keeps exactly the synced entries on every day, not just the first', () => {
+  const plan = planClearWeek(
+    ['2026-07-28', '2026-07-29'],
+    readerOf({
+      '2026-07-28': [entry({ id: 'a-keep', worklogId: '900' }), entry({ id: 'a-go' })],
+      '2026-07-29': [entry({ id: 'b-keep', worklogId: '901' }), entry({ id: 'b-go' })],
+    }),
+  );
+  assert.deepEqual(plan.resultFor('2026-07-28', 'unsynced').map((e) => e.id), ['a-keep']);
+  assert.deepEqual(plan.resultFor('2026-07-29', 'unsynced').map((e) => e.id), ['b-keep']);
+});
+
+test('"all" empties every day, whatever it holds', () => {
+  const plan = planClearWeek(
+    ['2026-07-28', '2026-07-29'],
+    readerOf({
+      '2026-07-28': [entry({ id: 'a', worklogId: '900' })],
+      '2026-07-29': [entry({ id: 'b' })],
+    }),
+  );
+  assert.deepEqual(plan.resultFor('2026-07-28', 'all'), []);
+  assert.deepEqual(plan.resultFor('2026-07-29', 'all'), []);
 });

@@ -102,8 +102,9 @@ been exercised end to end, not just written.
 | Finish Day | Confirmed against real Jira — worklog `60504` on `EHW-70` |
 | Jira-side worklogs | Time logged in the Jira web UI is read back and counted |
 | Logging | `logs/joggl.log`, credential-redacted |
-| Tests | 283 passing, `npm test`; 85 UI checks, `npm run uicheck` (or `:fast`) |
+| Tests | 334 passing, `npm test`; 99 UI checks, `npm run uicheck` (or `:fast`) |
 | Shell | Collapsible sidebar with a view registry; week and month tabs present but disabled |
+| Week view | Five or seven day columns sharing one hour range; everything a day column can do, plus dragging between days, a per-column menu, and one Sync for the week |
 | Drag to day view | An issue dragged from the task list becomes a 30-minute pending entry |
 | Keyboard | Every list arrow-navigable, every menu and dialog reachable — see below |
 | Help | A panel above Settings: what the app is for, and every shortcut, built from one list |
@@ -154,33 +155,53 @@ a reason.
    cached the same way, per day, so stepping back to a day just visited no longer
    blanks and refetches it.
 
+9. **The shared timeline geometry holds an hour, not a timestamp.** The week-view
+   spec named it `{ rangeStartMs, pxPerMin, totalMinutes }`, which is the shape the
+   day view's singleton had. One absolute `rangeStartMs` cannot serve several
+   columns: each day's hour 7 is a different instant, and across a clock change two
+   of them are not even a constant apart. So `timeline-geometry.js` holds `startHour`
+   and every conversion — `rangeStartMs(day)`, `offsetPxOf(ts, day)`,
+   `tsAtOffsetPx(px, day)` — takes the day it is about. With one column it computes
+   exactly what the singleton did.
+
+10. **The week shown is the week containing `state.selectedDate`.** The spec described
+    a week stepper and left the relationship to the day view open. Making the week a
+    function of the selected day means every navigation path already in the app — `T`,
+    `[`, `]`, Page Up/Down, the calendar — moves the week without knowing this view
+    exists, switching views lands on the day that was marked, and there is one answer
+    to "which day is this about" for the column menus and for phase 4's paste target.
+    The stepper is `selectDate(addWeeks(anchor, ±1))` and nothing more.
+
+11. **The omnibar and the pin bar are moved into the week view, not copied.** Both are
+    static markup inside the day view's left panel, and every listener in the app is
+    bound by id — including the drag sources, which are delegated onto `#pin-chips`
+    itself. A second copy would mean two `#task-input`s and half the wiring pointing at
+    whichever the DOM answered with first. Moving a node keeps its listeners, so
+    `mount` appends the two into `#week-topbar` and `unmount` puts them back against
+    fixed anchors.
+
 ### Next, roughly in order
 
-1. **Week view** — phase 2 of the sidebar work. Day columns, a work-week / 7-day
-   toggle, a week stepper that names the week of the month, and dragging entries
-   between days. Needs the multi-day state and the generalised timeline column that
-   phase 1 deliberately left alone: the `view` singleton in `timeline.js` still ties
-   every drag handler to one column. The range data layer it needs — a multi-day
-   store, a single range read for a span of Jira worklogs, and the per-day cache —
-   landed in 0.16.0.
-2. **Month view** — phase 3. A calendar grid with hours logged per day, and the day
-   view beside it showing whichever day was clicked.
-3. **Tray icon states** — the icon should show at a glance whether a timer is running.
+1. **Month view** — phase 4 of the sidebar work. A calendar grid with hours logged per
+   day, and the day view beside it showing whichever day was clicked. Everything it
+   needs is now in: the range data layer, the shared timeline geometry, the column map
+   and the view registry with its `onDayChange` hook.
+2. **Tray icon states** — the icon should show at a glance whether a timer is running.
    Right now the only signal is opening the window.
-4. **A global start/stop shortcut** — Ctrl+Enter starts and stops from inside the
+3. **A global start/stop shortcut** — Ctrl+Enter starts and stops from inside the
    window (see *Keyboard*), but reaching it still means giving Joggl focus first. A
    `globalShortcut` that resumes the last task with the window hidden is what would
    make it keyboard-first, and it needs a main↔renderer signal it does not have.
-5. **Which days are not worked is a toggle, not a schedule.** The weekend tint is
+4. **Which days are not worked is a toggle, not a schedule.** The weekend tint is
    hardcoded to Saturday and Sunday; anyone whose week runs otherwise switches it off.
    A per-day working-week setting is the obvious next step if that is not enough.
-6. **Splitting a synced entry, and repointing one at another issue** — both refused,
+5. **Splitting a synced entry, and repointing one at another issue** — both refused,
    for the same reason: a worklogId is only valid on the issue it was created against,
    so either needs a delete plus a create with its own partial-failure story. Until
    someone actually misses them, deleting the entry (which offers to remove the Jira
    worklog too) and re-adding it is the honest path, and both messages say so.
-7. **macOS build** — a GitHub Actions job with a macOS runner, no code changes.
-8. **Auto-update** — still not worth it for ten users. Revisit if handing out installers
+6. **macOS build** — a GitHub Actions job with a macOS runner, no code changes.
+7. **Auto-update** — still not worth it for ten users. Revisit if handing out installers
    becomes the annoying part.
 
 Deliberately **not** planned: everything under *Out of scope* at the end of this file.
@@ -284,6 +305,45 @@ the description whatever part of it was hit: the block is all label, so there is
 "anywhere else" to aim at, and the description is the dominant need there — every one
 of the 391 real worklogs sampled on this site had one, while repointing a block at
 another issue is a rare correction that stays first on its right-click menu.
+
+---
+
+## The week
+
+Five columns, Monday to Friday, or seven. Each is a day, and each is drawn by the
+same painter the day view uses — `paintDayColumn` — so a block behaves identically
+wherever it is.
+
+Three things are shared across the columns and one is not:
+
+- **One hour range.** `computeRange` is given every visible day at once, so the rows
+  line up. A 06:30 block on Tuesday widens Monday too, which is the point: columns
+  that each chose their own range would be unreadable side by side.
+- **One zoom**, the day view's, so the two cannot disagree about how tall an hour is.
+- **One gutter, outside the columns.** The day view draws its hour labels inside the
+  grid, 40px in, and `placeBlock` offsets every block by that much. A week column is
+  under 200px wide and cannot spare 40 of them, so the labels move to a rail of their
+  own and the columns register a gutter of zero. That width is per column for exactly
+  this reason.
+- **The overlap solver is not shared.** `computeColumns` runs per day, so a block
+  never narrows because of something on another day.
+
+**Weeks are ISO 8601**, because every colleague's calendar and every Jira report is.
+Two things follow that look like bugs until they are read: a week has a *week-year*
+which is not always the calendar year of its Monday, and 1 January is in week 1 only
+when it falls Monday to Thursday. The label says the year only when it differs.
+
+**Five-day mode hides an empty weekend, not a worked one.** A Saturday holding any
+time — local or Jira-side — is drawn whatever the toggle says. Time that cannot be
+seen is time that does not get synced, and hiding it is the one thing this view must
+never do.
+
+**A block dragged sideways changes day.** It leaves one day log and joins another in
+one gesture, and a synced entry may do it: the worklogId stays valid because the issue
+has not changed, only when the work started, so the entry returns to `pending` and the
+next Sync rewrites the worklog with `PUT`. That is the same rule a move within a day
+already followed. Retargeting still refuses, because that one changes the issue, and a
+worklog id is only valid on the issue it was created against.
 
 ---
 
@@ -667,6 +727,21 @@ Never probe the environment. If something above appears missing, say so and stop
   empty day says so in both places. The grid's hint is `pointer-events: none`, or it would
   sit over the hours it is telling people to click. A day holding only read-only Jira rows
   is **not** empty: the hint keys off what is rendered, not off what the store holds.
+- **A write names its day; a render reads the day on screen.** `state.entries` is a
+  live view onto the selected day, so any assignment to it after an `await` files the
+  result under whichever day is selected when the promise resolves — a sync that takes
+  seconds, a modal the user is reading, a Jira `DELETE`. Every such path now captures
+  `const day = state.selectedDate` before its first `await` and goes through
+  `entriesFor(day)` / `setEntriesFor(day, …)` / `persistDayNow(day)`. The debounced
+  write has the same rule in `day-writes.js`: what is owed is decided when the edit
+  happens, not when the timer fires, so an edit made on one day and a step to the next
+  inside the 500 ms window can no longer write the wrong day's entries under the wrong
+  key. Renders are the exception and stay as they are — "the day on screen" is exactly
+  what they mean. Every read of a day log — `loadDay`, `readDay`, `loadDays` — flushes
+  the queue first, so a read cannot install a version older than what is on screen.
+  That flush is reported and let go rather than propagated: a background save that
+  fails must not stop a day change, and must not abort `stopTimer` after it has
+  already cleared the timer, which would drop the block just timed.
 - **A day's bounds are `addDays`, not a fixed 86,400,000 ms.** `loadDays` and
   `loadExternalWorklogs` both compute the end of a range as `startOfDayMs(addDays(day,
   1))`, never `startOfDayMs(day) + DAY`. A day is not always 24 hours — the autumn

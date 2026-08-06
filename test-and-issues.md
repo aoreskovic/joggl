@@ -65,7 +65,8 @@ Not scripted — it needs a machine without Node, or at least a shell without it
 | Do this | Correct result |
 |---|---|
 | Look at the sidebar | Joggl, three tabs, Settings at the bottom. Day View highlighted with a left accent bar. |
-| Click Week View or Month View | Nothing happens. Both are dimmed and say "Not built yet" on hover. |
+| Click Month View | Nothing happens. It is dimmed and says "Not built yet" on hover. |
+| Click Week View | The week view opens. The search box and the pins move to the top of it; the issue list and **On this day** are not in this view. Click Day View — everything is back where it was. |
 | Click Settings | The settings overlay opens. Close still closes it. There is no ⚙ button in the day header any more. |
 | Click the toggle | The rail collapses to icons and the chevron flips. Click again to expand. |
 | Collapse, quit the app entirely, start it again | It comes back collapsed. Expand, quit, restart — comes back expanded. |
@@ -81,6 +82,41 @@ Not scripted — it needs a machine without Node, or at least a shell without it
 | Click it again | It reopens. |
 | Collapse it, change day, quit and restart | Still collapsed. |
 | Collapse it, then check the entries are not gone | Reopen and the rows are all still there — collapsing hides, it does not clear. |
+
+### Week view
+
+| Do this | Correct result |
+|---|---|
+| Open the week view | Five columns, Monday to Friday, with the weekday and date in each head and that day's total on the right. Today's column is marked. |
+| Click **7** | Saturday and Sunday appear. Click **5** — they go again. Quit and restart: the choice is remembered. |
+| Put time on a Saturday, then click **5** | Saturday stays on screen. Time that cannot be seen is time that never gets synced. |
+| Read the week label | `27 Jul – 2 Aug · week 31`. The year appears only on a week whose ISO week-year is not its Monday's — `29 Dec – 4 Jan · week 1 of 2026`. |
+| Click **‹** and **›** | A week back and forward. **›** is dimmed on the week holding today. |
+| Press Page Up and Page Down | The same, from the keyboard. `[` and `]` still step a single day, moving the marked column and, at the ends, the week. |
+| Look across the columns | The hours line up: one range for the whole week, widened to cover whatever is logged on any day of it. |
+| Zoom in and out | Both views share the setting — set it here, go to the day view, and it is the same. |
+| Drag a pin onto Wednesday's column | A half-hour block appears on Wednesday, where the preview said — not on the day the day view had selected. |
+| Type in the search box and drag a result onto a column | The same. The result rows are draggable; this is how an issue that is not pinned gets onto a day here. |
+| Click an empty hour in any column | The quick-entry popup opens, and what it creates lands on **that** column's day. |
+| Scroll the week down, then click a column head | Nothing is created. The heads sit over their own columns once scrolled, and a click on one only marks the day. |
+| Click a block, double-click it, right-click it | Select, work description, the full menu — the same as the day view, because it is the same code. |
+| Drag a block's edges | Resize, snapping to the quarter hour and to its own day's neighbours. |
+| Drag a block from Monday's column onto Thursday's | It moves. Monday no longer has it, Thursday does, at the time the preview showed. |
+| Drag a **synced** block to another day | It moves and goes back to ● pending. Sync then *rewrites* that worklog rather than logging a second one — the issue has not changed, only when the work started. |
+| Drag a **Manual Jira entry** anywhere | It refuses, with the message it already gives. It is not Joggl's to move. |
+| Drag a block out of a column and release over the header | It stays on the last column it was over. Nothing is created on a day the cursor never entered. |
+| Read the **Sync week** button | `Sync week · 12 entries, 34h 15m` — what will actually reach Jira, across every column shown. With nothing waiting it reads **Nothing to sync** and is dimmed. |
+| Hover it | The tooltip says what is a rewrite rather than a fresh log, what is already in Jira, and that the running timer is excluded. |
+| Press it with entries on three days | They go up day by day. One summary at the end; on a partial failure the failures name their day and **Retry failed** retries only those. |
+| Press it, then look at the day view | The same entries are ✓ synced there. Nothing is logged twice. |
+| Click **⋯** on a column head | A menu: Copy previous day, Clear day, Clear week. The three the *On this day* header has, plus the one only a week can offer. |
+| Copy previous day from a column | That column fills from the last day with anything on it, at the same times. The other columns are untouched. |
+| Clear day from a column | Only that column empties. It asks first, offers to spare the synced entries, and nothing is deleted from Jira. |
+| Clear week | Asks once, naming how many entries across how many days. Local only — every worklog already in Jira stays there. |
+| Step back three weeks, then start a timer from the search box | The view jumps to this week and the timer runs in today's column. A timer only ever runs on today. |
+| Watch a running timer in the week view | Its block grows in today's column, takes part in that column's overlap layout, and both the day total and the week total count it. |
+| Press F1 | The shortcut table has an **In the week view** group. |
+| Switch to the week view and back, twice | The search box and pins move with it each time. There is never a second copy of either, and Ctrl+L still reaches the box. |
 
 ### Editing which task a block belongs to
 
@@ -340,20 +376,57 @@ on Jira.
 
 ### Confirmed bugs
 
-- **After deleting a worklog from Jira, the day briefly shows no Jira-side rows at all.**
-  Not just the deleted one — every **Manual Jira entry** on that day disappears for one
-  network round trip, then comes back minus the deleted one. `deleteEntry` invalidates
-  the day's cache next to the successful `DELETE`, and the `renderAll()` that follows
-  paints before the refetch lands, so it reads an empty cache.
+Nothing open.
 
-  Left alone deliberately. Rendering after the refetch instead means the deleted
-  worklog's cached row stops being claimed by any local entry and is drawn as a genuine
-  Manual Jira entry for time that no longer exists anywhere — briefly claiming time
-  exists is worse than briefly not showing it. Moving the invalidate later reopens the
-  window between the Jira delete and the local removal, which is the data-integrity bug
-  0.16.1 closed. Fixing it properly means removing one row from the cache rather than
-  dropping the day, which is worth doing when the week view makes a whole week's rows
-  vanish instead of a day's.
+Fixed on 2026-08-05:
+
+- **An inline edit could be lost by stepping a day and stepping back.** The day log is
+  written 500 ms after an edit. `loadDay` runs on every day change and overwrites
+  `state.days` straight from disk, so editing a time field, clicking `‹` and clicking
+  `›` back inside that window installed the version the edit had not reached yet —
+  and the queued write then saved that stale array back over it. Gone from screen and
+  from disk, with nothing said. `loadDay` and `readDay` now flush the pending writes
+  first, as `loadDays` already did.
+
+  Not covered by a UI check. The window is 500 ms and closing it needs two day
+  changes, each of which waits on a Jira read — a check for it would pass or fail on
+  timing rather than on behaviour, which is trap 8's whole lesson. The part that can
+  be pinned down is pinned down: `test/day-writes.test.js` proves a queued write names
+  its day and cannot be redirected by what happens next.
+
+- **A save that failed abandoned every day queued behind it.** `flush()` takes the
+  days off the queue and then writes them in a loop, so one rejection skipped the
+  rest — two days edited inside one debounce window and a transient failure on the
+  first silently lost the second. Every day is attempted now, and the first error is
+  still what the caller sees.
+
+- **The flush above, added to two reads, turned a background failure into a blocking
+  one.** Found reviewing that fix rather than in use. A save that failed while
+  `loadDay` was flushing rejected out through `selectDate`, so the day arrows did
+  nothing at all; the same failure inside `readDay` aborted `stopTimer` after it had
+  already cleared the timer, so the block just timed had nowhere to land. Both reads
+  now report the failure to the log and carry on — the write is already lost by then,
+  and refusing to navigate or to finish stopping a timer does not bring it back.
+
+- **After deleting a worklog from Jira, the day briefly showed no Jira-side rows at
+  all.** Not just the deleted one — every **Manual Jira entry** on that day vanished
+  for one network round trip, then came back minus the deleted one. `deleteEntry`
+  dropped the whole day from the external cache next to the successful `DELETE`, and
+  the `renderAll()` after it painted from an empty cache.
+
+  Fixed as the entry itself said to: by taking the one row that is genuinely gone out
+  of the cache (`withoutWorklog` in `renderer/js/day-range.js`, via
+  `dropExternalWorklog` in `state.js`) rather than dropping the day. The rest of the
+  cache is still true, so the refetch that used to follow is gone entirely — one fewer
+  Jira round trip on a path the user is waiting on. Neither of the two things that
+  made this hard to fix before applies any more: nothing renders a stale row for time
+  that no longer exists, and the invalidate still sits next to the `DELETE`, so the
+  window the 0.16.1 fix closed stays closed.
+
+  Not covered by a UI check, deliberately. Reaching it means deleting a real Jira
+  worklog, and the live and fixture runs must report the same counts — so a check that
+  could only run against the fake would break the one thing keeping the fake honest.
+  The pure helper carries the test; the wiring is three lines.
 
 Fixed on 2026-07-29, in the order found:
 
@@ -395,7 +468,7 @@ Every table above except the persistence rows is executed by `scripts/ui-check.m
 npm run uicheck
 ```
 
-46 checks, exits non-zero on failure. It needs **no dependency and no DevTools Protocol** —
+85 checks, exits non-zero on failure. It needs **no dependency and no DevTools Protocol** —
 the main process already holds `webContents.executeJavaScript`, which is enough to
 dispatch real `MouseEvent`s, read computed styles and element boxes, and drive the app end
 to end. `main/index.js` loads it only under `--uicheck`, which also redirects `userData` to

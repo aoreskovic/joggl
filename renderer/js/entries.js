@@ -6,6 +6,7 @@ import { showContextMenu } from './context-menu.js';
 import { copyPreviousDay } from './copy-day.js';
 import {
   canRetarget,
+  dirtiedEntry,
   duplicateOf,
   flaggedOverlaps,
   retargetEntry,
@@ -21,11 +22,12 @@ import { renderAll } from './render.js';
 import { applySelection, clearSelection, select } from './selection.js';
 import {
   deleteWorklog,
-  invalidateExternal,
+  dropExternalWorklog,
+  entriesFor,
   isToday,
   persistDay,
   persistDayNow,
-  refreshExternal,
+  setEntriesFor,
   state,
   visibleEntries,
 } from './state.js';
@@ -361,26 +363,13 @@ function handleInlineEdit(event) {
   if (sameTimes(entry, before)) return;
 
   markDirty(entry);
-  persistDay();
+  persistDay(state.selectedDate);
   renderAll();
 }
 
-/**
- * An entry that changed needs syncing again. A previously synced one keeps its
- * worklogId so the next Finish Day rewrites that worklog rather than adding a
- * second one for the same stretch of time.
- */
+/** The mutating form of `dirtiedEntry`, which is where the rule itself lives. */
 export function markDirty(entry) {
-  if (isExternal(entry)) return;
-  if (!entry.issueKey) {
-    entry.status = 'local';
-    entry.errorMsg = null;
-    return;
-  }
-  if (entry.status === 'synced' || entry.status === 'error') {
-    entry.status = 'pending';
-    entry.errorMsg = null;
-  }
+  Object.assign(entry, dirtiedEntry(entry));
 }
 
 async function handleEntryAction(event) {
@@ -404,6 +393,9 @@ async function handleEntryAction(event) {
 
 /** Shared by the entry list and the day-view context menu. */
 export async function deleteEntry(id) {
+  // Fixed before the confirmation modal and the Jira DELETE, both of which the day
+  // can be stepped underneath. The entry belongs to the day it was found on.
+  const day = state.selectedDate;
   const entry = currentEntry(id);
   if (!entry) return;
 
@@ -411,8 +403,6 @@ export async function deleteEntry(id) {
     toastWarn('This worklog was made in Jira — delete it there.');
     return;
   }
-
-  let deletedInJira = false;
 
   // Deleting locally would leave the time booked in Jira with nothing on screen
   // to show for it, so the worklog is the decision, not an afterthought.
@@ -437,14 +427,16 @@ export async function deleteEntry(id) {
         return;
       }
       toastOk(`Worklog removed from ${entry.issueKey}.`);
-      // The cached Jira-side rows for this day were read before the DELETE and one
-      // of them stands for the worklog now gone. That is known to be wrong the
-      // instant the DELETE returns, so it is dropped here rather than after the
-      // refetch is decided — it is a synchronous Map delete, so it widens no window,
-      // and it means nothing below can draw a row for a worklog Joggl has just
-      // removed. The *refetch* is the display concern and waits until the end.
-      invalidateExternal(state.selectedDate);
-      deletedInJira = true;
+      // The cached Jira-side rows for this day were read before the DELETE, and one
+      // of them stands for the worklog now gone. It is taken out here, next to the
+      // DELETE that made it false — a synchronous Map write, so it widens no window,
+      // and nothing below can draw a row for a worklog Joggl has just removed.
+      //
+      // Exactly that row, rather than the whole day: dropping the day left every
+      // other Manual Jira entry on it blank until a refetch landed, which is
+      // bug-worthy on one day and unacceptable across a week. The rest of the cache
+      // is still true, so there is no refetch at all.
+      dropExternalWorklog(day, entry.worklogId);
     }
   }
 
@@ -452,24 +444,13 @@ export async function deleteEntry(id) {
   // and the DELETE. Once Jira has dropped the worklog, an entry still carrying its
   // worklogId is the dangerous state: a day change or a crash before this line
   // leaves it on the original day, and the next Sync would PUT to a worklog that no
-  // longer exists. It also reads as a failed delete while it sits there. The refetch
-  // below used to run in this gap, which put a whole Jira round trip inside it.
+  // longer exists. It also reads as a failed delete while it sits there. A refetch
+  // used to run in this gap, which put a whole Jira round trip inside it; there is
+  // no refetch now, because the cache was corrected rather than thrown away.
   if (state.timer?.entryId === id) await stopTimer({ save: false });
-  state.entries = state.entries.filter((e) => e.id !== id);
-  await persistDayNow();
+  setEntriesFor(day, entriesFor(day).filter((e) => e.id !== id));
+  await persistDayNow(day);
   renderAll();
-
-  if (deletedInJira) {
-    // Invalidating alone would leave the day showing zero Manual Jira entries until
-    // something unrelated happened to refetch it — an understated total, which is
-    // the worse of the two lies. Refetched through the same tracked
-    // `refreshExternal` a day change uses, and outside the delete's own try/catch: a
-    // failed refetch must not read as a failed delete. It cannot throw out of this
-    // handler either — `track` in state.js catches internally — and if it does fail,
-    // `renderEntryList` shows the same "could not read this day's worklogs from
-    // Jira" note a failed day-change read shows.
-    await refreshExternal(state.selectedDate);
-  }
 }
 
 /**
@@ -478,12 +459,13 @@ export async function deleteEntry(id) {
  * belongs — moving it is the expected next step, not a correction.
  */
 export async function duplicateEntry(id) {
+  const day = state.selectedDate;
   const entry = currentEntry(id);
   if (!entry || entry.endTs === null) return;
 
   const copy = duplicateOf(entry, uuid());
-  state.entries = sortEntries([...state.entries, copy]);
-  await persistDayNow();
+  setEntriesFor(day, sortEntries([...entriesFor(day), copy]));
+  await persistDayNow(day);
   renderAll();
 
   toast(
@@ -497,6 +479,7 @@ export async function duplicateEntry(id) {
  * that is the point, and it is why this is not just delete-and-redraw.
  */
 export async function editEntryTask(id) {
+  const day = state.selectedDate;
   const entry = currentEntry(id);
   if (!entry) return;
 
@@ -532,8 +515,8 @@ export async function editEntryTask(id) {
   if (picked.issueKey === entry.issueKey) return;
 
   const next = retargetEntry(entry, picked);
-  state.entries = state.entries.map((e) => (e.id === next.id ? next : e));
-  await persistDayNow();
+  setEntriesFor(day, entriesFor(day).map((e) => (e.id === next.id ? next : e)));
+  await persistDayNow(day);
   renderAll();
   toastOk(`Moved ${tsToHHMM(next.startTs)}–${tsToHHMM(next.endTs)} to ${next.issueKey}.`);
 }
@@ -547,6 +530,7 @@ export async function editEntryTask(id) {
  * description of an existing worklog is exactly what PUT .../worklog/{id} is for.
  */
 export async function editEntryComment(id) {
+  const day = state.selectedDate;
   const entry = currentEntry(id);
   if (!entry) return;
 
@@ -596,11 +580,12 @@ export async function editEntryComment(id) {
 
   Object.assign(entry, next);
   markDirty(entry);
-  await persistDayNow();
+  await persistDayNow(day);
   renderAll();
 }
 
 export async function splitEntry(id) {
+  const day = state.selectedDate;
   const entry = currentEntry(id);
   if (!entry || entry.endTs === null) return;
   if (isExternal(entry)) {
@@ -617,7 +602,7 @@ export async function splitEntry(id) {
     return;
   }
 
-  const midpoint = snapToQuarter((entry.startTs + entry.endTs) / 2, state.selectedDate);
+  const midpoint = snapToQuarter((entry.startTs + entry.endTs) / 2, day);
   if (midpoint <= entry.startTs || midpoint >= entry.endTs) {
     toastWarn('Entry is too short to split.');
     return;
@@ -625,7 +610,7 @@ export async function splitEntry(id) {
 
   const second = { ...entry, id: uuid(), startTs: midpoint, worklogId: null };
   entry.endTs = midpoint;
-  state.entries = sortEntries([...state.entries, second]);
-  await persistDayNow();
+  setEntriesFor(day, sortEntries([...entriesFor(day), second]));
+  await persistDayNow(day);
   renderAll();
 }

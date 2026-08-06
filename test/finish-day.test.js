@@ -370,3 +370,18 @@ test('the tooltip mentions the running timer, which the button cannot', () => {
 test('an empty day still says something rather than showing a blank tooltip', () => {
   assert.match(syncTooltip(planFinishDay([])), /Nothing on this day/);
 });
+
+test('a caller can name the verb, for a button that is not about one day', () => {
+  const plan = planFinishDay([
+    { id: 'a', issueKey: 'GEN-1', startTs: 0, endTs: 3_600_000, status: 'pending' },
+    { id: 'b', issueKey: 'GEN-2', startTs: 0, endTs: 1_800_000, status: 'pending' },
+  ]);
+  assert.equal(syncLabel(plan, { verb: 'Sync week' }), 'Sync week · 2 entries, 1h 30m');
+  // The verb does not override the day rule for callers that do not pass one.
+  assert.equal(syncLabel(plan, { isToday: false }), 'Re-sync · 2 entries, 1h 30m');
+});
+
+test('nothing to sync outranks the verb', () => {
+  const plan = planFinishDay([{ id: 'a', issueKey: 'GEN-1', startTs: 0, endTs: 60_000, status: 'synced', worklogId: '1' }]);
+  assert.equal(syncLabel(plan, { verb: 'Sync week' }), 'Nothing to sync');
+});

@@ -21,9 +21,10 @@ import { createRowNav } from './keynav.js';
 import { isPinned, renderPins, togglePin } from './pins.js';
 import { registerRenderer, renderAll } from './render.js';
 import { clearSelection } from './selection.js';
-import { registerView, setActiveView, wireShell } from './shell.js';
+import { activeView, hasView, notifyDayChange, registerView, setActiveView, wireShell } from './shell.js';
 import {
   appVersion,
+  entriesFor,
   externalPending,
   invalidateExternal,
   isToday,
@@ -37,6 +38,7 @@ import {
   persistTimer,
   refreshExternal,
   saveUi,
+  setEntriesFor,
   state,
   ZOOM_LEVELS,
 } from './state.js';
@@ -50,7 +52,7 @@ import {
   wireSettings,
   wireSetup,
 } from './settings-ui.js';
-import { finishDay, updateFinishButton } from './sync.js';
+import { finishDay, syncWeek, updateFinishButton } from './sync.js';
 import { createIssueLookup, loadIssues, renderTaskList, searchIssues } from './tasks.js';
 import {
   hideQuickEntry,
@@ -79,6 +81,7 @@ import {
   todayKey,
   tsToHHMM,
 } from './util.js';
+import { registerWeekView, renderWeek, updateWeekLive, weekAnchorDays, wireWeekControls } from './week-view.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -104,13 +107,20 @@ async function boot() {
     unmount() {
       $('view-day').hidden = true;
     },
+    // Time booked straight into Jira belongs in this day's total too. Fired after
+    // the first paint, and never allowed to break the local view if Jira is down.
+    onDayChange(date) {
+      return refreshExternal(date);
+    },
   });
-  // Hardcoded rather than restored from state.ui.activeView: week and month do not
-  // exist yet, and restoring a view that is not registered would leave a blank app.
-  setActiveView('day');
+  registerWeekView({ selectDate });
+  // Restored now that there is more than one view to restore. Month is still not
+  // registered, and a stored preference naming it would leave a blank app.
+  setActiveView(hasView(state.ui.activeView) ? state.ui.activeView : 'day');
 
   registerRenderer(renderEntryList);
   registerRenderer(renderTimeline);
+  registerRenderer(renderWeek);
   registerRenderer(renderTaskList);
   registerRenderer(renderPins);
   registerRenderer(updateTotal);
@@ -133,6 +143,10 @@ async function boot() {
   wireDayPanel();
   wireDayNav();
   wireDayView();
+  wireWeekControls({
+    onZoom: (step) => changeZoom(step),
+    onSync: () => syncWeek(weekAnchorDays()),
+  });
   wireDayViewDrag();
   wireEntryList();
   wireHelp();
@@ -145,6 +159,7 @@ async function boot() {
 
   onTick(() => {
     updateTotal();
+    updateWeekLive();
     updateNowMarkers();
   });
 
@@ -184,17 +199,19 @@ function installTestHook() {
     whenIdle: () => externalPending ?? Promise.resolve(),
 
     /**
-     * Re-read the day log and repaint, **without** touching Jira.
+     * Re-read the day logs on screen and repaint, **without** touching Jira.
      *
-     * Deliberately not `selectDate`. That is a day *change*: it clears the selection
-     * and asks for the day's Jira-side rows, and while the per-day cache usually
-     * answers that without a request, "usually" is not a property a harness called a
-     * hundred times a run should rest on. This never touches Jira by construction.
-     * Nothing in a run writes to Jira, so the rows already on screen are still true.
+     * Every day drawn, not just the selected one: the week view has five to seven on
+     * screen, and a check that clears one of the others would otherwise see the old
+     * rows for the rest of the run. Deliberately not `selectDate` — that is a day
+     * *change*, which clears the selection and asks Jira for rows the harness
+     * already has and never invalidates.
      */
     async reloadDay() {
-      const day = await window.joggl.days.get(state.selectedDate);
-      state.entries = day.entries;
+      for (const key of new Set([state.selectedDate, ...weekAnchorDays()])) {
+        const day = await window.joggl.days.get(key);
+        setEntriesFor(key, day.entries);
+      }
       renderAll();
     },
 
@@ -227,19 +244,15 @@ async function selectDate(date) {
   $('current-date-label').textContent = formatDateLabel(date);
   $('next-day').disabled = date >= todayKey();
 
-  const today = isToday();
-  $('task-input').disabled = !today;
-  $('start-time-input').disabled = !today;
-  $('start-stop-btn').disabled = !today;
-
   // A property of the day now on screen, so it belongs here rather than in a render.
   applyWeekendTint();
 
   renderAll();
 
-  // Time booked straight into Jira belongs in this day's total too. Fetched after
-  // the first paint, and never allowed to break the local view if Jira is down.
-  refreshExternal(date);
+  // Which days have to be read depends on the view: one for the day view, the whole
+  // week for the week view. Asked of the view rather than branched on here, so this
+  // function does not learn about a view every time one is added.
+  notifyDayChange(date);
 }
 
 /**
@@ -301,14 +314,7 @@ function wireDayNav() {
     const picked = await pickDate(state.selectedDate);
     if (picked && picked !== state.selectedDate) selectDate(picked);
   });
-  $('finish-day-btn').addEventListener('click', async () => {
-    await finishDay();
-    // Newly created worklogs are now claimed by local entries; re-reading keeps
-    // the two views from disagreeing about what is in Jira. The cached rows are
-    // stale by definition here — Finish Day is the one thing that changes them.
-    invalidateExternal(state.selectedDate);
-    await refreshExternal();
-  });
+  $('finish-day-btn').addEventListener('click', () => finishDay());
   $('refresh-tasks-btn').addEventListener('click', async () => {
     // Pressing ↻ Refresh is the user saying "I know something changed", which is the
     // one thing the per-day cache cannot know. Without dropping the day first,
@@ -328,6 +334,14 @@ function updateTimerUi() {
   const button = $('start-stop-btn');
   const display = $('timer-display');
   const running = Boolean(state.timer);
+
+  // The timer runs only on today. In the day view that means the controls are dead
+  // on any other day; in the week view today is usually a column already on screen,
+  // so they stay live and starting one steps the view to this week instead.
+  const canStart = isToday() || activeView() === 'week';
+  input.disabled = !canStart;
+  startInput.disabled = !canStart;
+  button.disabled = !canStart && !running;
 
   button.innerHTML = running ? `${STOP_ICON}Stop` : `${PLAY_ICON}Start`;
   // btn-stop only recolours. Swapping btn-primary out with it stripped the
@@ -505,7 +519,13 @@ function wireOmnibar() {
       await stopTimer();
       return;
     }
-    if (!isToday()) return;
+    if (!isToday()) {
+      // Only the week view offers this: the day view's controls are dead off today,
+      // so there is nothing to press. Stepping to today puts the block that is about
+      // to start where it can be seen.
+      if (activeView() !== 'week') return;
+      await selectDate(todayKey());
+    }
 
     if (pickedIssue) {
       await startTimer({
@@ -535,24 +555,26 @@ function wireOmnibar() {
 // ── Day view controls ──────────────────────────────────────────────────────
 
 function updateZoomLabel() {
-  $('zoom-lbl').textContent = `${ZOOM_LEVELS[state.ui.zoomIdx] ?? 1}×`;
+  const label = `${ZOOM_LEVELS[state.ui.zoomIdx] ?? 1}×`;
+  $('zoom-lbl').textContent = label;
+  $('week-zoom-lbl').textContent = label;
+}
+
+/** One zoom for both views: the week is as tall as the day at the same setting. */
+async function changeZoom(step) {
+  const next = state.ui.zoomIdx + step;
+  if (next < 0 || next > ZOOM_LEVELS.length - 1) return;
+  await saveUi({ zoomIdx: next });
+  updateZoomLabel();
+  renderAll();
 }
 
 function wireDayView() {
   $('zoom-icon').innerHTML = ZOOM_ICON;
+  $('week-zoom-icon').innerHTML = ZOOM_ICON;
 
-  $('zoom-in').addEventListener('click', async () => {
-    if (state.ui.zoomIdx >= ZOOM_LEVELS.length - 1) return;
-    await saveUi({ zoomIdx: state.ui.zoomIdx + 1 });
-    updateZoomLabel();
-    renderTimeline();
-  });
-  $('zoom-out').addEventListener('click', async () => {
-    if (state.ui.zoomIdx <= 0) return;
-    await saveUi({ zoomIdx: state.ui.zoomIdx - 1 });
-    updateZoomLabel();
-    renderTimeline();
-  });
+  $('zoom-in').addEventListener('click', () => changeZoom(1));
+  $('zoom-out').addEventListener('click', () => changeZoom(-1));
 
   $('schedule-grid').addEventListener('click', onGridClick);
 
@@ -663,14 +685,16 @@ function wirePinPicker() {
  * recent entry, because "start the last thing again" is the whole point of a
  * keyboard shortcut for a timer — otherwise it would only ever be able to stop.
  */
-function resumeOrToggleTimer() {
+async function resumeOrToggleTimer() {
   const input = $('task-input');
-  if (state.timer || input.value.trim() || !isToday()) {
+  if (state.timer || input.value.trim() || (!isToday() && activeView() !== 'week')) {
     $('start-stop-btn').click();
     return;
   }
 
-  const last = [...state.entries]
+  // Today's, explicitly: in the week view the selected day is often not today, and
+  // resuming "the day's last entry" means the day the timer would run on.
+  const last = [...entriesFor(todayKey())]
     .filter((e) => !e.external && e.endTs !== null)
     .sort((a, b) => b.endTs - a.endTs)[0];
 
@@ -678,6 +702,9 @@ function resumeOrToggleTimer() {
     toastWarn('Nothing to resume yet. Ctrl+L to search for an issue.');
     return;
   }
+  // startTimer refuses off today, same as the button — so a resume pressed from a
+  // past week has to come home first, exactly as pressing Start there now does.
+  if (!isToday()) await selectDate(todayKey());
   startTimer({ issueKey: last.issueKey, issueId: last.issueId, title: last.title });
 }
 

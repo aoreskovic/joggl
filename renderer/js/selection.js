@@ -10,6 +10,7 @@
 // `liveUpdate` in timeline-drag.js mirrors a drag by hand.
 
 import { pruned, selectOnly, toggled } from './selection-model.js';
+import { BAND_THRESHOLD_PX, canStartBand, enclosedIds, normalisedRect } from './rubber-band.js';
 import { state } from './state.js';
 
 const CLASS = 'is-selected';
@@ -92,4 +93,81 @@ export function applySelection() {
   for (const el of document.querySelectorAll(BOTH)) {
     el.classList.toggle(CLASS, ids.has(el.dataset.id));
   }
+}
+
+// ── The rubber band ────────────────────────────────────────────────────────
+
+/**
+ * Until when a click is the tail of a band rather than a click.
+ *
+ * The grid's own click clears the selection and opens the quick-entry popup — which
+ * is exactly right for a click on empty space, and exactly wrong for the click that
+ * follows a band, which would wipe what the band had just selected a frame earlier.
+ * Module level rather than per-gesture for the same reason `timeline-drag.js` keeps
+ * its own: the commit re-renders, and the click lands on a new element.
+ */
+let bandSuppressedUntil = 0;
+const BAND_TAIL_MS = 200;
+
+export function isBandSuppressed() {
+  return Date.now() < bandSuppressedUntil;
+}
+
+/** Called once at boot. Both grids exist in the markup from the start. */
+export function wireRubberBand() {
+  for (const id of ['schedule-grid', 'week-scroll']) {
+    document.getElementById(id)?.addEventListener('mousedown', onBandStart);
+  }
+}
+
+function onBandStart(event) {
+  if (event.button !== 0 || !canStartBand(event.target)) return;
+
+  const origin = { x: event.clientX, y: event.clientY };
+  let el = null;
+
+  const onMouseMove = (move) => {
+    const crossed =
+      Math.abs(move.clientX - origin.x) >= BAND_THRESHOLD_PX ||
+      Math.abs(move.clientY - origin.y) >= BAND_THRESHOLD_PX;
+    if (!el && !crossed) return;
+
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'rubber-band';
+      document.body.appendChild(el);
+      // Only once the band is real: a press that never became one must leave the
+      // text selection and the focus it would otherwise have taken.
+      move.preventDefault();
+    }
+
+    const rect = normalisedRect(origin, { x: move.clientX, y: move.clientY });
+    el.style.left = `${rect.left}px`;
+    el.style.top = `${rect.top}px`;
+    el.style.width = `${rect.right - rect.left}px`;
+    el.style.height = `${rect.bottom - rect.top}px`;
+  };
+
+  const onMouseUp = (up) => {
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+    if (!el) return; // never crossed the threshold — this was a click, leave it alone
+
+    el.remove();
+    el = null;
+    bandSuppressedUntil = Date.now() + BAND_TAIL_MS;
+
+    // Viewport coordinates on both sides: the band is positioned fixed and the boxes
+    // come from getBoundingClientRect, so neither needs to know how far the grid has
+    // been scrolled.
+    const rect = normalisedRect(origin, { x: up.clientX, y: up.clientY });
+    const boxes = [...document.querySelectorAll('.sched-entry-block:not(.live)')].map((block) => {
+      const box = block.getBoundingClientRect();
+      return { id: block.dataset.id, left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+    });
+    selectMany(enclosedIds(rect, boxes));
+  };
+
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
 }

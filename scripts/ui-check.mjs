@@ -2091,6 +2091,79 @@ async function clicks() {
       return d.blocks === 2 && d.cards === 2 && d.after === 0;
     },
   );
+
+  await check(
+    'a rubber band selects what it encloses, and not what it merely crosses',
+    `await H.resetDay();
+     const at = (hh, mm) => { const d = new Date(); d.setHours(hh, mm || 0, 0, 0); return d.getTime(); };
+     await window.joggl.days.save(H.todayKey(), [
+       { id: 'band-in', issueKey: 'GEN-1', issueId: null, title: 'Enclosed', startTs: at(10),
+         endTs: at(10, 30), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       { id: 'band-cross', issueKey: 'GEN-2', issueId: null, title: 'Crossed', startTs: at(11),
+         endTs: at(15), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+     ]);
+     await window.__jogglTest.reloadDay();
+     await H.showHour('10:00');
+     const inBox = H.q('.sched-entry-block[data-id="band-in"]').getBoundingClientRect();
+     const crossBox = H.q('.sched-entry-block[data-id="band-cross"]').getBoundingClientRect();
+     // From above the first block to halfway down the second: the first is contained,
+     // the second only crossed. Wide enough on both sides to contain the full width.
+     const x1 = Math.round(Math.min(inBox.left, crossBox.left) - 6);
+     const x2 = Math.round(Math.max(inBox.right, crossBox.right) + 6);
+     const y1 = Math.round(inBox.top - 6);
+     const y2 = Math.round(crossBox.top + crossBox.height / 2);
+     H.mouse(H.q('#schedule-grid'), 'mousedown', x1, y1, 1);
+     for (let i = 1; i <= 5; i++) {
+       H.mouse(document, 'mousemove', Math.round(x1 + (x2 - x1) * i / 5), Math.round(y1 + (y2 - y1) * i / 5), 1);
+     }
+     H.mouse(document, 'mouseup', x2, y2, 0);
+     await H.sleep(200);
+     const picked = H.all('.sched-entry-block.is-selected').map(e => e.dataset.id);
+     const popup = !!H.q('.sched-quick-entry');
+     await H.resetDay();
+     return JSON.stringify({ picked, popup })`,
+    (v) => {
+      const d = JSON.parse(v);
+      // The popup must not have opened: the click the band produces has to be
+      // suppressed, or the band would select and deselect in the same gesture.
+      return JSON.stringify(d.picked) === JSON.stringify(['band-in']) && d.popup === false;
+    },
+  );
+
+  await check(
+    'a press on a block is a move, not a band, and a press that never moves is still a click',
+    `await H.resetDay();
+     const at = (hh) => { const d = new Date(); d.setHours(hh, 0, 0, 0); return d.getTime(); };
+     await window.joggl.days.save(H.todayKey(), [
+       { id: 'band-block', issueKey: 'GEN-1', issueId: null, title: 'A block', startTs: at(10),
+         endTs: at(11), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+     ]);
+     await window.__jogglTest.reloadDay();
+     await H.showHour('10:00');
+     const box = H.q('.sched-entry-block[data-id="band-block"]').getBoundingClientRect();
+     H.mouse(H.q('.sched-entry-block[data-id="band-block"]'), 'mousedown',
+             Math.round(box.left + 20), Math.round(box.top + 8), 1);
+     H.mouse(document, 'mousemove', Math.round(box.left + 60), Math.round(box.top + 40), 1);
+     const bandOnBlock = !!H.q('.rubber-band');
+     H.mouse(document, 'mouseup', Math.round(box.left + 60), Math.round(box.top + 40), 0);
+     await H.sleep(250);
+
+     // And a plain click on empty grid still opens the popup, unchanged.
+     const y = await H.showHour('14:00');
+     H.mouse(H.q('#schedule-grid'), 'mousedown', H.gridX(), y, 1);
+     H.mouse(document, 'mouseup', H.gridX(), y, 0);
+     H.q('#schedule-grid').dispatchEvent(new MouseEvent('click', {
+       bubbles: true, cancelable: true, clientX: H.gridX(), clientY: y }));
+     await H.sleep(300);
+     const popup = !!H.q('.sched-quick-entry');
+     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+     await H.resetDay();
+     return JSON.stringify({ bandOnBlock, popup })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.bandOnBlock === false && d.popup === true;
+    },
+  );
 }
 
 async function syncButton() {

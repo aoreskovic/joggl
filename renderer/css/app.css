@@ -2231,3 +2231,14 @@ body.is-dragging-issue * {
   /* Never swallow the click it is describing. */
   pointer-events: none;
 }
+
+/* The rubber band. Fixed, because it is drawn in viewport coordinates and must not
+   scroll with the grid under it mid-gesture; pointer-events off, or it would take the
+   mouseup that ends it. */
+.rubber-band {
+  position: fixed;
+  z-index: 60;
+  border: 1px solid var(--accent);
+  background: var(--accent-softer);
+  pointer-events: none;
+}

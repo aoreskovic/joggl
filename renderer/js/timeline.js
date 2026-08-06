@@ -10,7 +10,7 @@ import { showContextMenu } from './context-menu.js';
 import { editEntryComment } from './entries.js';
 import { createRowNav, wireRovingList } from './keynav.js';
 import { renderAll } from './render.js';
-import { applySelection, clearSelection, select, toggleSelect } from './selection.js';
+import { applySelection, clearSelection, isBandSuppressed, select, toggleSelect } from './selection.js';
 import { activeView } from './shell.js';
 import {
   entriesFor,
@@ -342,6 +342,10 @@ function onQuickEntryOutside(event) {
 }
 
 export function onGridClick(event) {
+  // A band that just finished produces a click on the grid it was drawn over, and
+  // this function clears the selection and opens the quick-entry popup. Without
+  // standing aside, every band would select and then instantly deselect.
+  if (isBandSuppressed()) return;
   if (event.target.closest('.sched-entry-block') || event.target.closest('.sched-handle')) return;
   // The week's column heads are sticky, so once the grid is scrolled they sit *over*
   // the top of their own column: a click on one is inside the column's rect, and

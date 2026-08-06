@@ -20,7 +20,7 @@ import { PLAY_ICON, STOP_ICON, ZOOM_ICON } from './icons.js';
 import { createRowNav } from './keynav.js';
 import { isPinned, renderPins, togglePin } from './pins.js';
 import { registerRenderer, renderAll } from './render.js';
-import { clearSelection } from './selection.js';
+import { clearSelection, wireRubberBand } from './selection.js';
 import { activeView, hasView, notifyDayChange, registerView, setActiveView, wireShell } from './shell.js';
 import {
   appVersion,
@@ -148,6 +148,7 @@ async function boot() {
     onSync: () => syncWeek(weekAnchorDays()),
   });
   wireDayViewDrag();
+  wireRubberBand();
   wireEntryList();
   wireHelp();
   wirePinPicker();

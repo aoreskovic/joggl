@@ -1751,6 +1751,13 @@ async function keyboard() {
      const up = document.activeElement?.dataset.id ?? null;
      press(document.activeElement, 'ArrowUp');
      const held = document.activeElement?.dataset.id ?? null;
+     // dayKey is not today, so H.resetDay()'s own cleanup — which only ever clears
+     // H.todayKey() — leaves nav-early/nav-late sitting on dayKey for the rest of
+     // the run. Worse than a stray fixture: findEmptyDay caches the day it found on
+     // its first call and every later call in the run trusts that cache instead of
+     // re-checking, so a dayKey left dirty here is handed straight to the copy and
+     // empty-state checks as "confirmed empty" when it no longer is.
+     await H.clearDays([dayKey]);
      await H.resetDay();
      return JSON.stringify({ down, up, held })`,
     (v) => {

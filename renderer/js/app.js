@@ -51,7 +51,7 @@ import {
   wireSettings,
   wireSetup,
 } from './settings-ui.js';
-import { finishDay, updateFinishButton } from './sync.js';
+import { finishDay, syncWeek, updateFinishButton } from './sync.js';
 import { createIssueLookup, loadIssues, renderTaskList, searchIssues } from './tasks.js';
 import {
   hideQuickEntry,
@@ -142,7 +142,10 @@ async function boot() {
   wireDayPanel();
   wireDayNav();
   wireDayView();
-  wireWeekControls({ onZoom: (step) => changeZoom(step) });
+  wireWeekControls({
+    onZoom: (step) => changeZoom(step),
+    onSync: () => syncWeek(weekAnchorDays()),
+  });
   wireDayViewDrag();
   wireEntryList();
   wireHelp();
@@ -315,19 +318,7 @@ function wireDayNav() {
     const picked = await pickDate(state.selectedDate);
     if (picked && picked !== state.selectedDate) selectDate(picked);
   });
-  $('finish-day-btn').addEventListener('click', async () => {
-    // Read before the await, not after. A sync takes seconds, nothing suppresses the
-    // bare `[` and `]` day shortcuts while it runs, and re-reading afterwards would
-    // invalidate whichever day the user had stepped to — leaving the day that was
-    // actually synced holding its pre-sync cache.
-    const day = state.selectedDate;
-    await finishDay();
-    // Newly created worklogs are now claimed by local entries; re-reading keeps
-    // the two views from disagreeing about what is in Jira. The cached rows are
-    // stale by definition here — Finish Day is the one thing that changes them.
-    invalidateExternal(day);
-    await refreshExternal(day);
-  });
+  $('finish-day-btn').addEventListener('click', () => finishDay());
   $('refresh-tasks-btn').addEventListener('click', async () => {
     // Pressing ↻ Refresh is the user saying "I know something changed", which is the
     // one thing the per-day cache cannot know. Without dropping the day first,

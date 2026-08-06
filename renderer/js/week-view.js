@@ -10,9 +10,11 @@
 // bound by id — including the drag sources, which are delegated onto `#pin-chips`
 // itself and survive the move because moving a node keeps its listeners.
 
+import { nothingToSync, planFinishDay, syncLabel, syncTooltip } from './finish-day.js';
 import { wireRovingList } from './keynav.js';
 import { applySelection, select } from './selection.js';
 import { activeView, registerView } from './shell.js';
+import { isSyncRunning } from './sync.js';
 import { pxPerMin, refreshRange, saveUi, state, visibleEntriesFor } from './state.js';
 import { onGridClick, paintDayColumn } from './timeline.js';
 import { setColumns } from './timeline-columns.js';
@@ -207,6 +209,24 @@ function renderWeekHeader(days) {
 
   const total = days.reduce((sum, day) => sum + dayTotalMs(day), 0);
   $('week-total').textContent = `Total: ${msToDur(total)}`;
+  updateWeekSyncButton();
+}
+
+/**
+ * What the week's Sync button says it will do, before it does it.
+ *
+ * `syncLabel`'s counting rules, unchanged: only what reaches Jira is counted, and
+ * entries with no issue key get their own phrasing. The plan is built from the days
+ * drawn — a weekend hidden because it is empty has nothing to contribute anyway.
+ */
+export function updateWeekSyncButton() {
+  const button = $('week-sync-btn');
+  if (!button) return;
+  const busy = isSyncRunning();
+  const plan = planFinishDay(drawnDays.flatMap((day) => visibleEntriesFor(day).filter((e) => !e.external)));
+  button.textContent = syncLabel(plan, { verb: 'Sync week', busy });
+  button.title = syncTooltip(plan);
+  button.disabled = busy || nothingToSync(plan);
 }
 
 /**
@@ -232,7 +252,8 @@ function scrollWeekToNow() {
 }
 
 /** Called once at boot. The controls outlive every render, so they are bound once. */
-export function wireWeekControls({ onZoom }) {
+export function wireWeekControls({ onZoom, onSync }) {
+  $('week-sync-btn').addEventListener('click', () => onSync());
   $('prev-week').addEventListener('click', () => selectDay(addWeeks(state.selectedDate, -1)));
   $('next-week').addEventListener('click', () => {
     if ($('next-week').disabled) return;

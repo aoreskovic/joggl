@@ -74,20 +74,28 @@ export function nothingToSync(plan) {
  * it; they get their own phrasing when they are all there is, and the tooltip
  * carries the rest.
  *
+ * `verb` is for a button that is not about one day — the week's, which cannot be
+ * "Sync" or "Re-sync" because a week usually holds some of each.
+ *
  * @param {ReturnType<planFinishDay>} plan
- * @param {{isToday?: boolean, busy?: boolean, done?: number, total?: number}} [opts]
+ * @param {{isToday?: boolean, busy?: boolean, done?: number, total?: number, verb?: string}} [opts]
  */
-export function syncLabel(plan, { isToday = true, busy = false, done = null, total = null } = {}) {
+export function syncLabel(
+  plan,
+  { isToday = true, busy = false, done = null, total = null, verb = null } = {},
+) {
   if (busy) return done === null ? 'Syncing…' : `Syncing ${done}/${total}…`;
   if (nothingToSync(plan)) return 'Nothing to sync';
 
   // Past days are a rewrite of a day already dealt with, and saying so is the only
   // warning that this is not the first time.
-  const verb = isToday ? 'Sync' : 'Re-sync';
-  if (plan.toSubmit.length === 0) return `${verb} · ${plural(plan.toMarkLocal.length, 'local entry', 'local entries')}`;
+  const word = verb ?? (isToday ? 'Sync' : 'Re-sync');
+  if (plan.toSubmit.length === 0) {
+    return `${word} · ${plural(plan.toMarkLocal.length, 'local entry', 'local entries')}`;
+  }
 
   const ms = plan.toSubmit.reduce((sum, e) => sum + Math.max(0, e.endTs - e.startTs), 0);
-  return `${verb} · ${plural(plan.toSubmit.length, 'entry', 'entries')}, ${msToDur(ms)}`;
+  return `${word} · ${plural(plan.toSubmit.length, 'entry', 'entries')}, ${msToDur(ms)}`;
 }
 
 /** The parts that do not fit on a button, in the order they matter. */

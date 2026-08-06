@@ -105,6 +105,10 @@ Not scripted — it needs a machine without Node, or at least a shell without it
 | Drag a **synced** block to another day | It moves and goes back to ● pending. Sync then *rewrites* that worklog rather than logging a second one — the issue has not changed, only when the work started. |
 | Drag a **Manual Jira entry** anywhere | It refuses, with the message it already gives. It is not Joggl's to move. |
 | Drag a block out of a column and release over the header | It stays on the last column it was over. Nothing is created on a day the cursor never entered. |
+| Read the **Sync week** button | `Sync week · 12 entries, 34h 15m` — what will actually reach Jira, across every column shown. With nothing waiting it reads **Nothing to sync** and is dimmed. |
+| Hover it | The tooltip says what is a rewrite rather than a fresh log, what is already in Jira, and that the running timer is excluded. |
+| Press it with entries on three days | They go up day by day. One summary at the end; on a partial failure the failures name their day and **Retry failed** retries only those. |
+| Press it, then look at the day view | The same entries are ✓ synced there. Nothing is logged twice. |
 
 ### Editing which task a block belongs to
 

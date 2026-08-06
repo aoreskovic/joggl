@@ -1091,6 +1091,52 @@ async function weekView() {
       return d.left === 0 && d.landed === 1 && d.worklogId === '99001' && d.status === 'pending';
     },
   );
+
+  await check(
+    'week: Sync counts the whole week, and says so',
+    inWeek(`const a = H.colDay(0), b = H.colDay(2);
+            const block = (id, day, from, to) => ({
+              id, issueKey: 'GEN-1', issueId: null, title: 'Work',
+              startTs: new Date(day + 'T' + from).getTime(),
+              endTs: new Date(day + 'T' + to).getTime(),
+              status: 'pending', worklogId: null, comment: null, errorMsg: null,
+            });
+            await window.joggl.days.save(a, [block('wk-s-1', a, '09:00:00', '10:00:00')]);
+            await window.joggl.days.save(b, [block('wk-s-2', b, '09:00:00', '10:30:00')]);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => H.q('#week-sync-btn').textContent.includes('entries'), 4000, 'the label');
+            const label = H.q('#week-sync-btn').textContent;
+            const disabled = H.q('#week-sync-btn').disabled;
+            await H.clearDays([a, b]);
+            await H.until(() => H.q('#week-sync-btn').disabled, 4000, 'the button to go quiet');
+            return JSON.stringify({ label, disabled, empty: H.q('#week-sync-btn').textContent });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.label === 'Sync week · 2 entries, 2h 30m' && d.disabled === false &&
+        d.empty === 'Nothing to sync';
+    },
+  );
+
+  await check(
+    'week: an empty week says what to do, and stops saying it once there is time',
+    inWeek(`const day = H.colDay(1);
+            await H.clearDays(H.all('.week-colhead').map(h => h.dataset.day));
+            const hintShown = !H.q('#week-empty-hint').hidden;
+            await window.joggl.days.save(day, [{
+              id: 'wk-hint-1', issueKey: 'GEN-1', issueId: null, title: 'Something',
+              startTs: new Date(day + 'T09:00:00').getTime(),
+              endTs: new Date(day + 'T10:00:00').getTime(),
+              status: 'pending', worklogId: null, comment: null, errorMsg: null,
+            }]);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => H.q('#week-empty-hint').hidden, 4000, 'the hint to go');
+            await H.clearDays([day]);
+            return JSON.stringify({ hintShown, gone: H.q('#week-empty-hint').hidden });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.gone === true;
+    },
+  );
 }
 
 async function quickEntry() {

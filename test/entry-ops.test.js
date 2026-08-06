@@ -17,6 +17,7 @@ import {
   flaggedOverlaps,
   movedEntry,
   overlappingIds,
+  planClearWeek,
   retargetEntry,
   sameComment,
   sameTimes,
@@ -496,4 +497,84 @@ test('a block dropped into the 25th hour of a clock-change day keeps the length 
   assert.equal(moved.startTs, desiredStart, 'not pulled back to the naive 24-hour boundary');
   assert.equal(moved.endTs, dayEnd, "ends exactly at the day's real midnight");
   assert.equal(moved.endTs - moved.startTs, 30 * 60_000, 'the length is untouched');
+});
+
+// ── The arithmetic behind Clear week ─────────────────────────────────────────
+
+/** A day → entries map turned into the `entriesFor` reader planClearWeek expects. */
+function readerOf(byDay) {
+  return (day) => byDay[day] ?? [];
+}
+
+test('days out of order and with a duplicate are deduped and sorted', () => {
+  const plan = planClearWeek(
+    ['2026-07-30', '2026-07-28', '2026-07-30', '2026-07-29'],
+    readerOf({
+      '2026-07-28': [entry({ id: 'a' })],
+      '2026-07-29': [entry({ id: 'b' })],
+      '2026-07-30': [entry({ id: 'c' })],
+    }),
+  );
+  assert.deepEqual(plan.days, ['2026-07-28', '2026-07-29', '2026-07-30']);
+  // A duplicated day must not have its entries counted twice.
+  assert.deepEqual(plan.all.map((e) => e.id).sort(), ['a', 'b', 'c']);
+});
+
+test('a week where every entry is synced offers no "unsynced only" button', () => {
+  const plan = planClearWeek(
+    ['2026-07-28', '2026-07-29'],
+    readerOf({
+      '2026-07-28': [entry({ id: 'a', worklogId: '900' })],
+      '2026-07-29': [entry({ id: 'b', worklogId: '901' })],
+    }),
+  );
+  assert.equal(plan.synced.length, plan.all.length);
+  assert.equal(plan.offerUnsyncedOnly, false, 'clearing unsynced-only would be the same as clearing all');
+});
+
+test('a week where nothing is synced offers no "unsynced only" button either', () => {
+  const plan = planClearWeek(
+    ['2026-07-28', '2026-07-29'],
+    readerOf({
+      '2026-07-28': [entry({ id: 'a' })],
+      '2026-07-29': [entry({ id: 'b' })],
+    }),
+  );
+  assert.equal(plan.synced.length, 0);
+  assert.equal(plan.offerUnsyncedOnly, false, 'there is nothing unsynced to spare');
+});
+
+test('a week with some of each offers the button', () => {
+  const plan = planClearWeek(
+    ['2026-07-28', '2026-07-29'],
+    readerOf({
+      '2026-07-28': [entry({ id: 'a', worklogId: '900' })],
+      '2026-07-29': [entry({ id: 'b' })],
+    }),
+  );
+  assert.equal(plan.offerUnsyncedOnly, true);
+});
+
+test('"unsynced only" keeps exactly the synced entries on every day, not just the first', () => {
+  const plan = planClearWeek(
+    ['2026-07-28', '2026-07-29'],
+    readerOf({
+      '2026-07-28': [entry({ id: 'a-keep', worklogId: '900' }), entry({ id: 'a-go' })],
+      '2026-07-29': [entry({ id: 'b-keep', worklogId: '901' }), entry({ id: 'b-go' })],
+    }),
+  );
+  assert.deepEqual(plan.resultFor('2026-07-28', 'unsynced').map((e) => e.id), ['a-keep']);
+  assert.deepEqual(plan.resultFor('2026-07-29', 'unsynced').map((e) => e.id), ['b-keep']);
+});
+
+test('"all" empties every day, whatever it holds', () => {
+  const plan = planClearWeek(
+    ['2026-07-28', '2026-07-29'],
+    readerOf({
+      '2026-07-28': [entry({ id: 'a', worklogId: '900' })],
+      '2026-07-29': [entry({ id: 'b' })],
+    }),
+  );
+  assert.deepEqual(plan.resultFor('2026-07-28', 'all'), []);
+  assert.deepEqual(plan.resultFor('2026-07-29', 'all'), []);
 });

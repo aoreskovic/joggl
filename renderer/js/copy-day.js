@@ -11,11 +11,11 @@
 // screen, which is what lets one range read answer the entire search below.
 
 import { findLastDayWithEntries, MAX_LOOKBACK_DAYS } from './day-search.js';
-import { copiedToDay } from './entry-ops.js';
+import { copiedToDay, planClearWeek } from './entry-ops.js';
 import { askModal } from './modal.js';
 import { renderAll } from './render.js';
 import { entriesFor, loadDays, persistDayNow, setEntriesFor, state } from './state.js';
-import { toast, toastOk } from './toast.js';
+import { toast, toastErr, toastOk } from './toast.js';
 import { addDays, esc, formatDateLabel, msToDur } from './util.js';
 
 /**
@@ -164,19 +164,17 @@ export async function clearDay(day = state.selectedDate) {
  * — and the count in the question is what makes it answerable.
  */
 export async function clearWeek(days) {
-  const targets = [...new Set(days)].sort();
-  const all = targets.flatMap((day) => entriesFor(day));
-  const synced = all.filter((e) => e.worklogId);
+  const plan = planClearWeek(days, entriesFor);
 
-  if (all.length === 0) {
+  if (plan.all.length === 0) {
     toast('Nothing to clear this week.');
     return;
   }
 
-  const body = clearBody(synced, all.filter((e) => !e.worklogId));
+  const body = clearBody(plan.synced, plan.unsynced, 'This week');
   const days_ = document.createElement('p');
   days_.className = 'panel-lede';
-  days_.textContent = `Across ${targets.length} day${targets.length === 1 ? '' : 's'}.`;
+  days_.textContent = `Across ${plan.days.length} day${plan.days.length === 1 ? '' : 's'}.`;
   body.appendChild(days_);
 
   const answer = await askModal({
@@ -184,24 +182,35 @@ export async function clearWeek(days) {
     body,
     buttons: [
       { label: 'Cancel', value: 'cancel' },
-      ...(synced.length > 0 && synced.length < all.length
-        ? [{ label: 'Clear unsynced only', value: 'unsynced' }]
-        : []),
+      ...(plan.offerUnsyncedOnly ? [{ label: 'Clear unsynced only', value: 'unsynced' }] : []),
       { label: 'Clear all', value: 'all', primary: true },
     ],
     dismissValue: 'cancel',
   });
   if (answer === 'cancel') return;
 
-  for (const day of targets) {
-    setEntriesFor(day, answer === 'unsynced' ? entriesFor(day).filter((e) => e.worklogId) : []);
-    await persistDayNow(day);
+  // Every day's result is computed and written to memory before any write to disk
+  // is attempted, so whatever happens next the screen — once `renderAll` runs in the
+  // `finally` below — shows every column cleared. A `persistDayNow` that throws
+  // partway through only risks that one day's clear not surviving a restart; it does
+  // not leave any column looking untouched on screen right now.
+  for (const day of plan.days) {
+    setEntriesFor(day, plan.resultFor(day, answer));
   }
-  renderAll();
-  toastOk(answer === 'unsynced' ? 'Unsynced entries cleared.' : 'Week cleared.');
+
+  try {
+    for (const day of plan.days) {
+      await persistDayNow(day);
+    }
+    toastOk(answer === 'unsynced' ? `${plural(plan.unsynced.length)} cleared.` : 'Week cleared.');
+  } catch (err) {
+    toastErr(`Could not save clearing the week — ${err.message}`);
+  } finally {
+    renderAll();
+  }
 }
 
-function clearBody(synced, rest) {
+function clearBody(synced, rest, subject = 'This day') {
   const body = document.createElement('div');
   const lines = [];
 
@@ -210,7 +219,7 @@ function clearBody(synced, rest) {
 
   const lede = document.createElement('p');
   lede.className = 'panel-lede';
-  lede.textContent = `This day holds ${lines.join(' and ')}.`;
+  lede.textContent = `${subject} holds ${lines.join(' and ')}.`;
   body.appendChild(lede);
 
   // Both of these have caught people out in the single-entry version, so they are

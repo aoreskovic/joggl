@@ -248,6 +248,44 @@ export function flaggedOverlaps(entries) {
   return ids;
 }
 
+/**
+ * The arithmetic behind Clear week: which days it touches, what is on them across
+ * all of them, and what each answer to the modal would leave on a given day.
+ *
+ * Pulled out of `copy-day.js` so the dedup-and-sort, the cross-day union, and the
+ * synced/unsynced split can be tested without a DOM — `clearWeek` itself only reads
+ * a modal answer and writes the days this decides on.
+ *
+ * @param {string[]} days the columns drawn — possibly out of order, possibly with a
+ *   duplicate if a caller ever passes the same day twice
+ * @param {(day: string) => object[]} entriesFor a per-day entry reader, e.g.
+ *   `entriesFor` from state.js
+ */
+export function planClearWeek(days, entriesFor) {
+  const targets = [...new Set(days)].sort();
+  // Read once per day and reused below, so "unsynced only" filters the same
+  // snapshot the totals were computed from rather than re-reading after `all` was
+  // built from it.
+  const perDay = new Map(targets.map((day) => [day, entriesFor(day)]));
+  const all = targets.flatMap((day) => perDay.get(day));
+  const synced = all.filter((e) => e.worklogId);
+
+  return {
+    days: targets,
+    all,
+    synced,
+    unsynced: all.filter((e) => !e.worklogId),
+    // Offered only when it would actually leave something different behind: not
+    // when every entry in the week is already synced (there is nothing unsynced to
+    // spare), and not when none is (it would be the same as "Clear all").
+    offerUnsyncedOnly: synced.length > 0 && synced.length < all.length,
+    /** What `day` is left holding if `answer` ('all' | 'unsynced') is applied. */
+    resultFor(day, answer) {
+      return answer === 'unsynced' ? (perDay.get(day) ?? []).filter((e) => e.worklogId) : [];
+    },
+  };
+}
+
 /** Ids of entries whose time ranges overlap. Allowed, but usually a mistake. */
 export function overlappingIds(entries) {
   const ids = new Set();

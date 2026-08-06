@@ -1173,6 +1173,61 @@ async function weekView() {
         JSON.stringify(d.labels) === JSON.stringify(['Copy previous day', 'Clear day', 'Clear week']);
     },
   );
+
+  await check(
+    'week: Clear week empties every column, wording says "week" not "day", and a Jira-side row survives it',
+    inWeek(`const days = H.all('.week-colhead').map(h => h.dataset.day);
+            const block = (id, day) => ({
+              id, issueKey: 'GEN-1', issueId: null, title: 'Work',
+              startTs: new Date(day + 'T09:00:00').getTime(),
+              endTs: new Date(day + 'T10:00:00').getTime(),
+              status: 'pending', worklogId: null, comment: null, errorMsg: null,
+            });
+            // One local entry on every drawn column, today included — the fake Jira
+            // client also books two worklogs on today, which is the row this check
+            // needs to still be on screen afterwards.
+            for (const [i, day] of days.entries()) {
+              await window.joggl.days.save(day, [block('wk-cw-' + i, day)]);
+            }
+            await window.__jogglTest.reloadDay();
+            await H.until(
+              () => H.all('#week-scroll .sched-entry-block:not(.live)').length >= days.length,
+              4000, 'the seeded blocks',
+            );
+            // Scoped to #week-scroll: the day view's own grid keeps its last render
+            // in the DOM, only hidden, while this view is up, and would otherwise be
+            // counted alongside it.
+            const externalBefore = H.all('#week-scroll .sched-entry-block.external').length;
+            if (externalBefore === 0) {
+              // No Jira-side row to prove survives — live mode against a site with
+              // nothing booked today. Nothing to assert; leave the days as found.
+              await H.clearDays(days);
+              return JSON.stringify({ skip: true });
+            }
+
+            H.all('.week-colhead')[0].querySelector('.week-colhead-menu').click();
+            await H.until(() => !H.q('#ctx-menu').classList.contains('hidden'), 4000, 'the menu');
+            H.all('#ctx-menu .ctx-item')[2].click();
+            await H.until(() => !H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the confirmation');
+            const bodyText = H.q('#modal-body').textContent;
+            H.all('#modal-buttons button').find(b => b.textContent === 'Clear all').click();
+            await H.until(() => H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the modal to close');
+            await H.sleep(250);
+
+            const left = [];
+            for (const day of days) left.push((await window.joggl.days.get(day)).entries.length);
+            const externalAfter = H.all('#week-scroll .sched-entry-block.external').length;
+            await H.clearDays(days);
+            return JSON.stringify({ left, bodyText, externalBefore, externalAfter, dayCount: days.length });`),
+    (v) => {
+      const d = JSON.parse(v);
+      if (d.skip) return 'skipped';
+      return d.left.every((n) => n === 0) &&
+        d.bodyText.includes('This week holds') && !d.bodyText.includes('This day holds') &&
+        d.bodyText.includes(`Across ${d.dayCount} day`) &&
+        d.externalBefore > 0 && d.externalAfter === d.externalBefore;
+    },
+  );
 }
 
 async function quickEntry() {

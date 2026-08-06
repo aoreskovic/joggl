@@ -6,6 +6,7 @@ import {
   eachDay,
   externalToEntries,
   installDayAccessors,
+  locateEntry,
   missingDays,
   withoutWorklog,
 } from './day-range.js';
@@ -180,6 +181,17 @@ export function entriesFor(dayKey) {
  */
 export function visibleEntriesFor(dayKey) {
   return copyableEntries(state.days.get(dayKey) ?? [], state.external.get(dayKey) ?? []);
+}
+
+/**
+ * The entry with this id and the day holding it, across every day loaded.
+ *
+ * The bound form of `locateEntry`. Every entry action goes through it, so an action
+ * reached from a week column writes to that column's day and not to whichever day
+ * happens to be marked.
+ */
+export function findEntry(id) {
+  return locateEntry(id, state.days, state.external);
 }
 
 /** Replace one day's entries, whether or not it is the day on screen. */

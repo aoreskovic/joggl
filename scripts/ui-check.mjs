@@ -1228,6 +1228,69 @@ async function weekView() {
         d.externalBefore > 0 && d.externalAfter === d.externalBefore;
     },
   );
+
+  // The day the week is anchored on is the *selected* one, and it is the only day
+  // the old lookup could see. So both of these deliberately pick a column that is
+  // not it — that is the whole bug.
+  const seedOffAnchor = (id, extra = '') => `
+    const heads = H.all('.week-colhead');
+    const i = heads.findIndex(h => !h.classList.contains('is-selected'));
+    const day = H.colDay(i);
+    const at = (hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+    await window.joggl.days.save(day, [
+      { id: '${id}', issueKey: 'GEN-1', issueId: null, title: 'Off the anchor',
+        startTs: at(9), endTs: at(10), status: 'pending', worklogId: null,
+        comment: null, errorMsg: null },
+      ${extra}
+    ]);
+    await window.__jogglTest.reloadDay();
+    await H.until(() => !!H.q('.sched-entry-block[data-id="${id}"]'), 4000, 'the seeded block');`;
+
+  await check(
+    'week: an action on a column that is not the marked day still reaches its entry',
+    inWeek(`${seedOffAnchor('x-off-1')}
+            const block = H.q('.sched-entry-block[data-id="x-off-1"]');
+            const onAnchor = block.dataset.day === H.q('.week-colhead.is-selected').dataset.day;
+            block.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+            await H.until(() => !H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the description dialog');
+            H.q('#modal-body .comment-field').value = 'written from another column';
+            H.all('#modal-buttons button').find(b => b.textContent === 'Save').click();
+            await H.until(() => H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the dialog to close');
+            await H.sleep(250);
+            const saved = (await window.joggl.days.get(day)).entries[0].comment;
+            await H.clearDays([day]);
+            return JSON.stringify({ onAnchor, saved });`),
+    (v) => {
+      const d = JSON.parse(v);
+      // If the seeded day *were* the anchor the check would prove nothing at all.
+      return d.onAnchor === false && d.saved === 'written from another column';
+    },
+  );
+
+  await check(
+    'week: deleting from a column that is not the marked day empties that day, not another',
+    inWeek(`${seedOffAnchor(
+      'x-off-2',
+      `{ id: 'x-off-keep', issueKey: 'GEN-2', issueId: null, title: 'Stays',
+         startTs: at(14), endTs: at(15), status: 'pending', worklogId: null,
+         comment: null, errorMsg: null },`,
+    )}
+            const anchorBefore = (await window.joggl.days.get(H.q('.week-colhead.is-selected').dataset.day)).entries.length;
+            const block = H.q('.sched-entry-block[data-id="x-off-2"]');
+            block.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 }));
+            await H.until(() => !H.q('#ctx-menu').classList.contains('hidden'), 4000, 'the menu');
+            H.all('#ctx-menu .ctx-item').find(i => i.textContent.includes('Delete')).click();
+            await H.sleep(400);
+            const left = (await window.joggl.days.get(day)).entries.map(e => e.id);
+            const anchorAfter = (await window.joggl.days.get(H.q('.week-colhead.is-selected').dataset.day)).entries.length;
+            await H.clearDays([day]);
+            return JSON.stringify({ left, anchorBefore, anchorAfter });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return JSON.stringify(d.left) === JSON.stringify(['x-off-keep']) &&
+        d.anchorAfter === d.anchorBefore;
+    },
+  );
 }
 
 async function quickEntry() {

@@ -24,6 +24,7 @@ import {
   deleteWorklog,
   dropExternalWorklog,
   entriesFor,
+  findEntry,
   isToday,
   persistDay,
   persistDayNow,
@@ -289,13 +290,10 @@ function buildEntryCard(entry, isOverlapping) {
   return card;
 }
 
-function currentEntry(id) {
-  return visibleEntries().find((e) => e.id === id) ?? null;
-}
-
 function resetInput(input) {
-  const entry = currentEntry(input.dataset.id);
-  if (!entry) return;
+  const found = findEntry(input.dataset.id);
+  if (!found) return;
+  const { entry } = found;
   if (input.dataset.f === 'start') input.value = tsToHHMM(entry.startTs);
   else if (input.dataset.f === 'end') input.value = tsToHHMM(entry.endTs ?? entry.startTs);
   else input.value = msToDur((entry.endTs ?? entry.startTs) - entry.startTs);
@@ -315,15 +313,19 @@ function rejectInput(input, message) {
 
 function handleInlineEdit(event) {
   const input = event.target;
-  const entry = currentEntry(input.dataset.id);
-  if (!entry || isExternal(entry)) return;
+  const found = findEntry(input.dataset.id);
+  if (!found || isExternal(found.entry)) return;
+  // The entry's own day, not the day on screen. HH:MM resolves against a day, and a
+  // row is only ever edited on the day it belongs to — but saying which day that is
+  // costs nothing and makes this the same rule as every other action here.
+  const { entry, dayKey } = found;
 
   const field = input.dataset.f;
   const card = input.closest('.entry-card');
   const before = { startTs: entry.startTs, endTs: entry.endTs };
 
   if (field === 'start') {
-    const ts = hhmmToTs(input.value, state.selectedDate);
+    const ts = hhmmToTs(input.value, dayKey);
     if (ts === null) return rejectInput(input, 'Use HH:MM, e.g. 09:30');
     if (entry.endTs !== null && ts >= entry.endTs) {
       return rejectInput(input, 'Start must be before the end time');
@@ -336,7 +338,7 @@ function handleInlineEdit(event) {
     // start-time field (app.js) and again in startTimer (timer.js).
     entry.startTs = ts;
   } else if (field === 'end') {
-    const ts = hhmmToTs(input.value, state.selectedDate);
+    const ts = hhmmToTs(input.value, dayKey);
     if (ts === null) return rejectInput(input, 'Use HH:MM, e.g. 17:00');
     if (ts <= entry.startTs) return rejectInput(input, 'End must be after the start time');
     entry.endTs = ts;
@@ -363,7 +365,7 @@ function handleInlineEdit(event) {
   if (sameTimes(entry, before)) return;
 
   markDirty(entry);
-  persistDay(state.selectedDate);
+  persistDay(dayKey);
   renderAll();
 }
 
@@ -374,8 +376,9 @@ export function markDirty(entry) {
 
 async function handleEntryAction(event) {
   const button = event.currentTarget;
-  const entry = currentEntry(button.dataset.id);
-  if (!entry) return;
+  const found = findEntry(button.dataset.id);
+  if (!found) return;
+  const { entry } = found;
 
   if (button.dataset.a === 'delete') {
     await deleteEntry(entry.id);
@@ -393,11 +396,12 @@ async function handleEntryAction(event) {
 
 /** Shared by the entry list and the day-view context menu. */
 export async function deleteEntry(id) {
-  // Fixed before the confirmation modal and the Jira DELETE, both of which the day
-  // can be stepped underneath. The entry belongs to the day it was found on.
-  const day = state.selectedDate;
-  const entry = currentEntry(id);
-  if (!entry) return;
+  // The day comes from the entry, not from the screen, and is fixed before the
+  // confirmation modal and the Jira DELETE — both of which the day can be stepped
+  // underneath, and neither of which is necessarily about the day on screen at all.
+  const found = findEntry(id);
+  if (!found) return;
+  const { entry, dayKey: day } = found;
 
   if (isExternal(entry)) {
     toastWarn('This worklog was made in Jira — delete it there.');
@@ -459,9 +463,9 @@ export async function deleteEntry(id) {
  * belongs — moving it is the expected next step, not a correction.
  */
 export async function duplicateEntry(id) {
-  const day = state.selectedDate;
-  const entry = currentEntry(id);
-  if (!entry || entry.endTs === null) return;
+  const found = findEntry(id);
+  if (!found || found.entry.endTs === null) return;
+  const { entry, dayKey: day } = found;
 
   const copy = duplicateOf(entry, uuid());
   setEntriesFor(day, sortEntries([...entriesFor(day), copy]));
@@ -479,9 +483,9 @@ export async function duplicateEntry(id) {
  * that is the point, and it is why this is not just delete-and-redraw.
  */
 export async function editEntryTask(id) {
-  const day = state.selectedDate;
-  const entry = currentEntry(id);
-  if (!entry) return;
+  const found = findEntry(id);
+  if (!found) return;
+  const { entry, dayKey: day } = found;
 
   const allowed = canRetarget(entry);
   if (!allowed.ok) {
@@ -530,9 +534,9 @@ export async function editEntryTask(id) {
  * description of an existing worklog is exactly what PUT .../worklog/{id} is for.
  */
 export async function editEntryComment(id) {
-  const day = state.selectedDate;
-  const entry = currentEntry(id);
-  if (!entry) return;
+  const found = findEntry(id);
+  if (!found) return;
+  const { entry, dayKey: day } = found;
 
   if (isExternal(entry)) {
     toastWarn('This worklog was made in Jira — change its description there.');
@@ -585,9 +589,9 @@ export async function editEntryComment(id) {
 }
 
 export async function splitEntry(id) {
-  const day = state.selectedDate;
-  const entry = currentEntry(id);
-  if (!entry || entry.endTs === null) return;
+  const found = findEntry(id);
+  if (!found || found.entry.endTs === null) return;
+  const { entry, dayKey: day } = found;
   if (isExternal(entry)) {
     toastWarn('This worklog was made in Jira — split it there.');
     return;

@@ -259,6 +259,11 @@ function buildBlock(entry, dayKey, slot) {
   if (entry.status === 'error') block.classList.add('st-error');
   if (entry.external) block.classList.add('external');
   block.dataset.id = entry.id;
+  // Which column this is, and when it starts. Read by the arrow keys (block-nav.js)
+  // and by the UI checks, neither of which can otherwise tell one column from
+  // another once the blocks are on the page.
+  block.dataset.day = dayKey;
+  block.dataset.start = String(entry.startTs);
   // Focusable for the same reason the entry rows are: the Menu key fires
   // contextmenu on whatever has focus. The tab stop is roved, not one per block.
   block.tabIndex = -1;

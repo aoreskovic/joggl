@@ -117,6 +117,7 @@ Not scripted — it needs a machine without Node, or at least a shell without it
 | Watch a running timer in the week view | Its block grows in today's column, takes part in that column's overlap layout, and both the day total and the week total count it. |
 | Press F1 | The shortcut table has an **In the week view** group. |
 | Switch to the week view and back, twice | The search box and pins move with it each time. There is never a second copy of either, and Ctrl+L still reaches the box. |
+| Right-click a block in a column that is **not** the marked day | Every item works — Work description, Duplicate, Split, Edit task, Delete. They read and write that column's day, not the marked one. |
 
 ### Editing which task a block belongs to
 
@@ -377,6 +378,16 @@ on Jira.
 ### Confirmed bugs
 
 Nothing open.
+
+Fixed on 2026-08-06:
+
+- **In the week view, the right-click menu did nothing on any column but the marked
+  one.** `currentEntry(id)` looked the entry up in `visibleEntries()` — the selected
+  day — and every action then wrote to `state.selectedDate`. In the day view those are
+  the same day and always were, which is why this shipped: the menu opened, the dialog
+  never did, and nothing was logged. Entries are now located across every day loaded
+  (`locateEntry` in `renderer/js/day-range.js`, `findEntry` in `state.js`) and each
+  action writes the day it found.
 
 Fixed on 2026-08-05:
 

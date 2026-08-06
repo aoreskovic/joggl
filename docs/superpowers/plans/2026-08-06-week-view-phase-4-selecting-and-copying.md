@@ -966,7 +966,7 @@ export function canStartBand(target) {
 - [ ] **Step 4: Run it and watch it pass**
 
 Run: `npm test`
-Expected: PASS — 349 (343 + 6).
+Expected: PASS — 348 (343 + 5).
 
 - [ ] **Step 5: Draw it, and wire the gesture**
 
@@ -1177,7 +1177,7 @@ In `scripts/ui-check.mjs`, append to `clicks()`:
 - [ ] **Step 10: Verify**
 
 Run: `npm test`
-Expected: PASS — 349.
+Expected: PASS — 348.
 
 Run: `npm run uicheck:fast`
 Expected: PASS — 105 of 105.
@@ -1357,7 +1357,7 @@ export function nextBlockId(blocks, fromId, key) {
 - [ ] **Step 4: Run it and watch it pass**
 
 Run: `npm test`
-Expected: PASS — 356 (349 + 7).
+Expected: PASS — 355 (348 + 7).
 
 - [ ] **Step 5: Let a list answer its own arrows**
 
@@ -1527,7 +1527,7 @@ In `scripts/ui-check.mjs`, append to `keyboard()`:
 - [ ] **Step 8: Verify, and check the existing keyboard rows**
 
 Run: `npm test`
-Expected: PASS — 356.
+Expected: PASS — 355.
 
 Run: `npm run uicheck:fast`
 Expected: PASS — 107 of 107. **The day view's arrow order has changed from DOM order to time order.** Any existing check in `keyboard()` or `clicks()` that walks the day grid with arrows and names an expected id may now expect a different one. If one fails, read what it reports: if the new order is time order, the check's expectation is what is stale, not the code — update it and say so in the commit.
@@ -1772,7 +1772,7 @@ export function pastePlan(clip, targetDay, newId = uuid) {
 - [ ] **Step 4: Run it and watch it pass**
 
 Run: `npm test`
-Expected: PASS — 367 (356 + 11).
+Expected: PASS — 365 (355 + 10).
 
 - [ ] **Step 5: Wire copy and paste**
 
@@ -2097,7 +2097,7 @@ In `scripts/ui-check.mjs`, append to `weekView()`:
 - [ ] **Step 10: Verify**
 
 Run: `npm test`
-Expected: PASS — 367.
+Expected: PASS — 365.
 
 Run: `npm run uicheck:fast`
 Expected: PASS — 110 of 110.
@@ -2237,7 +2237,7 @@ export function planDeletion(items) {
 - [ ] **Step 4: Run it and watch it pass**
 
 Run: `npm test`
-Expected: PASS — 372 (367 + 5).
+Expected: PASS — 370 (365 + 5).
 
 - [ ] **Step 5: Write the batch delete**
 
@@ -2567,7 +2567,7 @@ In `scripts/ui-check.mjs`, append to `clicks()`. **Neither presses "Delete in Ji
 - [ ] **Step 8: Verify**
 
 Run: `npm test`
-Expected: PASS — 372.
+Expected: PASS — 370.
 
 Run: `npm run uicheck:fast`
 Expected: PASS — 112 of 112.
@@ -2711,7 +2711,7 @@ both **113 passed, 0 failed**. Both report the same total, which is the only thi
 keeping `main/jira/fake.js` honest.
 ```
 
-Replace the counts in *Running it* and in *The script* with `npm test # 372 tests` and `113 checks`. Read the numbers off the runs in step 6 rather than trusting these.
+Replace the counts in *Running it* and in *The script* with `npm test # 370 tests` and `113 checks`. Read the numbers off the runs in step 6 rather than trusting these.
 
 - [ ] **Step 5: Update CLAUDE.md**
 
@@ -2726,7 +2726,7 @@ Four edits.
 **b.** In the same table, update the counts to what the runs report:
 
 ```markdown
-| Tests | 372 passing, `npm test`; 113 UI checks, `npm run uicheck` (or `:fast`) |
+| Tests | 370 passing, `npm test`; 113 UI checks, `npm run uicheck` (or `:fast`) |
 ```
 
 **c.** In *Clicking*, extend the opening so it is not left saying there is one selection:
@@ -2813,7 +2813,7 @@ Expected: `0.18.1` → `0.19.0`. A change bumps the minor; this is the one commi
 - [ ] **Step 7: Verify everything**
 
 Run: `npm test`
-Expected: PASS — 372.
+Expected: PASS — 370.
 
 Run: `npm run uicheck:fast`
 Expected: PASS — 113 of 113. **Record the number it reports** and make sure `CLAUDE.md` and `test-and-issues.md` say that number and not a stale one.

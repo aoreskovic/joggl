@@ -296,10 +296,14 @@ window.H = {
   colDay(index) {
     return H.all('.week-colhead')[index]?.dataset.day ?? null;
   },
+  /** The selected day's key, parsed off the header label ("Thu, 30.07.2026"). */
+  selectedDayKey() {
+    const m = H.q('#current-date-label').textContent.match(/(\\d{2})\\.(\\d{2})\\.(\\d{4})/);
+    return m ? m[3] + '-' + m[2] + '-' + m[1] : null;
+  },
   /** The day header, read as a key. The label is "Thu, 30.07.2026". */
   onToday() {
-    const m = H.q('#current-date-label').textContent.match(/(\\d{2})\\.(\\d{2})\\.(\\d{4})/);
-    return m ? m[3] + '-' + m[2] + '-' + m[1] === H.todayKey() : false;
+    return H.selectedDayKey() === H.todayKey();
   },
   firstTask() { return H.q('.task-item'); },
   /**
@@ -1716,20 +1720,25 @@ async function keyboard() {
 
   await check(
     'the day grid’s arrows walk its blocks in time order, not the order they were drawn',
-    `await H.resetDay();
-     const at = (hh) => { const d = new Date(); d.setHours(hh, 0, 0, 0); return d.getTime(); };
+    `const day = await H.findEmptyDay();
+     if (!day) return JSON.stringify({ skip: true });
+     // findEmptyDay confirmed this day has no rows of either kind — local or
+     // Jira-side. That matters more here than in most of its other callers: today
+     // would not do, and not only because of the fake client's fixture rows at
+     // 09:30/13:00 (main/jira/fake.js). A live account is used daily and can hold a
+     // worklog at any hour of any day, and a single one landing between the two
+     // seeded below would make ArrowDown answer with it instead — correctly, but
+     // not what this check is asking about, and silently different between the
+     // fast run and the live one, which is exactly the property that must not
+     // happen (see the fake's own doc comment on why the two runs must agree).
+     const dayKey = H.selectedDayKey();
+     const at = (hh) => { const d = new Date(dayKey + 'T00:00:00'); d.setHours(hh, 0, 0, 0); return d.getTime(); };
      // Deliberately out of order in the day log, so DOM order and time order differ.
-     // Both sit before 09:00: the fake Jira client books fixture worklogs at 09:30
-     // and 13:00 on today (main/jira/fake.js), and a fixture landing between these
-     // two would make ArrowDown answer with the Jira-side row instead — correctly,
-     // but not what this check is asking about. Keeping both before the fixture's
-     // earliest row is what makes nav-early the day's topmost block too, which the
-     // "held" assertion below needs.
-     await window.joggl.days.save(H.todayKey(), [
-       { id: 'nav-late', issueKey: 'GEN-1', issueId: null, title: 'Late', startTs: at(8),
-         endTs: at(9), status: 'pending', worklogId: null, comment: null, errorMsg: null },
-       { id: 'nav-early', issueKey: 'GEN-2', issueId: null, title: 'Early', startTs: at(6),
-         endTs: at(7), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+     await window.joggl.days.save(dayKey, [
+       { id: 'nav-late', issueKey: 'GEN-1', issueId: null, title: 'Late', startTs: at(15),
+         endTs: at(16), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       { id: 'nav-early', issueKey: 'GEN-2', issueId: null, title: 'Early', startTs: at(9),
+         endTs: at(10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
      ]);
      await window.__jogglTest.reloadDay();
      const press = (el, key) => el.dispatchEvent(new KeyboardEvent('keydown', {
@@ -1746,7 +1755,11 @@ async function keyboard() {
      return JSON.stringify({ down, up, held })`,
     (v) => {
       const d = JSON.parse(v);
+      if (d.skip) return 'skipped';
       // Held at the top rather than wrapping — the same clamp every roving list has.
+      // A revert to DOM order fails this: the log was written [late, early], so
+      // early is DOM-last, and old-style ArrowDown clamped at the end of the list
+      // stays put — down would equal 'nav-early', never 'nav-late'.
       return d.down === 'nav-late' && d.up === 'nav-early' && d.held === 'nav-early';
     },
   );
@@ -1759,6 +1772,14 @@ async function keyboard() {
      try {
        const a = H.colDay(0), b = H.colDay(1);
        const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+       // a and b are ordinary weekday columns of the week containing today, and on a
+       // live account either can already hold real worklogs — this seeds two more
+       // into a and one into b without knowing or caring what else is there. That is
+       // enough to make both columns non-empty, whatever they held before: Up/Down
+       // never leaves the column it started in, so a can never run empty under
+       // ArrowDown, and Right stops at the first non-empty column it finds, so a
+       // non-empty b can never be skipped over. What is asserted below therefore
+       // holds regardless of any other row in either column — see the expectation.
        await window.joggl.days.save(a, [
          { id: 'wk-a9', issueKey: 'GEN-1', issueId: null, title: 'A nine', startTs: on(a, 9),
            endTs: on(a, 10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
@@ -1776,22 +1797,32 @@ async function keyboard() {
        const start = H.q('.sched-entry-block[data-id="wk-a9"]');
        start.focus();
        press(start, 'ArrowDown');
-       const down = document.activeElement?.dataset.id ?? null;
-       press(document.activeElement, 'ArrowRight');
-       const right = document.activeElement?.dataset.id ?? null;
-       press(document.activeElement, 'ArrowLeft');
-       const left = document.activeElement?.dataset.id ?? null;
+       const afterDown = document.activeElement;
+       const downDay = afterDown?.dataset.day ?? null;
+       press(afterDown, 'ArrowRight');
+       const afterRight = document.activeElement;
+       const rightDay = afterRight?.dataset.day ?? null;
+       press(afterRight, 'ArrowLeft');
+       const afterLeft = document.activeElement;
+       const leftDay = afterLeft?.dataset.day ?? null;
        await H.clearDays([a, b]);
-       return JSON.stringify({ down, right, left });
+       return JSON.stringify({ a, b, downDay, rightDay, leftDay });
      } finally {
        H.q('.sidebar-item[data-view="day"]').click();
        await H.until(() => !H.q('#view-day').hidden, 8000, 'the day view');
      }`,
     (v) => {
       const d = JSON.parse(v);
-      // Down stays on Monday; right crosses to Tuesday's only block; left comes back
-      // to whichever of Monday's two is nearest 14:00, which is the 15:00 one.
-      return d.down === 'wk-a15' && d.right === 'wk-b14' && d.left === 'wk-a15';
+      // Asserted on which *column* each key landed in, never on which specific
+      // block — a live account can hold anything else in a or b, and this must
+      // still hold. Down must not leave the column it started in (whatever else is
+      // in a, above or below wk-a9, block-nav's Up/Down never crosses a day); Right
+      // must land in b specifically, the very next column, because a non-empty b is
+      // never a column Right steps over; Left must return to a for the same reason
+      // run backwards. Before this task neither arrow key was bound at all, so a
+      // revert leaves focus exactly on wk-a9's own column throughout — rightDay
+      // would equal a, not b, and the check fails, which is the bar it has to clear.
+      return d.downDay === d.a && d.rightDay === d.b && d.leftDay === d.a;
     },
   );
 }

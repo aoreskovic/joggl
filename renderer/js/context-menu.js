@@ -61,23 +61,21 @@ function anchorFor(event) {
   return { x: Math.round(rect.left + 24), y: Math.round(rect.bottom - 4) };
 }
 
-export function showContextMenu(event, entry) {
+/**
+ * Raise the shared menu with whatever rows the caller wants.
+ *
+ * Extracted from `showContextMenu` so a column head can raise a menu that is not
+ * about an entry. Everything about *behaviour* — the arrow keys, Enter, Escape, Tab,
+ * the focus that goes back to the opener, being pulled inside the window — is here
+ * and so cannot come to differ between the two.
+ *
+ * @param {MouseEvent|{clientX, clientY, currentTarget, target, preventDefault}} event
+ * @param {{icon?: string, svg?: string, label: string, danger?: boolean, run: Function}[]} items
+ */
+export function showMenu(event, items) {
   hideContextMenu();
   const menu = document.getElementById('ctx-menu');
-  if (!menu || !actions) return;
-
-  const items = [
-    { icon: '✎', label: 'Edit task', run: () => actions.editTask(entry) },
-    // Jira's own name for the field, so it is recognisable to anyone who fills it
-    // in through the Jira UI — which, on this site, is everyone.
-    { icon: '≡', label: 'Work description', run: () => actions.editComment(entry) },
-    { icon: '⏵', label: 'Restart timer', run: () => actions.restart(entry) },
-    { icon: '⧉', label: 'Duplicate', run: () => actions.duplicate(entry) },
-    { icon: '✂', label: 'Split at midpoint', run: () => actions.split(entry) },
-    // Drawn rather than 🗑, for the reason given over DELETE_ICON: the emoji's ribs
-    // turn to mush at this size. The others are geometric glyphs, which do not.
-    { svg: DELETE_ICON, label: 'Delete', danger: true, run: () => actions.remove(entry) },
-  ];
+  if (!menu || items.length === 0) return;
 
   const choose = (item) => {
     // Focus goes back to the row before the action runs, so a dialog opening from
@@ -135,4 +133,20 @@ export function showContextMenu(event, entry) {
       hideContextMenu({ restoreFocus: true });
     }
   };
+}
+
+export function showContextMenu(event, entry) {
+  if (!actions) return;
+  showMenu(event, [
+    { icon: '✎', label: 'Edit task', run: () => actions.editTask(entry) },
+    // Jira's own name for the field, so it is recognisable to anyone who fills it
+    // in through the Jira UI — which, on this site, is everyone.
+    { icon: '≡', label: 'Work description', run: () => actions.editComment(entry) },
+    { icon: '⏵', label: 'Restart timer', run: () => actions.restart(entry) },
+    { icon: '⧉', label: 'Duplicate', run: () => actions.duplicate(entry) },
+    { icon: '✂', label: 'Split at midpoint', run: () => actions.split(entry) },
+    // Drawn rather than 🗑, for the reason given over DELETE_ICON: the emoji's ribs
+    // turn to mush at this size. The others are geometric glyphs, which do not.
+    { svg: DELETE_ICON, label: 'Delete', danger: true, run: () => actions.remove(entry) },
+  ]);
 }

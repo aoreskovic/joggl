@@ -10,6 +10,8 @@
 // bound by id — including the drag sources, which are delegated onto `#pin-chips`
 // itself and survive the move because moving a node keeps its listeners.
 
+import { showMenu } from './context-menu.js';
+import { clearDay, clearWeek, copyPreviousDay } from './copy-day.js';
 import { nothingToSync, planFinishDay, syncLabel, syncTooltip } from './finish-day.js';
 import { wireRovingList } from './keynav.js';
 import { applySelection, select } from './selection.js';
@@ -191,7 +193,23 @@ function buildHead(dayKey) {
   total.className = 'week-colhead-total';
   total.textContent = msToDur(dayTotalMs(dayKey));
 
-  head.append(name, total);
+  const menu = document.createElement('button');
+  menu.className = 'week-colhead-menu';
+  menu.type = 'button';
+  menu.textContent = '⋯';
+  menu.title = 'What to do with this day';
+  menu.setAttribute('aria-label', `Actions for ${dayKey}`);
+  menu.addEventListener('click', (event) => {
+    // The head is itself a click target — selecting the day — so this stops there.
+    event.stopPropagation();
+    showMenu(event, [
+      { icon: '⧉', label: 'Copy previous day', run: () => copyPreviousDay(dayKey) },
+      { icon: '⌫', label: 'Clear day', run: () => clearDay(dayKey) },
+      { icon: '⌫', label: 'Clear week', danger: true, run: () => clearWeek(weekAnchorDays()) },
+    ]);
+  });
+
+  head.append(name, total, menu);
   // Clicking a head makes that day the anchor — which marks the column, and is the
   // day the day view shows on the way back.
   head.addEventListener('click', () => selectDay(dayKey));

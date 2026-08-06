@@ -1137,6 +1137,42 @@ async function weekView() {
       return d.gone === true;
     },
   );
+
+  await check(
+    'week: the column menu clears that day and leaves the rest',
+    inWeek(`const a = H.colDay(0), b = H.colDay(1);
+            const block = (id, day) => ({
+              id, issueKey: 'GEN-1', issueId: null, title: 'Work',
+              startTs: new Date(day + 'T09:00:00').getTime(),
+              endTs: new Date(day + 'T10:00:00').getTime(),
+              status: 'pending', worklogId: null, comment: null, errorMsg: null,
+            });
+            await window.joggl.days.save(a, [block('wk-c-1', a)]);
+            await window.joggl.days.save(b, [block('wk-c-2', b)]);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('[data-id="wk-c-1"]'), 4000, 'the seeded blocks');
+
+            H.all('.week-colhead')[0].querySelector('.week-colhead-menu').click();
+            await H.until(() => !H.q('#ctx-menu').classList.contains('hidden'), 4000, 'the menu');
+            // Strips the leading icon glyph, same as every other check reading a
+            // .ctx-item's text — the icon is a separate span, not part of the label.
+            const labels = H.all('#ctx-menu .ctx-item').map(i => i.textContent.replace(/^\\W+/, ''));
+            H.all('#ctx-menu .ctx-item')[1].click();
+            await H.until(() => !H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the confirmation');
+            H.all('#modal-buttons button').find(b => b.textContent === 'Clear all').click();
+            await H.until(() => H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the modal to close');
+            await H.sleep(250);
+
+            const left = (await window.joggl.days.get(a)).entries.length;
+            const kept = (await window.joggl.days.get(b)).entries.length;
+            await H.clearDays([a, b]);
+            return JSON.stringify({ labels, left, kept });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.left === 0 && d.kept === 1 &&
+        JSON.stringify(d.labels) === JSON.stringify(['Copy previous day', 'Clear day', 'Clear week']);
+    },
+  );
 }
 
 async function quickEntry() {

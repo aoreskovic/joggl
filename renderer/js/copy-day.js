@@ -39,10 +39,13 @@ async function prefetchedReaders(from) {
 
 let busy = false;
 
-export async function copyPreviousDay() {
+/**
+ * @param {string} [target] the day to fill. Defaults to the day on screen; the week
+ *   view passes the column's own day, which is usually not the same thing.
+ */
+export async function copyPreviousDay(target = state.selectedDate) {
   if (busy) return;
   const button = document.getElementById('copy-day-btn');
-  const target = state.selectedDate;
   busy = true;
 
   if (button) {
@@ -116,10 +119,13 @@ function confirmCopy(found, copies, target) {
   });
 }
 
-export async function clearDay() {
+/**
+ * @param {string} [day] the day to empty. Local only — this never issues a DELETE to
+ *   Jira, and cannot touch a Jira-side row because those are not `state.entries`.
+ */
+export async function clearDay(day = state.selectedDate) {
   // Fixed before the modal opens: it stays up for as long as the user reads it, and
-  // clearing must empty the day they were looking at when they pressed the button.
-  const day = state.selectedDate;
+  // clearing must empty the day the button was pressed on.
   const entries = entriesFor(day);
   const synced = entries.filter((e) => e.worklogId);
   const rest = entries.filter((e) => !e.worklogId);
@@ -147,6 +153,52 @@ export async function clearDay() {
   await persistDayNow(day);
   renderAll();
   toastOk(answer === 'unsynced' ? `${plural(rest.length)} cleared.` : 'Day cleared.');
+}
+
+/**
+ * Empty a whole week.
+ *
+ * The same promise `clearDay` makes, seven times over: local only, nothing is deleted
+ * from Jira, and rows logged in the Jira web UI are not Joggl's to remove. Asked once
+ * rather than per day — seven modals is not a confirmation, it is an obstacle course
+ * — and the count in the question is what makes it answerable.
+ */
+export async function clearWeek(days) {
+  const targets = [...new Set(days)].sort();
+  const all = targets.flatMap((day) => entriesFor(day));
+  const synced = all.filter((e) => e.worklogId);
+
+  if (all.length === 0) {
+    toast('Nothing to clear this week.');
+    return;
+  }
+
+  const body = clearBody(synced, all.filter((e) => !e.worklogId));
+  const days_ = document.createElement('p');
+  days_.className = 'panel-lede';
+  days_.textContent = `Across ${targets.length} day${targets.length === 1 ? '' : 's'}.`;
+  body.appendChild(days_);
+
+  const answer = await askModal({
+    title: 'Clear this week?',
+    body,
+    buttons: [
+      { label: 'Cancel', value: 'cancel' },
+      ...(synced.length > 0 && synced.length < all.length
+        ? [{ label: 'Clear unsynced only', value: 'unsynced' }]
+        : []),
+      { label: 'Clear all', value: 'all', primary: true },
+    ],
+    dismissValue: 'cancel',
+  });
+  if (answer === 'cancel') return;
+
+  for (const day of targets) {
+    setEntriesFor(day, answer === 'unsynced' ? entriesFor(day).filter((e) => e.worklogId) : []);
+    await persistDayNow(day);
+  }
+  renderAll();
+  toastOk(answer === 'unsynced' ? 'Unsynced entries cleared.' : 'Week cleared.');
 }
 
 function clearBody(synced, rest) {

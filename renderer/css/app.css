@@ -2179,6 +2179,20 @@ body.is-dragging-issue * {
   white-space: nowrap;
 }
 
+.week-colhead-menu {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font: inherit;
+  line-height: 1;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.week-colhead-menu:hover {
+  color: var(--text);
+}
+
 .week-gutter {
   position: relative;
 }

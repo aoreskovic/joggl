@@ -109,6 +109,10 @@ Not scripted — it needs a machine without Node, or at least a shell without it
 | Hover it | The tooltip says what is a rewrite rather than a fresh log, what is already in Jira, and that the running timer is excluded. |
 | Press it with entries on three days | They go up day by day. One summary at the end; on a partial failure the failures name their day and **Retry failed** retries only those. |
 | Press it, then look at the day view | The same entries are ✓ synced there. Nothing is logged twice. |
+| Click **⋯** on a column head | A menu: Copy previous day, Clear day, Clear week. The three the *On this day* header has, plus the one only a week can offer. |
+| Copy previous day from a column | That column fills from the last day with anything on it, at the same times. The other columns are untouched. |
+| Clear day from a column | Only that column empties. It asks first, offers to spare the synced entries, and nothing is deleted from Jira. |
+| Clear week | Asks once, naming how many entries across how many days. Local only — every worklog already in Jira stays there. |
 
 ### Editing which task a block belongs to
 

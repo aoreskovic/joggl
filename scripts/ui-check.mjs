@@ -2117,16 +2117,31 @@ async function clicks() {
        H.mouse(document, 'mousemove', Math.round(x1 + (x2 - x1) * i / 5), Math.round(y1 + (y2 - y1) * i / 5), 1);
      }
      H.mouse(document, 'mouseup', x2, y2, 0);
+     const pickedByBand = H.all('.sched-entry-block.is-selected').map(e => e.dataset.id);
+     // A synthetic mousedown/mouseup pair does not itself produce a native 'click' —
+     // the browser fires that as a separate event, and onGridClick is bound to
+     // 'click'. Without dispatching this one by hand, the handler this check exists
+     // to guard against — the one that clears the selection and opens the popup —
+     // would never run at all, and the check would pass whether or not
+     // isBandSuppressed() actually suppresses anything.
+     H.q('#schedule-grid').dispatchEvent(new MouseEvent('click', {
+       bubbles: true, cancelable: true, clientX: x2, clientY: y2 }));
      await H.sleep(200);
-     const picked = H.all('.sched-entry-block.is-selected').map(e => e.dataset.id);
+     // Read again after the click: the point of the suppression is that the
+     // selection the band just made survives it.
+     const pickedAfterClick = H.all('.sched-entry-block.is-selected').map(e => e.dataset.id);
      const popup = !!H.q('.sched-quick-entry');
      await H.resetDay();
-     return JSON.stringify({ picked, popup })`,
+     return JSON.stringify({ pickedByBand, pickedAfterClick, popup })`,
     (v) => {
       const d = JSON.parse(v);
-      // The popup must not have opened: the click the band produces has to be
-      // suppressed, or the band would select and deselect in the same gesture.
-      return JSON.stringify(d.picked) === JSON.stringify(['band-in']) && d.popup === false;
+      // Three distinct fields so a failure says which half broke, rather than one
+      // boolean masking all of them: did the band itself select the wrong thing
+      // (pickedByBand), did the click the band produces wipe a correct selection
+      // (pickedAfterClick), or did that click also open the popup (popup)?
+      const bandCorrect = JSON.stringify(d.pickedByBand) === JSON.stringify(['band-in']);
+      const survivedClick = JSON.stringify(d.pickedAfterClick) === JSON.stringify(['band-in']);
+      return bandCorrect && survivedClick && d.popup === false;
     },
   );
 

@@ -2031,6 +2031,66 @@ async function clicks() {
         d.after > '00:15:00' && d.created === 0;
     },
   );
+
+  await check(
+    'Ctrl+click adds a second entry to the selection, and takes it back out',
+    `await H.resetDay();
+     const at = (hh) => { const d = new Date(); d.setHours(hh, 0, 0, 0); return d.getTime(); };
+     await window.joggl.days.save(H.todayKey(), [
+       { id: 'sel-a', issueKey: 'GEN-1', issueId: null, title: 'First', startTs: at(9),
+         endTs: at(10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       { id: 'sel-b', issueKey: 'GEN-2', issueId: null, title: 'Second', startTs: at(11),
+         endTs: at(12), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+     ]);
+     await window.__jogglTest.reloadDay();
+     const click = (id, ctrl) => {
+       const el = H.q('.sched-entry-block[data-id="' + id + '"]');
+       el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: ctrl }));
+     };
+     click('sel-a', false);
+     const one = H.all('.sched-entry-block.is-selected').length;
+     click('sel-b', true);
+     const two = H.all('.sched-entry-block.is-selected').length;
+     click('sel-b', true);
+     const back = H.all('.sched-entry-block.is-selected').length;
+     click('sel-b', false);
+     const plain = H.all('.sched-entry-block.is-selected').map(e => e.dataset.id);
+     await H.resetDay();
+     return JSON.stringify({ one, two, back, plain })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.one === 1 && d.two === 2 && d.back === 1 &&
+        JSON.stringify(d.plain) === JSON.stringify(['sel-b']);
+    },
+  );
+
+  await check(
+    'the selection marks the row and the block together, and Escape puts it all down',
+    `await H.resetDay();
+     const at = (hh) => { const d = new Date(); d.setHours(hh, 0, 0, 0); return d.getTime(); };
+     await window.joggl.days.save(H.todayKey(), [
+       { id: 'sel-c', issueKey: 'GEN-1', issueId: null, title: 'Both', startTs: at(9),
+         endTs: at(10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       { id: 'sel-d', issueKey: 'GEN-2', issueId: null, title: 'Both too', startTs: at(11),
+         endTs: at(12), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+     ]);
+     await window.__jogglTest.reloadDay();
+     for (const id of ['sel-c', 'sel-d']) {
+       H.q('.sched-entry-block[data-id="' + id + '"]').dispatchEvent(
+         new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+     }
+     const blocks = H.all('.sched-entry-block.is-selected').length;
+     const cards = H.all('.entry-card.is-selected').length;
+     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+     await H.sleep(150);
+     const after = H.all('.is-selected').length;
+     await H.resetDay();
+     return JSON.stringify({ blocks, cards, after })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.blocks === 2 && d.cards === 2 && d.after === 0;
+    },
+  );
 }
 
 async function syncButton() {

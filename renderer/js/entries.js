@@ -19,7 +19,7 @@ import { DELETE_ICON, PLAY_ICON } from './icons.js';
 import { sortEntries } from './merge.js';
 import { askModal } from './modal.js';
 import { renderAll } from './render.js';
-import { applySelection, clearSelection, select } from './selection.js';
+import { applySelection, clearSelection, select, toggleSelect } from './selection.js';
 import {
   deleteWorklog,
   dropExternalWorklog,
@@ -136,7 +136,8 @@ export function wireEntryList() {
     }
     // The time fields and the row's buttons keep their own click.
     if (event.target.closest('.ie, [data-a]')) return;
-    select(card.dataset.id);
+    if (event.ctrlKey || event.metaKey) toggleSelect(card.dataset.id);
+    else select(card.dataset.id);
     // The roving tab stop should follow the mouse, or Tab returns somewhere else.
     card.focus();
   });

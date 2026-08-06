@@ -10,7 +10,7 @@ import { showContextMenu } from './context-menu.js';
 import { editEntryComment } from './entries.js';
 import { createRowNav, wireRovingList } from './keynav.js';
 import { renderAll } from './render.js';
-import { applySelection, clearSelection, select } from './selection.js';
+import { applySelection, clearSelection, select, toggleSelect } from './selection.js';
 import { activeView } from './shell.js';
 import {
   entriesFor,
@@ -296,7 +296,8 @@ function buildBlock(entry, dayKey, slot) {
     if (event.target.closest('.sched-handle')) return;
     // A move that actually moved is not a click, however it ends up on screen.
     if (isClickSuppressed()) return;
-    select(entry.id);
+    if (event.ctrlKey || event.metaKey) toggleSelect(entry.id);
+    else select(entry.id);
     // onMoveBlock calls preventDefault on mousedown, which suppresses the focus a
     // click would otherwise give, so the roving tab stop has to be set by hand.
     block.focus();

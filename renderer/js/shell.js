@@ -21,6 +21,16 @@ export function registerView(id, view) {
   views.set(id, view);
 }
 
+/** Which view is mounted. Renders use it so two views cannot both draw at once. */
+export function activeView() {
+  return activeId;
+}
+
+/** Whether a view has been registered — a stored preference may name one that has not. */
+export function hasView(id) {
+  return views.has(id);
+}
+
 export function setActiveView(id) {
   if (id === activeId) return;
   const next = views.get(id);

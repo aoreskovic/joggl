@@ -14,12 +14,21 @@ import { snapToQuarter } from './util.js';
  */
 export const GUTTER_PX = 40;
 
-/** dateKey -> the element that day's blocks are positioned inside. */
+/**
+ * dateKey -> { el, gutterPx }.
+ *
+ * The gutter is per column because the two views put the hour labels in different
+ * places. The day view draws them *inside* the grid, 40px in, and blocks start after
+ * them. A week column is under 200px wide and cannot spare 40 of them, so its labels
+ * live in a rail of their own to the left and its blocks start at its left edge.
+ */
 const columns = new Map();
 
 export function setColumns(pairs) {
   columns.clear();
-  for (const [dateKey, el] of pairs) if (el) columns.set(dateKey, el);
+  for (const [dateKey, el, gutterPx = GUTTER_PX] of pairs) {
+    if (el) columns.set(dateKey, { el, gutterPx });
+  }
 }
 
 /**
@@ -35,7 +44,12 @@ export function clearColumns() {
 }
 
 export function columnFor(dayKey) {
-  return columns.get(dayKey) ?? null;
+  return columns.get(dayKey)?.el ?? null;
+}
+
+/** Every column now drawn, for the callers that have to touch all of them. */
+export function columnPairs() {
+  return [...columns].map(([dateKey, column]) => [dateKey, column.el]);
 }
 
 /**
@@ -57,7 +71,7 @@ export function columnFor(dayKey) {
  * *which day*, which is the whole reason this function replaced `gridTimeAt`.
  */
 export function columnAt(clientX, clientY) {
-  for (const [dateKey, el] of columns) {
+  for (const [dateKey, { el }] of columns) {
     const rect = el.getBoundingClientRect();
     if (clientX < rect.left || clientX > rect.right) continue;
 
@@ -79,16 +93,18 @@ export function columnAt(clientX, clientY) {
  */
 export function placeBlock(el, startTs, endTs, dayKey, slot, minHeightPx = 6) {
   const durMin = Math.max(1, (endTs - startTs) / 60_000);
+  // The column's own gutter, not the constant: a week column has none.
+  const gutter = columns.get(dayKey)?.gutterPx ?? GUTTER_PX;
   el.style.top = `${offsetPxOf(startTs, dayKey)}px`;
   el.style.minHeight = `${Math.max(minHeightPx, durMin * grid.pxPerMin)}px`;
 
   if (slot.totalCols === 1) {
-    el.style.left = `${GUTTER_PX}px`;
+    el.style.left = `${gutter}px`;
     el.style.right = '4px';
     el.style.width = '';
   } else {
-    const span = `(100% - ${GUTTER_PX + 4}px)`;
-    el.style.left = `calc(${GUTTER_PX}px + ${slot.col / slot.totalCols} * ${span})`;
+    const span = `(100% - ${gutter + 4}px)`;
+    el.style.left = `calc(${gutter}px + ${slot.col / slot.totalCols} * ${span})`;
     el.style.width = `calc(${1 / slot.totalCols} * ${span} - 1px)`;
     el.style.right = 'auto';
   }

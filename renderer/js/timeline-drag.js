@@ -13,7 +13,7 @@
 import { markDirty } from './entries.js';
 import { sameTimes } from './entry-ops.js';
 import { renderAll } from './render.js';
-import { persistDayNow, state, visibleEntries } from './state.js';
+import { persistDayNow, state, visibleEntries, visibleEntriesFor } from './state.js';
 import { grid, offsetPxOf } from './timeline-geometry.js';
 import { toastWarn } from './toast.js';
 import { msToDur, QUARTER, snapToQuarter, startOfDayMs, tsToHHMM } from './util.js';
@@ -53,13 +53,10 @@ export function onResize(event, entry, edge, dayKey) {
     if (edge === 'top') {
       let next = snapToQuarter(origStart + deltaMs, dayKey);
       // Butting up against a neighbour beats the quarter-hour grid: closing a gap
-      // exactly is the thing the grid alone cannot express.
-      //
-      // `visibleEntries()` is the day on screen, which is this entry's day until
-      // there is more than one column. Phase 3 swaps it for
-      // `visibleEntriesFor(dayKey)`; doing it here would be a behaviour change in a
-      // phase that promises none.
-      for (const other of visibleEntries()) {
+      // exactly is the thing the grid alone cannot express. The neighbours are this
+      // entry's own day's, which is the day on screen until there is more than one
+      // column and is not afterwards.
+      for (const other of visibleEntriesFor(dayKey)) {
         if (other.id !== entry.id && other.endTs !== null && Math.abs(other.endTs - next) < EDGE_SNAP_MS) {
           next = other.endTs;
         }
@@ -67,7 +64,7 @@ export function onResize(event, entry, edge, dayKey) {
       if (next <= origEnd - MIN_DURATION_MS) entry.startTs = next;
     } else {
       let next = snapToQuarter(origEnd + deltaMs, dayKey);
-      for (const other of visibleEntries()) {
+      for (const other of visibleEntriesFor(dayKey)) {
         if (other.id !== entry.id && Math.abs(other.startTs - next) < EDGE_SNAP_MS) {
           next = other.startTs;
         }

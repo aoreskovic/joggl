@@ -11,6 +11,7 @@ import { editEntryComment } from './entries.js';
 import { createRowNav, wireRovingList } from './keynav.js';
 import { renderAll } from './render.js';
 import { applySelection, clearSelection, select } from './selection.js';
+import { activeView } from './shell.js';
 import {
   entriesFor,
   isToday,
@@ -18,10 +19,10 @@ import {
   pxPerMin,
   setEntriesFor,
   state,
-  visibleEntries,
+  visibleEntriesFor,
 } from './state.js';
 import { createIssueLookup, searchIssues } from './tasks.js';
-import { clearColumns, columnAt, placeBlock, setColumns } from './timeline-columns.js';
+import { clearColumns, columnAt, columnFor, columnPairs, GUTTER_PX, placeBlock, setColumns } from './timeline-columns.js';
 import { isClickSuppressed, onMoveBlock, onResize } from './timeline-drag.js';
 import {
   computeRange,
@@ -36,6 +37,7 @@ import {
   extractIssueKey,
   startOfDayMs,
   stripTrailingKey,
+  todayKey,
   tsToHHMM,
   uuid,
 } from './util.js';
@@ -84,6 +86,11 @@ export function computeColumns(entries) {
 }
 
 export function renderTimeline() {
+  // The week view registers its own columns, and both renders run on every
+  // renderAll. Whichever ran last would own the map, which is a rule nobody can
+  // read off the code — so each render draws only while its own view is up.
+  if (activeView() !== 'day') return;
+
   const gridEl = document.getElementById('schedule-grid');
   if (!gridEl) {
     // Nothing was drawn, so nothing is a column. Leaving the last render's map in
@@ -92,74 +99,91 @@ export function renderTimeline() {
     return;
   }
 
-  // One column today. The map is what a week view fills with five or seven, and it
-  // is registered before anything is drawn so a gesture arriving mid-render still
-  // resolves to a day.
-  setColumns([[state.selectedDate, gridEl]]);
+  const day = state.selectedDate;
+  setColumns([[day, gridEl, GUTTER_PX]]);
 
-  const entries = visibleEntries().filter((e) => e.endTs !== null);
-
-  const { startHour, endHour } = computeRange(new Map([[state.selectedDate, entries]]), {
-    today: isToday() ? state.selectedDate : null,
+  const entries = visibleEntriesFor(day).filter((e) => e.endTs !== null);
+  const { startHour, endHour } = computeRange(new Map([[day, entries]]), {
+    today: isToday() ? day : null,
     timerStartTs: state.timer && isToday() ? state.timer.startTs : null,
   });
   setGrid({ startHour, endHour, pxPerMin: pxPerMin() });
-  // The hour loop below is expressed in px-per-minute terms directly, so it keeps
-  // its own short name rather than reading `grid.pxPerMin` on every line.
-  const px = grid.pxPerMin;
 
-  gridEl.replaceChildren();
   gridEl.style.height = `${gridHeightPx()}px`;
+  paintDayColumn(gridEl, day, { showLabels: true, emptyHint: true });
 
-  for (let h = startHour; h <= endHour; h++) {
-    const y = (h - startHour) * 60 * px;
+  roving().refresh();
+  // These blocks are new elements and know nothing about the selection.
+  applySelection();
+}
+
+/**
+ * Draw one day into one column: hour lines, its blocks, the live timer block, the
+ * now line, and — when asked — the empty hint.
+ *
+ * The hour range is *not* computed here. Every column of a week shares one, or the
+ * rows do not line up across it, so `setGrid` is the caller's business and this only
+ * reads it. The live block belongs to today's column whatever day is selected, which
+ * is why the test is `todayKey()` and not `isToday()`.
+ *
+ * @returns {number} how many finished blocks were drawn
+ */
+export function paintDayColumn(host, dayKey, { showLabels = true, emptyHint = true } = {}) {
+  const px = grid.pxPerMin;
+  host.replaceChildren();
+  host.style.height = `${gridHeightPx()}px`;
+
+  for (let h = grid.startHour; h <= grid.endHour; h++) {
+    const y = (h - grid.startHour) * 60 * px;
 
     const line = document.createElement('div');
     line.className = 'sched-hour';
     line.style.top = `${y}px`;
-    const label = document.createElement('span');
-    label.className = 'sched-hour-label';
-    label.textContent = `${String(h % 24).padStart(2, '0')}:00`;
-    line.appendChild(label);
-    gridEl.appendChild(line);
+    if (showLabels) {
+      const label = document.createElement('span');
+      label.className = 'sched-hour-label';
+      label.textContent = `${String(h % 24).padStart(2, '0')}:00`;
+      line.appendChild(label);
+    }
+    host.appendChild(line);
 
-    if (h < endHour) {
+    if (h < grid.endHour) {
       const half = document.createElement('div');
       half.className = 'sched-half';
       half.style.top = `${y + 30 * px}px`;
-      gridEl.appendChild(half);
+      host.appendChild(half);
     }
   }
+
+  const entries = visibleEntriesFor(dayKey).filter((e) => e.endTs !== null);
 
   // The live block is fed into the column solver as a synthetic entry so it
   // shares columns with whatever it overlaps instead of covering it.
   const live =
-    state.timer && isToday()
+    state.timer && dayKey === todayKey()
       ? { id: '__live__', startTs: state.timer.startTs, endTs: Date.now() }
       : null;
-  const columns = computeColumns(live ? [...entries, live] : entries);
+  const slots = computeColumns(live ? [...entries, live] : entries);
 
   for (const entry of entries) {
-    gridEl.appendChild(
-      buildBlock(entry, state.selectedDate, columns.get(entry.id) ?? { col: 0, totalCols: 1 }),
-    );
+    host.appendChild(buildBlock(entry, dayKey, slots.get(entry.id) ?? { col: 0, totalCols: 1 }));
   }
 
   if (live) {
-    const slot = columns.get('__live__') ?? { col: 0, totalCols: 1 };
+    const slot = slots.get('__live__') ?? { col: 0, totalCols: 1 };
     const block = document.createElement('div');
     block.className = 'sched-entry-block live';
-    placeBlock(block, live.startTs, live.endTs, state.selectedDate, slot, 20);
+    placeBlock(block, live.startTs, live.endTs, dayKey, slot, 20);
     const label = document.createElement('div');
     label.className = 'sched-entry-label';
     label.textContent =
       (state.timer.issueKey ? `${state.timer.issueKey} ` : '') + state.timer.title;
     block.appendChild(label);
-    gridEl.appendChild(block);
+    host.appendChild(block);
   }
 
-  if (isToday()) {
-    const nowPx = offsetPxOf(Date.now(), state.selectedDate);
+  if (dayKey === todayKey()) {
+    const nowPx = offsetPxOf(Date.now(), dayKey);
     if (nowPx >= 0 && nowPx <= gridHeightPx()) {
       const nowLine = document.createElement('div');
       nowLine.className = 'sched-now-line';
@@ -167,23 +191,21 @@ export function renderTimeline() {
       const dot = document.createElement('div');
       dot.className = 'sched-now-dot';
       nowLine.appendChild(dot);
-      gridEl.appendChild(nowLine);
+      host.appendChild(nowLine);
     }
   }
 
   // Same reasoning as the empty entry list: the two gestures are undiscoverable,
   // and an empty grid is where there is room to name them. pointer-events off, or
   // the hint would swallow the very click it is describing.
-  if (entries.length === 0 && !live) {
+  if (emptyHint && entries.length === 0 && !live) {
     const hint = document.createElement('div');
     hint.className = 'sched-empty-hint';
     hint.textContent = 'Click an hour to add time, or drag an issue here';
-    gridEl.appendChild(hint);
+    host.appendChild(hint);
   }
 
-  roving().refresh();
-  // These blocks are new elements and know nothing about the selection.
-  applySelection();
+  return entries.length;
 }
 
 /**
@@ -199,22 +221,29 @@ export function gridTimeAt(clientX, clientY) {
  * Show what a drop would create. Always full width rather than fighting for an
  * overlap column: a preview that reflowed as it passed other blocks would jump
  * sideways under the cursor.
+ *
+ * The preview lives inside the column it is about, so crossing into another day
+ * moves it there rather than leaving it hanging over the day it started in.
  */
-export function showDropPlaceholder(startTs, endTs) {
-  const gridEl = document.getElementById('schedule-grid');
-  if (!gridEl) return;
+export function showDropPlaceholder(startTs, endTs, dayKey = state.selectedDate) {
+  const host = columnFor(dayKey);
+  if (!host) return;
 
-  let el = gridEl.querySelector('.sched-drop-preview');
+  let el = document.querySelector('.sched-drop-preview');
+  if (el && el.parentElement !== host) {
+    el.remove();
+    el = null;
+  }
   if (!el) {
     el = document.createElement('div');
     el.className = 'sched-drop-preview';
     const label = document.createElement('div');
     label.className = 'sched-entry-label';
     el.appendChild(label);
-    gridEl.appendChild(el);
+    host.appendChild(el);
   }
 
-  placeBlock(el, startTs, endTs, state.selectedDate, { col: 0, totalCols: 1 });
+  placeBlock(el, startTs, endTs, dayKey, { col: 0, totalCols: 1 });
   el.querySelector('.sched-entry-label').textContent =
     `${tsToHHMM(startTs)} – ${tsToHHMM(endTs)}`;
 }
@@ -510,22 +539,24 @@ function showQuickEntry(cx, cy, dayKey, startTs, endTs) {
 
 // ── Cheap per-second updates between full renders ──────────────────────────
 
+// The old `if (!isToday()) return` guard is gone because the loop already only
+// touches today's column — and in the week view today's column is drawn while
+// another day is selected.
 export function updateNowMarkers() {
-  if (!isToday()) return;
-  const gridEl = document.getElementById('schedule-grid');
-  if (!gridEl) return;
+  const today = todayKey();
+  for (const [dayKey, host] of columnPairs()) {
+    if (dayKey !== today) continue;
 
-  const line = gridEl.querySelector('.sched-now-line');
-  const nowPx = offsetPxOf(Date.now(), state.selectedDate);
-  if (line && nowPx >= 0 && nowPx <= gridHeightPx()) {
-    line.style.top = `${nowPx}px`;
-  }
+    const line = host.querySelector('.sched-now-line');
+    const nowPx = offsetPxOf(Date.now(), dayKey);
+    if (line && nowPx >= 0 && nowPx <= gridHeightPx()) line.style.top = `${nowPx}px`;
 
-  const live = gridEl.querySelector('.sched-entry-block.live');
-  if (live && state.timer) {
-    const durMin = Math.max(1, (Date.now() - state.timer.startTs) / 60_000);
-    live.style.top = `${offsetPxOf(state.timer.startTs, state.selectedDate)}px`;
-    live.style.minHeight = `${Math.max(20, durMin * grid.pxPerMin)}px`;
+    const live = host.querySelector('.sched-entry-block.live');
+    if (live && state.timer) {
+      const durMin = Math.max(1, (Date.now() - state.timer.startTs) / 60_000);
+      live.style.top = `${offsetPxOf(state.timer.startTs, dayKey)}px`;
+      live.style.minHeight = `${Math.max(20, durMin * grid.pxPerMin)}px`;
+    }
   }
 }
 

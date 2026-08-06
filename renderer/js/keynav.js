@@ -33,8 +33,12 @@ const ACTIVE = 'is-keynav-active';
  * @param {string} spec.rowSelector
  * @param {(row: Element) => void} [spec.onMove] the row the arrows just landed on,
  *        so the selection can follow the keyboard as it follows the mouse
+ * @param {(rows: Element[], from: Element, key: string) => Element|null} [spec.resolve]
+ *        Which row a key means, for a list that is not a straight line — the week's
+ *        grid is columns, where Down means "later that day" and Right means "the next
+ *        column". Absent, the linear behaviour below applies.
  */
-export function wireRovingList({ container, rowSelector, onMove }) {
+export function wireRovingList({ container, rowSelector, onMove, resolve }) {
   const rows = () => {
     const host = container();
     return host ? [...host.querySelectorAll(rowSelector)] : [];
@@ -57,7 +61,14 @@ export function wireRovingList({ container, rowSelector, onMove }) {
       if (from < 0) return; // a keypress inside an input, not on a row
 
       let to = null;
-      if (event.key === 'ArrowDown') to = Math.min(from + 1, all.length - 1);
+      if (resolve) {
+        // The list decides. Anything it does not answer for is left alone entirely,
+        // so a grid does not have to re-implement the keys it does not care about.
+        const row = resolve(all, all[from], event.key);
+        if (!row) return;
+        to = all.indexOf(row);
+        if (to < 0) return;
+      } else if (event.key === 'ArrowDown') to = Math.min(from + 1, all.length - 1);
       else if (event.key === 'ArrowUp') to = Math.max(from - 1, 0);
       else if (event.key === 'Home') to = 0;
       else if (event.key === 'End') to = all.length - 1;

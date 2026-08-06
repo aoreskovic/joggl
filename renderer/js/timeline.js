@@ -5,6 +5,7 @@
 // settled by use, not by design — treat behaviour changes as regressions unless
 // they are deliberate.
 
+import { nextBlockId } from './block-nav.js';
 import { editorForTarget } from './click-actions.js';
 import { showContextMenu } from './context-menu.js';
 import { editEntryComment } from './entries.js';
@@ -42,6 +43,23 @@ import {
   uuid,
 } from './util.js';
 
+/**
+ * The rows of a grid as `block-nav` wants them: which column, and how far into it.
+ *
+ * Exported because the week view's roving list needs exactly the same reading of
+ * exactly the same elements — the two grids differ in how many columns they draw and
+ * in nothing else.
+ */
+export function blockNavResolver(rows, from, key) {
+  const blocks = rows.map((el) => ({
+    id: el.dataset.id,
+    day: el.dataset.day,
+    offsetMs: Number(el.dataset.start) - startOfDayMs(el.dataset.day),
+  }));
+  const id = nextBlockId(blocks, from?.dataset.id, key);
+  return id ? rows.find((el) => el.dataset.id === id) ?? null : null;
+}
+
 // One tab stop for the whole grid, arrow keys between blocks. Lazy because the
 // grid exists before this module runs but renderTimeline may be called first.
 let rovingBlocks = null;
@@ -50,6 +68,7 @@ function roving() {
     container: () => document.getElementById('schedule-grid'),
     rowSelector: '.sched-entry-block:not(.live)',
     onMove: (block) => select(block.dataset.id),
+    resolve: blockNavResolver,
   });
   return rovingBlocks;
 }

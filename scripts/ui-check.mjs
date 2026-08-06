@@ -1713,6 +1713,87 @@ async function keyboard() {
      return String(inside)`,
     eq('true'),
   );
+
+  await check(
+    'the day grid’s arrows walk its blocks in time order, not the order they were drawn',
+    `await H.resetDay();
+     const at = (hh) => { const d = new Date(); d.setHours(hh, 0, 0, 0); return d.getTime(); };
+     // Deliberately out of order in the day log, so DOM order and time order differ.
+     // Both sit before 09:00: the fake Jira client books fixture worklogs at 09:30
+     // and 13:00 on today (main/jira/fake.js), and a fixture landing between these
+     // two would make ArrowDown answer with the Jira-side row instead — correctly,
+     // but not what this check is asking about. Keeping both before the fixture's
+     // earliest row is what makes nav-early the day's topmost block too, which the
+     // "held" assertion below needs.
+     await window.joggl.days.save(H.todayKey(), [
+       { id: 'nav-late', issueKey: 'GEN-1', issueId: null, title: 'Late', startTs: at(8),
+         endTs: at(9), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       { id: 'nav-early', issueKey: 'GEN-2', issueId: null, title: 'Early', startTs: at(6),
+         endTs: at(7), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+     ]);
+     await window.__jogglTest.reloadDay();
+     const press = (el, key) => el.dispatchEvent(new KeyboardEvent('keydown', {
+       key, bubbles: true, cancelable: true }));
+     const early = H.q('.sched-entry-block[data-id="nav-early"]');
+     early.focus();
+     press(early, 'ArrowDown');
+     const down = document.activeElement?.dataset.id ?? null;
+     press(document.activeElement, 'ArrowUp');
+     const up = document.activeElement?.dataset.id ?? null;
+     press(document.activeElement, 'ArrowUp');
+     const held = document.activeElement?.dataset.id ?? null;
+     await H.resetDay();
+     return JSON.stringify({ down, up, held })`,
+    (v) => {
+      const d = JSON.parse(v);
+      // Held at the top rather than wrapping — the same clamp every roving list has.
+      return d.down === 'nav-late' && d.up === 'nav-early' && d.held === 'nav-early';
+    },
+  );
+
+  await check(
+    'in the week view ← and → cross columns while ↑ and ↓ stay in one',
+    `H.q('.sidebar-item[data-view="week"]').click();
+     await H.until(() => !H.q('#view-week').hidden, 8000, 'the week view');
+     await H.settle();
+     try {
+       const a = H.colDay(0), b = H.colDay(1);
+       const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+       await window.joggl.days.save(a, [
+         { id: 'wk-a9', issueKey: 'GEN-1', issueId: null, title: 'A nine', startTs: on(a, 9),
+           endTs: on(a, 10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+         { id: 'wk-a15', issueKey: 'GEN-1', issueId: null, title: 'A three', startTs: on(a, 15),
+           endTs: on(a, 16), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       ]);
+       await window.joggl.days.save(b, [
+         { id: 'wk-b14', issueKey: 'GEN-2', issueId: null, title: 'B two', startTs: on(b, 14),
+           endTs: on(b, 15), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       ]);
+       await window.__jogglTest.reloadDay();
+       await H.until(() => !!H.q('.sched-entry-block[data-id="wk-b14"]'), 4000, 'the seeded blocks');
+       const press = (el, key) => el.dispatchEvent(new KeyboardEvent('keydown', {
+         key, bubbles: true, cancelable: true }));
+       const start = H.q('.sched-entry-block[data-id="wk-a9"]');
+       start.focus();
+       press(start, 'ArrowDown');
+       const down = document.activeElement?.dataset.id ?? null;
+       press(document.activeElement, 'ArrowRight');
+       const right = document.activeElement?.dataset.id ?? null;
+       press(document.activeElement, 'ArrowLeft');
+       const left = document.activeElement?.dataset.id ?? null;
+       await H.clearDays([a, b]);
+       return JSON.stringify({ down, right, left });
+     } finally {
+       H.q('.sidebar-item[data-view="day"]').click();
+       await H.until(() => !H.q('#view-day').hidden, 8000, 'the day view');
+     }`,
+    (v) => {
+      const d = JSON.parse(v);
+      // Down stays on Monday; right crosses to Tuesday's only block; left comes back
+      // to whichever of Monday's two is nearest 14:00, which is the 15:00 one.
+      return d.down === 'wk-a15' && d.right === 'wk-b14' && d.left === 'wk-a15';
+    },
+  );
 }
 
 async function dateJump() {

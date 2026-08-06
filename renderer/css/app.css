@@ -136,7 +136,8 @@ button {
 }
 
 /* The rail is out of flow while collapsed, so the view host reserves its width. */
-.sidebar.collapsed ~ .app-layout {
+.sidebar.collapsed ~ .app-layout,
+.sidebar.collapsed ~ .week-layout {
   margin-left: 44px;
 }
 

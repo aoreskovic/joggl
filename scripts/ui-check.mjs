@@ -918,7 +918,9 @@ async function weekView() {
     inWeek(`return JSON.stringify(H.all('.week-colhead').map(h => h.querySelector('.week-colhead-day').textContent));`),
     (v) => {
       const heads = JSON.parse(v);
-      return heads.length >= 5 && heads[0].startsWith('Mon') && heads[4].startsWith('Fri');
+      // Exactly five: `>= 5` would still pass if the toggle were stuck on seven, or
+      // defaulted there, since the fifth head is 'Fri' either way.
+      return heads.length === 5 && heads[0].startsWith('Mon') && heads[4].startsWith('Fri');
     },
   );
 
@@ -934,7 +936,9 @@ async function weekView() {
             return JSON.stringify({ seven, active, stored, back: H.all('.week-colhead').length });`),
     (v) => {
       const d = JSON.parse(v);
-      return d.seven === 7 && d.active && d.stored === true && d.back <= 6;
+      // Exactly five once back: `<= 6` only catches a toggle stuck fully open, not
+      // one stuck one column short of closing.
+      return d.seven === 7 && d.active && d.stored === true && d.back === 5;
     },
   );
 

@@ -7,6 +7,7 @@
 // nothing about the working day view moves into a builder function.
 
 import { CHEVRON_ICON, DAY_ICON, HELP_ICON, MONTH_ICON, SETTINGS_ICON, WEEK_ICON } from './icons.js';
+import { renderAll } from './render.js';
 import { saveUi, state } from './state.js';
 
 /** Long enough that crossing the rail on the way somewhere else does not open it. */
@@ -49,6 +50,13 @@ export function setActiveView(id) {
   views.get(activeId)?.unmount();
   activeId = id;
   next.mount();
+  // Every renderer gates on activeView() and skips its own work while a different
+  // view is mounted, so the incoming view's markup can be stale — the day view's
+  // grid does not repaint on its own when the day changes while Week is up, since
+  // renderTimeline() no-ops for as long as Week stays active. A view switch is not
+  // itself a day change, so notifyDayChange has nothing to do with this; it is the
+  // switch itself that needs a repaint, here rather than in each view's own mount().
+  renderAll();
 
   for (const button of document.querySelectorAll('.sidebar-item[data-view]')) {
     const isActive = button.dataset.view === id;

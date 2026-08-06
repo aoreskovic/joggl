@@ -2082,6 +2082,20 @@ async function help() {
         /Manual Jira entry/.test(d.text) && /Work description/.test(d.text);
     },
   );
+
+  await check(
+    'help: the week view has its own bindings',
+    `H.q('#help-btn').click(); await H.sleep(200);
+     const groups = H.all('#help-shortcuts .help-keys-group th').map(t => t.textContent);
+     const keys = H.all('#help-shortcuts kbd').map(k => k.textContent);
+     H.q('#close-help').click(); await H.sleep(150);
+     return JSON.stringify({ hasGroup: groups.includes('In the week view'),
+                             hasToggle: keys.includes('5 | 7') })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.hasGroup && d.hasToggle;
+    },
+  );
 }
 
 async function copyAndClear() {

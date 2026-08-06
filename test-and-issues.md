@@ -113,6 +113,10 @@ Not scripted — it needs a machine without Node, or at least a shell without it
 | Copy previous day from a column | That column fills from the last day with anything on it, at the same times. The other columns are untouched. |
 | Clear day from a column | Only that column empties. It asks first, offers to spare the synced entries, and nothing is deleted from Jira. |
 | Clear week | Asks once, naming how many entries across how many days. Local only — every worklog already in Jira stays there. |
+| Step back three weeks, then start a timer from the search box | The view jumps to this week and the timer runs in today's column. A timer only ever runs on today. |
+| Watch a running timer in the week view | Its block grows in today's column, takes part in that column's overlap layout, and both the day total and the week total count it. |
+| Press F1 | The shortcut table has an **In the week view** group. |
+| Switch to the week view and back, twice | The search box and pins move with it each time. There is never a second copy of either, and Ctrl+L still reaches the box. |
 
 ### Editing which task a block belongs to
 

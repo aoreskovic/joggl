@@ -21,9 +21,10 @@ import { createRowNav } from './keynav.js';
 import { isPinned, renderPins, togglePin } from './pins.js';
 import { registerRenderer, renderAll } from './render.js';
 import { clearSelection } from './selection.js';
-import { hasView, notifyDayChange, registerView, setActiveView, wireShell } from './shell.js';
+import { activeView, hasView, notifyDayChange, registerView, setActiveView, wireShell } from './shell.js';
 import {
   appVersion,
+  entriesFor,
   externalPending,
   invalidateExternal,
   isToday,
@@ -243,11 +244,6 @@ async function selectDate(date) {
   $('current-date-label').textContent = formatDateLabel(date);
   $('next-day').disabled = date >= todayKey();
 
-  const today = isToday();
-  $('task-input').disabled = !today;
-  $('start-time-input').disabled = !today;
-  $('start-stop-btn').disabled = !today;
-
   // A property of the day now on screen, so it belongs here rather than in a render.
   applyWeekendTint();
 
@@ -338,6 +334,14 @@ function updateTimerUi() {
   const button = $('start-stop-btn');
   const display = $('timer-display');
   const running = Boolean(state.timer);
+
+  // The timer runs only on today. In the day view that means the controls are dead
+  // on any other day; in the week view today is usually a column already on screen,
+  // so they stay live and starting one steps the view to this week instead.
+  const canStart = isToday() || activeView() === 'week';
+  input.disabled = !canStart;
+  startInput.disabled = !canStart;
+  button.disabled = !canStart && !running;
 
   button.innerHTML = running ? `${STOP_ICON}Stop` : `${PLAY_ICON}Start`;
   // btn-stop only recolours. Swapping btn-primary out with it stripped the
@@ -515,7 +519,13 @@ function wireOmnibar() {
       await stopTimer();
       return;
     }
-    if (!isToday()) return;
+    if (!isToday()) {
+      // Only the week view offers this: the day view's controls are dead off today,
+      // so there is nothing to press. Stepping to today puts the block that is about
+      // to start where it can be seen.
+      if (activeView() !== 'week') return;
+      await selectDate(todayKey());
+    }
 
     if (pickedIssue) {
       await startTimer({
@@ -675,14 +685,16 @@ function wirePinPicker() {
  * recent entry, because "start the last thing again" is the whole point of a
  * keyboard shortcut for a timer — otherwise it would only ever be able to stop.
  */
-function resumeOrToggleTimer() {
+async function resumeOrToggleTimer() {
   const input = $('task-input');
-  if (state.timer || input.value.trim() || !isToday()) {
+  if (state.timer || input.value.trim() || (!isToday() && activeView() !== 'week')) {
     $('start-stop-btn').click();
     return;
   }
 
-  const last = [...state.entries]
+  // Today's, explicitly: in the week view the selected day is often not today, and
+  // resuming "the day's last entry" means the day the timer would run on.
+  const last = [...entriesFor(todayKey())]
     .filter((e) => !e.external && e.endTs !== null)
     .sort((a, b) => b.endTs - a.endTs)[0];
 
@@ -690,6 +702,9 @@ function resumeOrToggleTimer() {
     toastWarn('Nothing to resume yet. Ctrl+L to search for an issue.');
     return;
   }
+  // startTimer refuses off today, same as the button — so a resume pressed from a
+  // past week has to come home first, exactly as pressing Start there now does.
+  if (!isToday()) await selectDate(todayKey());
   startTimer({ issueKey: last.issueKey, issueId: last.issueId, title: last.title });
 }
 

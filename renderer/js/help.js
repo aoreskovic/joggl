@@ -32,6 +32,15 @@ export const SHORTCUTS = [
     ],
   },
   {
+    group: 'In the week view',
+    keys: [
+      ['‹ ›', 'A week back and forward. Page Up and Page Down do the same'],
+      ['[ or ]', 'A day — which moves the marked column, and steps the week at its ends'],
+      ['5 | 7', 'Monday to Friday, or the whole week. A weekend with time on it is shown either way'],
+      ['Drag a block sideways', 'Move it to another day. A synced one goes back to pending and is rewritten, never logged twice'],
+    ],
+  },
+  {
     group: 'In any list',
     keys: [
       ['↑ ↓', 'Move the highlight, wrapping at both ends'],

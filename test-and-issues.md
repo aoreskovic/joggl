@@ -101,6 +101,10 @@ Not scripted — it needs a machine without Node, or at least a shell without it
 | Scroll the week down, then click a column head | Nothing is created. The heads sit over their own columns once scrolled, and a click on one only marks the day. |
 | Click a block, double-click it, right-click it | Select, work description, the full menu — the same as the day view, because it is the same code. |
 | Drag a block's edges | Resize, snapping to the quarter hour and to its own day's neighbours. |
+| Drag a block from Monday's column onto Thursday's | It moves. Monday no longer has it, Thursday does, at the time the preview showed. |
+| Drag a **synced** block to another day | It moves and goes back to ● pending. Sync then *rewrites* that worklog rather than logging a second one — the issue has not changed, only when the work started. |
+| Drag a **Manual Jira entry** anywhere | It refuses, with the message it already gives. It is not Joggl's to move. |
+| Drag a block out of a column and release over the header | It stays on the last column it was over. Nothing is created on a day the cursor never entered. |
 
 ### Editing which task a block belongs to
 

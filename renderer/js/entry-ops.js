@@ -138,6 +138,23 @@ export function retargetEntry(entry, issue) {
   };
 }
 
+/**
+ * The entry, marked as needing to reach Jira again.
+ *
+ * The rule `markDirty` has always applied, pulled out of `entries.js` so a move that
+ * changes day can be tested without a DOM. The worklogId is deliberately kept: an
+ * entry edited after syncing is *rewritten* with `PUT .../worklog/{id}`, never posted
+ * a second time. A Jira-side row is returned untouched — it is not Joggl's record.
+ */
+export function dirtiedEntry(entry) {
+  if (entry?.external) return entry;
+  if (!entry?.issueKey) return { ...entry, status: 'local', errorMsg: null };
+  if (entry.status === 'synced' || entry.status === 'error') {
+    return { ...entry, status: 'pending', errorMsg: null };
+  }
+  return entry;
+}
+
 /** A block drawn by hand on the day view is half an hour wherever it lands. */
 export const DEFAULT_DROP_MS = 30 * 60_000;
 

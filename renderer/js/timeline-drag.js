@@ -10,13 +10,22 @@
 // local midnight — which matters when two columns sit on opposite sides of a clock
 // change.
 
+import { canCrossDays, crossDayMove } from './cross-day.js';
 import { markDirty } from './entries.js';
 import { sameTimes } from './entry-ops.js';
 import { renderAll } from './render.js';
-import { persistDayNow, state, visibleEntries, visibleEntriesFor } from './state.js';
+import {
+  entriesFor,
+  persistDayNow,
+  setEntriesFor,
+  state,
+  visibleEntries,
+  visibleEntriesFor,
+} from './state.js';
 import { grid, offsetPxOf } from './timeline-geometry.js';
+import { columnAt, columnFor } from './timeline-columns.js';
 import { toastWarn } from './toast.js';
-import { msToDur, QUARTER, snapToQuarter, startOfDayMs, tsToHHMM } from './util.js';
+import { addDays, msToDur, QUARTER, snapToQuarter, startOfDayMs, tsToHHMM } from './util.js';
 
 // Nothing shorter than one grid step, so a block can never be dragged into a
 // sliver that is impossible to grab again.
@@ -105,34 +114,56 @@ export function onMoveBlock(event, entry, dayKey) {
   const origStart = entry.startTs;
   const duration = entry.endTs - origStart;
   const startY = event.clientY;
-  const dayStart = startOfDayMs(dayKey);
+  // What the entry says on the clock, as an offset from its own day's midnight. A
+  // move to another column keeps that offset and adds the drag; a fixed number of
+  // milliseconds would shift the block by an hour across a clock change.
+  const offset = origStart - startOfDayMs(dayKey);
   const block = document.querySelector(`.sched-entry-block[data-id="${CSS.escape(entry.id)}"]`);
   block?.classList.add('dragging', 'moving');
+  let targetDay = dayKey;
   let moved = false;
 
   const onMouseMove = (move) => {
     const deltaMs = ((move.clientY - startY) / grid.pxPerMin) * 60_000;
+
+    // Which column the cursor is over answers *which day*; the vertical delta answers
+    // *what time*. With one column this is exactly what it always did. A cursor that
+    // has wandered off every column keeps the day it last had, rather than snapping
+    // the block back to where it started.
+    const day = columnAt(move.clientX, move.clientY)?.dateKey ?? targetDay;
+    const dayStart = startOfDayMs(day);
+    const dayEnd = startOfDayMs(addDays(day, 1));
+
     // Moving keeps the length and snaps the start to the clock grid, so a 47-minute
     // entry stays 47 minutes but always begins on a quarter hour.
-    let start = snapToQuarter(origStart + deltaMs, dayKey);
+    let start = snapToQuarter(dayStart + offset + deltaMs, day);
     let end = start + duration;
 
     if (start < dayStart) {
       start = dayStart;
       end = start + duration;
     }
-    if (end > dayStart + 86_400_000) {
-      end = dayStart + 86_400_000;
+    // addDays, not a constant: the autumn clock change makes one day 25 hours, and
+    // adding 86,400,000 would cut its last hour off a moment before midnight.
+    if (end > dayEnd) {
+      end = dayEnd;
       start = end - duration;
     }
 
+    if (day !== targetDay) {
+      targetDay = day;
+      // The block has to live in the column it is being dropped into, or it would
+      // hang over the day it left while claiming to be on another.
+      columnFor(day)?.appendChild(block);
+    }
+
     // Snapping means most small movements change nothing, and a gesture that never
-    // changed the start is exactly what a plain click is.
-    if (start !== origStart) moved = true;
+    // changed the start *or the day* is exactly what a plain click is.
+    if (start !== origStart || targetDay !== dayKey) moved = true;
 
     entry.startTs = start;
     entry.endTs = end;
-    liveUpdate(block, entry, dayKey);
+    liveUpdate(block, entry, targetDay);
   };
 
   const onMouseUp = async () => {
@@ -140,6 +171,11 @@ export function onMoveBlock(event, entry, dayKey) {
     document.removeEventListener('mouseup', onMouseUp);
     block?.classList.remove('dragging', 'moving');
     if (moved) suppressClickUntil = Date.now() + CLICK_TAIL_MS;
+
+    if (targetDay !== dayKey) {
+      await commitCrossDay(entry, dayKey, targetDay);
+      return;
+    }
     await commitDrag(
       entry,
       dayKey,
@@ -150,6 +186,31 @@ export function onMoveBlock(event, entry, dayKey) {
 
   document.addEventListener('mousemove', onMouseMove);
   document.addEventListener('mouseup', onMouseUp);
+}
+
+/**
+ * End of a move that changed column.
+ *
+ * Two day logs, written one after the other. Both names are fixed before the first
+ * await, and neither is `state.selectedDate` — in the week view the day on screen is
+ * usually neither of them.
+ */
+async function commitCrossDay(entry, fromDay, toDay) {
+  if (!canCrossDays(entry)) return;
+
+  const { from, to } = crossDayMove({
+    entry,
+    fromEntries: entriesFor(fromDay),
+    toEntries: entriesFor(toDay),
+    toDayStartMs: startOfDayMs(toDay),
+    startTs: entry.startTs,
+  });
+
+  setEntriesFor(fromDay, from);
+  setEntriesFor(toDay, to);
+  await persistDayNow(fromDay);
+  await persistDayNow(toDay);
+  renderAll();
 }
 
 /**

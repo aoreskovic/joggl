@@ -12,6 +12,7 @@
 // movement threshold is what lets a single click on a task keep doing what it always
 // did, which is start a timer.
 
+import { crossDayMove } from './cross-day.js';
 import {
   clampDropStart,
   DEFAULT_DROP_MS,
@@ -325,11 +326,21 @@ async function onMouseUp() {
     const entry = entriesFor(source).find((e) => e.id === payload.entryId);
     // It could have been deleted, or the day changed, while the drag was running.
     if (!entry) return;
-    // Dropping a row from "On this day" onto another day is unreachable today — that
-    // list only exists in the day view, which draws one column. Task 5 gives this
-    // branch its move; until then, refusing beats writing the entry onto a day and
-    // leaving it on the one it came from as well.
-    if (day !== source) return;
+    if (day !== source) {
+      const { from, to } = crossDayMove({
+        entry,
+        fromEntries: entriesFor(source),
+        toEntries: entriesFor(day),
+        toDayStartMs: dayStartTs,
+        startTs: at.ts,
+      });
+      setEntriesFor(source, from);
+      setEntriesFor(day, to);
+      await persistDayNow(source);
+      await persistDayNow(day);
+      renderAll();
+      return;
+    }
     const moved = movedEntry(entry, at.ts, dayStartTs);
     // Dropped back where it started: not a move, so do not mark it as needing a
     // re-sync. Same reason commitDrag checks.

@@ -6,6 +6,7 @@ import { showContextMenu } from './context-menu.js';
 import { copyPreviousDay } from './copy-day.js';
 import {
   canRetarget,
+  dirtiedEntry,
   duplicateOf,
   flaggedOverlaps,
   retargetEntry,
@@ -366,22 +367,9 @@ function handleInlineEdit(event) {
   renderAll();
 }
 
-/**
- * An entry that changed needs syncing again. A previously synced one keeps its
- * worklogId so the next Finish Day rewrites that worklog rather than adding a
- * second one for the same stretch of time.
- */
+/** The mutating form of `dirtiedEntry`, which is where the rule itself lives. */
 export function markDirty(entry) {
-  if (isExternal(entry)) return;
-  if (!entry.issueKey) {
-    entry.status = 'local';
-    entry.errorMsg = null;
-    return;
-  }
-  if (entry.status === 'synced' || entry.status === 'error') {
-    entry.status = 'pending';
-    entry.errorMsg = null;
-  }
+  Object.assign(entry, dirtiedEntry(entry));
 }
 
 async function handleEntryAction(event) {

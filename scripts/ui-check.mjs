@@ -1060,6 +1060,37 @@ async function weekView() {
       return d.selected && d.items === 6;
     },
   );
+
+  await check(
+    'week: a block dragged to another column changes day, and only once',
+    inWeek(`const from = H.colDay(0), to = H.colDay(2);
+            await window.joggl.days.save(from, [{
+              id: 'wk-move-1', issueKey: 'GEN-1', issueId: null, title: 'Travelling',
+              startTs: new Date(from + 'T10:00:00').getTime(),
+              endTs: new Date(from + 'T11:00:00').getTime(),
+              status: 'synced', worklogId: '99001', comment: null, errorMsg: null,
+            }]);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('.week-col [data-id="wk-move-1"]'), 4000, 'the block');
+            const target = H.all('.week-col')[2].getBoundingClientRect();
+            H.drag(H.q('.week-col [data-id="wk-move-1"]'),
+                   Math.round(target.left + target.width / 2),
+                   Math.round(target.top + 200));
+            await H.sleep(500);
+            const left = (await window.joggl.days.get(from)).entries.length;
+            const landed = (await window.joggl.days.get(to)).entries;
+            await H.clearDays([from, to]);
+            return JSON.stringify({
+              left,
+              landed: landed.length,
+              worklogId: landed[0]?.worklogId ?? null,
+              status: landed[0]?.status ?? null,
+            });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.left === 0 && d.landed === 1 && d.worklogId === '99001' && d.status === 'pending';
+    },
+  );
 }
 
 async function quickEntry() {

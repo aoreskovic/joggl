@@ -287,6 +287,15 @@ window.H = {
     await H.settle();
     await window.__jogglTest.reloadDay();
   },
+  /** Empty some days and repaint, for the week checks that write to more than one. */
+  async clearDays(keys) {
+    for (const key of keys) await window.joggl.days.save(key, []);
+    await window.__jogglTest.reloadDay();
+  },
+  /** The day key a week column stands for. */
+  colDay(index) {
+    return H.all('.week-colhead')[index]?.dataset.day ?? null;
+  },
   /** The day header, read as a key. The label is "Thu, 30.07.2026". */
   onToday() {
     const m = H.q('#current-date-label').textContent.match(/(\\d{2})\\.(\\d{2})\\.(\\d{4})/);
@@ -981,6 +990,74 @@ async function weekView() {
     (v) => {
       const d = JSON.parse(v);
       return d.today === 1 && d.selected === 1;
+    },
+  );
+
+  await check(
+    'week: a pin dropped on a column lands on that column’s day',
+    inWeek(`await H.clearPins();
+            H.q('#add-pin-btn').click(); await H.sleep(200);
+            H.q('#pin-results .task-dd-item button')?.click(); await H.sleep(250);
+            H.q('#close-pin').click(); await H.sleep(150);
+            const chip = H.q('.pin-chip');
+            const col = H.all('.week-col')[1], day = H.colDay(1);
+            const box = col.getBoundingClientRect();
+            const y = Math.round(box.top + 120);
+            H.drag(chip, Math.round(box.left + box.width / 2), y);
+            await H.sleep(400);
+            const made = (await window.joggl.days.get(day)).entries.length;
+            const elsewhere = (await window.joggl.days.get(H.colDay(0))).entries.length;
+            await H.clearDays([day, H.colDay(0)]);
+            await H.clearPins();
+            return JSON.stringify({ made, elsewhere });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.made === 1 && d.elsewhere === 0;
+    },
+  );
+
+  await check(
+    'week: clicking an empty hour opens the popup for that column’s day',
+    inWeek(`const col = H.all('.week-col')[2], day = H.colDay(2);
+            const box = col.getBoundingClientRect();
+            H.mouse(col, 'click', Math.round(box.left + box.width / 2), Math.round(box.top + 160));
+            await H.until(() => !!H.q('.sched-quick-entry'), 4000, 'the quick-entry popup');
+            const input = H.q('.sched-quick-entry input');
+            input.value = 'week popup entry';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            await H.sleep(250);
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+            await H.until(() => !H.q('.sched-quick-entry'), 4000, 'the popup to close');
+            await H.sleep(200);
+            const made = (await window.joggl.days.get(day)).entries.map(e => e.title);
+            await H.clearDays([day]);
+            return JSON.stringify({ made });`),
+    (v) => JSON.parse(v).made.length === 1,
+  );
+
+  await check(
+    'week: a block selects, and its menu opens',
+    inWeek(`const day = H.colDay(1);
+            await window.joggl.days.save(day, [{
+              id: 'wk-sel-1', issueKey: 'GEN-1', issueId: null, title: 'Selectable',
+              startTs: new Date(day + 'T10:00:00').getTime(),
+              endTs: new Date(day + 'T11:00:00').getTime(),
+              status: 'pending', worklogId: null, comment: null, errorMsg: null,
+            }]);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('.week-col [data-id="wk-sel-1"]'), 4000, 'the block');
+            const block = H.q('.week-col [data-id="wk-sel-1"]');
+            H.click(block);
+            const selected = block.classList.contains('is-selected');
+            block.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 200 }));
+            await H.until(() => !H.q('#ctx-menu').classList.contains('hidden'), 4000, 'the menu');
+            const items = H.all('#ctx-menu .ctx-item').length;
+            H.q('#ctx-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            await H.clearDays([day]);
+            return JSON.stringify({ selected, items });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.selected && d.items === 6;
     },
   );
 }

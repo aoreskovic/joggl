@@ -95,6 +95,12 @@ Not scripted — it needs a machine without Node, or at least a shell without it
 | Press Page Up and Page Down | The same, from the keyboard. `[` and `]` still step a single day, moving the marked column and, at the ends, the week. |
 | Look across the columns | The hours line up: one range for the whole week, widened to cover whatever is logged on any day of it. |
 | Zoom in and out | Both views share the setting — set it here, go to the day view, and it is the same. |
+| Drag a pin onto Wednesday's column | A half-hour block appears on Wednesday, where the preview said — not on the day the day view had selected. |
+| Type in the search box and drag a result onto a column | The same. The result rows are draggable; this is how an issue that is not pinned gets onto a day here. |
+| Click an empty hour in any column | The quick-entry popup opens, and what it creates lands on **that** column's day. |
+| Scroll the week down, then click a column head | Nothing is created. The heads sit over their own columns once scrolled, and a click on one only marks the day. |
+| Click a block, double-click it, right-click it | Select, work description, the full menu — the same as the day view, because it is the same code. |
+| Drag a block's edges | Resize, snapping to the quarter hour and to its own day's neighbours. |
 
 ### Editing which task a block belongs to
 

@@ -14,7 +14,7 @@ import { wireRovingList } from './keynav.js';
 import { applySelection, select } from './selection.js';
 import { activeView, registerView } from './shell.js';
 import { pxPerMin, refreshRange, saveUi, state, visibleEntriesFor } from './state.js';
-import { paintDayColumn } from './timeline.js';
+import { onGridClick, paintDayColumn } from './timeline.js';
 import { setColumns } from './timeline-columns.js';
 import { computeRange, grid, gridHeightPx, offsetPxOf, setGrid } from './timeline-geometry.js';
 import { isWeekend, msToDur, pad, startOfDay, todayKey } from './util.js';
@@ -252,4 +252,8 @@ export function wireWeekControls({ onZoom }) {
 
   $('week-zoom-in').addEventListener('click', () => onZoom(1));
   $('week-zoom-out').addEventListener('click', () => onZoom(-1));
+
+  // Clicking an empty hour, in whichever column it was: onGridClick asks columnAt,
+  // so it writes to the day the click landed in and not the day that is selected.
+  $('week-scroll').addEventListener('click', onGridClick);
 }

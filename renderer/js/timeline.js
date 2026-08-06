@@ -337,6 +337,11 @@ function onQuickEntryOutside(event) {
 
 export function onGridClick(event) {
   if (event.target.closest('.sched-entry-block') || event.target.closest('.sched-handle')) return;
+  // The week's column heads are sticky, so once the grid is scrolled they sit *over*
+  // the top of their own column: a click on one is inside the column's rect, and
+  // without this it would open the quick-entry popup at whatever hour is hidden
+  // beneath the head.
+  if (event.target.closest('.week-colhead')) return;
 
   // Clicking away from every block is how you put the selection down here, the same
   // as the empty space below the entry rows.

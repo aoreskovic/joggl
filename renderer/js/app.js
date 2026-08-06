@@ -80,7 +80,7 @@ import {
   todayKey,
   tsToHHMM,
 } from './util.js';
-import { registerWeekView, renderWeek, updateWeekLive, wireWeekControls } from './week-view.js';
+import { registerWeekView, renderWeek, updateWeekLive, weekAnchorDays, wireWeekControls } from './week-view.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -195,18 +195,19 @@ function installTestHook() {
     whenIdle: () => externalPending ?? Promise.resolve(),
 
     /**
-     * Re-read the day log and repaint, **without** touching Jira.
+     * Re-read the day logs on screen and repaint, **without** touching Jira.
      *
-     * Deliberately not `selectDate`. That is a day *change*: it clears the selection
-     * and asks for the day's Jira-side rows, and while the per-day cache usually
-     * answers that without a request, "usually" is not a property a harness called a
-     * hundred times a run should rest on. This never touches Jira by construction.
-     * Nothing in a run writes to Jira, so the rows already on screen are still true.
+     * Every day drawn, not just the selected one: the week view has five to seven on
+     * screen, and a check that clears one of the others would otherwise see the old
+     * rows for the rest of the run. Deliberately not `selectDate` — that is a day
+     * *change*, which clears the selection and asks Jira for rows the harness
+     * already has and never invalidates.
      */
     async reloadDay() {
-      const key = state.selectedDate;
-      const day = await window.joggl.days.get(key);
-      setEntriesFor(key, day.entries);
+      for (const key of new Set([state.selectedDate, ...weekAnchorDays()])) {
+        const day = await window.joggl.days.get(key);
+        setEntriesFor(key, day.entries);
+      }
       renderAll();
     },
 

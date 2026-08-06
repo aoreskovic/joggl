@@ -2075,9 +2075,12 @@ async function help() {
      return JSON.stringify({ groups, rows, keys, text })`,
     (v) => {
       const d = JSON.parse(v);
-      // Every binding the app actually has must appear, or the help is a lie.
+      // Every binding the app actually has must appear, or the help is a lie. Exact
+      // counts, not a floor: a floor still passes if an entire group is deleted, as
+      // long as what's left clears the bar — see SHORTCUTS in help.js for the 7
+      // groups / 24 rows this counts.
       const wanted = ['Ctrl + L', 'Ctrl + Enter', 'F1', 'T', '[ or ]', 'Page Up / Page Down'];
-      return d.groups.length >= 5 && d.rows >= 18 &&
+      return d.groups.length === 7 && d.rows === 24 &&
         wanted.every((k) => d.keys.includes(k)) &&
         /Manual Jira entry/.test(d.text) && /Work description/.test(d.text);
     },

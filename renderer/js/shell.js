@@ -31,6 +31,16 @@ export function hasView(id) {
   return views.has(id);
 }
 
+/**
+ * Tell the mounted view the day changed, so it can read whatever days it draws.
+ *
+ * A hook rather than a branch in app.js: the day view wants one day's Jira-side rows
+ * and the week view wants seven, and a third view will want something else again.
+ */
+export function notifyDayChange(date) {
+  return views.get(activeId)?.onDayChange?.(date);
+}
+
 export function setActiveView(id) {
   if (id === activeId) return;
   const next = views.get(id);

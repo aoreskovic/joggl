@@ -83,6 +83,7 @@ const UI_DEFAULTS = {
   weekendTint: true, // shade Saturday and Sunday in the day view
   pinLabel: 'keyname', // key | keyname | name — see pinLabelParts
   activeView: 'day', // day | week | month — week and month arrive in later phases
+  weekSevenDay: false, // week view: Mon–Fri by default, the 5|7 toggle switches it
 };
 
 export async function getUiPrefs() {

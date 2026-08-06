@@ -65,7 +65,8 @@ Not scripted — it needs a machine without Node, or at least a shell without it
 | Do this | Correct result |
 |---|---|
 | Look at the sidebar | Joggl, three tabs, Settings at the bottom. Day View highlighted with a left accent bar. |
-| Click Week View or Month View | Nothing happens. Both are dimmed and say "Not built yet" on hover. |
+| Click Month View | Nothing happens. It is dimmed and says "Not built yet" on hover. |
+| Click Week View | The week view opens. The search box and the pins move to the top of it; the issue list and **On this day** are not in this view. Click Day View — everything is back where it was. |
 | Click Settings | The settings overlay opens. Close still closes it. There is no ⚙ button in the day header any more. |
 | Click the toggle | The rail collapses to icons and the chevron flips. Click again to expand. |
 | Collapse, quit the app entirely, start it again | It comes back collapsed. Expand, quit, restart — comes back expanded. |
@@ -81,6 +82,19 @@ Not scripted — it needs a machine without Node, or at least a shell without it
 | Click it again | It reopens. |
 | Collapse it, change day, quit and restart | Still collapsed. |
 | Collapse it, then check the entries are not gone | Reopen and the rows are all still there — collapsing hides, it does not clear. |
+
+### Week view
+
+| Do this | Correct result |
+|---|---|
+| Open the week view | Five columns, Monday to Friday, with the weekday and date in each head and that day's total on the right. Today's column is marked. |
+| Click **7** | Saturday and Sunday appear. Click **5** — they go again. Quit and restart: the choice is remembered. |
+| Put time on a Saturday, then click **5** | Saturday stays on screen. Time that cannot be seen is time that never gets synced. |
+| Read the week label | `27 Jul – 2 Aug · week 31`. The year appears only on a week whose ISO week-year is not its Monday's — `29 Dec – 4 Jan · week 1 of 2026`. |
+| Click **‹** and **›** | A week back and forward. **›** is dimmed on the week holding today. |
+| Press Page Up and Page Down | The same, from the keyboard. `[` and `]` still step a single day, moving the marked column and, at the ends, the week. |
+| Look across the columns | The hours line up: one range for the whole week, widened to cover whatever is logged on any day of it. |
+| Zoom in and out | Both views share the setting — set it here, go to the day view, and it is the same. |
 
 ### Editing which task a block belongs to
 

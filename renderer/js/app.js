@@ -21,7 +21,7 @@ import { createRowNav } from './keynav.js';
 import { isPinned, renderPins, togglePin } from './pins.js';
 import { registerRenderer, renderAll } from './render.js';
 import { clearSelection } from './selection.js';
-import { registerView, setActiveView, wireShell } from './shell.js';
+import { hasView, notifyDayChange, registerView, setActiveView, wireShell } from './shell.js';
 import {
   appVersion,
   externalPending,
@@ -80,6 +80,7 @@ import {
   todayKey,
   tsToHHMM,
 } from './util.js';
+import { registerWeekView, renderWeek, updateWeekLive, wireWeekControls } from './week-view.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -105,13 +106,20 @@ async function boot() {
     unmount() {
       $('view-day').hidden = true;
     },
+    // Time booked straight into Jira belongs in this day's total too. Fired after
+    // the first paint, and never allowed to break the local view if Jira is down.
+    onDayChange(date) {
+      return refreshExternal(date);
+    },
   });
-  // Hardcoded rather than restored from state.ui.activeView: week and month do not
-  // exist yet, and restoring a view that is not registered would leave a blank app.
-  setActiveView('day');
+  registerWeekView({ selectDate });
+  // Restored now that there is more than one view to restore. Month is still not
+  // registered, and a stored preference naming it would leave a blank app.
+  setActiveView(hasView(state.ui.activeView) ? state.ui.activeView : 'day');
 
   registerRenderer(renderEntryList);
   registerRenderer(renderTimeline);
+  registerRenderer(renderWeek);
   registerRenderer(renderTaskList);
   registerRenderer(renderPins);
   registerRenderer(updateTotal);
@@ -134,6 +142,7 @@ async function boot() {
   wireDayPanel();
   wireDayNav();
   wireDayView();
+  wireWeekControls({ onZoom: (step) => changeZoom(step) });
   wireDayViewDrag();
   wireEntryList();
   wireHelp();
@@ -146,6 +155,7 @@ async function boot() {
 
   onTick(() => {
     updateTotal();
+    updateWeekLive();
     updateNowMarkers();
   });
 
@@ -239,9 +249,10 @@ async function selectDate(date) {
 
   renderAll();
 
-  // Time booked straight into Jira belongs in this day's total too. Fetched after
-  // the first paint, and never allowed to break the local view if Jira is down.
-  refreshExternal(date);
+  // Which days have to be read depends on the view: one for the day view, the whole
+  // week for the week view. Asked of the view rather than branched on here, so this
+  // function does not learn about a view every time one is added.
+  notifyDayChange(date);
 }
 
 /**
@@ -542,24 +553,26 @@ function wireOmnibar() {
 // ── Day view controls ──────────────────────────────────────────────────────
 
 function updateZoomLabel() {
-  $('zoom-lbl').textContent = `${ZOOM_LEVELS[state.ui.zoomIdx] ?? 1}×`;
+  const label = `${ZOOM_LEVELS[state.ui.zoomIdx] ?? 1}×`;
+  $('zoom-lbl').textContent = label;
+  $('week-zoom-lbl').textContent = label;
+}
+
+/** One zoom for both views: the week is as tall as the day at the same setting. */
+async function changeZoom(step) {
+  const next = state.ui.zoomIdx + step;
+  if (next < 0 || next > ZOOM_LEVELS.length - 1) return;
+  await saveUi({ zoomIdx: next });
+  updateZoomLabel();
+  renderAll();
 }
 
 function wireDayView() {
   $('zoom-icon').innerHTML = ZOOM_ICON;
+  $('week-zoom-icon').innerHTML = ZOOM_ICON;
 
-  $('zoom-in').addEventListener('click', async () => {
-    if (state.ui.zoomIdx >= ZOOM_LEVELS.length - 1) return;
-    await saveUi({ zoomIdx: state.ui.zoomIdx + 1 });
-    updateZoomLabel();
-    renderTimeline();
-  });
-  $('zoom-out').addEventListener('click', async () => {
-    if (state.ui.zoomIdx <= 0) return;
-    await saveUi({ zoomIdx: state.ui.zoomIdx - 1 });
-    updateZoomLabel();
-    renderTimeline();
-  });
+  $('zoom-in').addEventListener('click', () => changeZoom(1));
+  $('zoom-out').addEventListener('click', () => changeZoom(-1));
 
   $('schedule-grid').addEventListener('click', onGridClick);
 

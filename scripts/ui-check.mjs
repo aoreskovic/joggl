@@ -407,18 +407,28 @@ async function sidebar() {
   );
 
   await check(
-    'sidebar: week and month disabled, "Not built yet"',
+    'sidebar: month still disabled, "Not built yet"',
     `return JSON.stringify(H.all('.sidebar-item[data-view]')
-       .filter(b => b.dataset.view !== 'day')
+       .filter(b => b.dataset.view === 'month')
        .map(b => ({ v: b.dataset.view, disabled: b.disabled, title: b.title })))`,
     (v) => JSON.parse(v).every((b) => b.disabled && b.title === 'Not built yet'),
   );
 
   await check(
-    'sidebar: clicking Week does nothing',
-    `H.q('.sidebar-item[data-view="week"]').click(); await H.sleep(200);
-     return H.q('.sidebar-item.is-active')?.dataset.view`,
-    eq('day'),
+    'sidebar: Week mounts and Day comes back',
+    `H.q('.sidebar-item[data-view="week"]').click();
+     await H.until(() => !H.q('#view-week').hidden, 8000, 'the week view');
+     const week = { active: H.q('.sidebar-item.is-active')?.dataset.view,
+                    dayHidden: H.q('#view-day').hidden,
+                    omnibarInWeek: !!H.q('#week-topbar #task-input') };
+     H.q('.sidebar-item[data-view="day"]').click();
+     await H.until(() => !H.q('#view-day').hidden, 8000, 'the day view');
+     return JSON.stringify({ ...week, backToDay: !!H.q('.left-panel > .omnibar #task-input'),
+                             weekHidden: H.q('#view-week').hidden })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.active === 'week' && d.dayHidden && d.omnibarInWeek && d.backToDay && d.weekHidden;
+    },
   );
 
   await check(
@@ -887,6 +897,86 @@ async function timeSafety() {
     (v) => {
       const d = JSON.parse(v);
       return d.chips === 1 && JSON.stringify(d.ranges) === JSON.stringify(['16:00-16:30']);
+    },
+  );
+}
+
+async function weekView() {
+  // Every check here leaves the app back on the day view, so nothing after this
+  // section has to know the week view exists.
+  const inWeek = (js) => `
+    H.q('.sidebar-item[data-view="week"]').click();
+    await H.until(() => !H.q('#view-week').hidden, 8000, 'the week view');
+    await H.settle();
+    try { ${js} } finally {
+      H.q('.sidebar-item[data-view="day"]').click();
+      await H.until(() => !H.q('#view-day').hidden, 8000, 'the day view');
+    }`;
+
+  await check(
+    'week: five columns by default, Monday first',
+    inWeek(`return JSON.stringify(H.all('.week-colhead').map(h => h.querySelector('.week-colhead-day').textContent));`),
+    (v) => {
+      const heads = JSON.parse(v);
+      return heads.length >= 5 && heads[0].startsWith('Mon') && heads[4].startsWith('Fri');
+    },
+  );
+
+  await check(
+    'week: the 5|7 toggle shows the weekend, and sticks',
+    inWeek(`H.q('#week-7').click();
+            await H.until(() => H.all('.week-colhead').length === 7, 4000, 'seven columns');
+            const seven = H.all('.week-colhead').length;
+            const active = H.q('#week-7').classList.contains('is-active');
+            const stored = (await window.joggl.ui.get()).weekSevenDay;
+            H.q('#week-5').click();
+            await H.until(() => H.all('.week-colhead').length <= 6, 4000, 'back to five');
+            return JSON.stringify({ seven, active, stored, back: H.all('.week-colhead').length });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.seven === 7 && d.active && d.stored === true && d.back <= 6;
+    },
+  );
+
+  await check(
+    'week: the stepper names the ISO week and stops at this one',
+    inWeek(`const here = H.q('#week-label').textContent;
+            const stuck = H.q('#next-week').disabled;
+            H.q('#prev-week').click();
+            await H.until(() => H.q('#week-label').textContent !== here, 8000, 'the week to step');
+            await H.settle();
+            const back = H.q('#week-label').textContent;
+            const open = !H.q('#next-week').disabled;
+            H.q('#next-week').click();
+            await H.until(() => H.q('#week-label').textContent === here, 8000, 'the week to come back');
+            await H.settle();
+            return JSON.stringify({ here, back, stuck, open });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.stuck && d.open && d.back !== d.here && /· week \d+/.test(d.here);
+    },
+  );
+
+  await check(
+    'week: every column shares one hour range',
+    inWeek(`const tops = H.all('.week-col').map(c => Math.round(c.getBoundingClientRect().top));
+            const heights = H.all('.week-col').map(c => Math.round(c.getBoundingClientRect().height));
+            return JSON.stringify({ tops: [...new Set(tops)].length, heights: [...new Set(heights)].length });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.tops === 1 && d.heights === 1;
+    },
+  );
+
+  await check(
+    'week: today is marked, and the anchor column is the selected one',
+    inWeek(`return JSON.stringify({
+              today: H.all('.week-colhead.is-today').length,
+              selected: H.all('.week-colhead.is-selected').length,
+            });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.today === 1 && d.selected === 1;
     },
   );
 }
@@ -2530,6 +2620,7 @@ export async function runChecks(mainWindow, app) {
     await waitForApp();
     await run(HELPERS);
     await sidebar();
+    await weekView();
     await quickEntry();
     await dayPanel();
     await dragging();

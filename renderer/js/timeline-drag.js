@@ -10,18 +10,11 @@
 // local midnight — which matters when two columns sit on opposite sides of a clock
 // change.
 
-import { canCrossDays, crossDayMove } from './cross-day.js';
+import { commitCrossDayMove } from './cross-day-commit.js';
 import { markDirty } from './entries.js';
 import { sameTimes } from './entry-ops.js';
 import { renderAll } from './render.js';
-import {
-  entriesFor,
-  persistDayNow,
-  setEntriesFor,
-  state,
-  visibleEntries,
-  visibleEntriesFor,
-} from './state.js';
+import { persistDayNow, state, visibleEntries, visibleEntriesFor } from './state.js';
 import { grid, offsetPxOf } from './timeline-geometry.js';
 import { columnAt, columnFor } from './timeline-columns.js';
 import { toastWarn } from './toast.js';
@@ -173,7 +166,11 @@ export function onMoveBlock(event, entry, dayKey) {
     if (moved) suppressClickUntil = Date.now() + CLICK_TAIL_MS;
 
     if (targetDay !== dayKey) {
-      await commitCrossDay(entry, dayKey, targetDay);
+      // Two day logs, written one after the other — see cross-day-commit.js for the
+      // write order and what happens if the second write fails. Both day names are
+      // fixed here, before the first await, and neither is `state.selectedDate`: in
+      // the week view the day on screen is usually neither of them.
+      await commitCrossDayMove(entry, dayKey, targetDay, entry.startTs);
       return;
     }
     await commitDrag(
@@ -186,31 +183,6 @@ export function onMoveBlock(event, entry, dayKey) {
 
   document.addEventListener('mousemove', onMouseMove);
   document.addEventListener('mouseup', onMouseUp);
-}
-
-/**
- * End of a move that changed column.
- *
- * Two day logs, written one after the other. Both names are fixed before the first
- * await, and neither is `state.selectedDate` — in the week view the day on screen is
- * usually neither of them.
- */
-async function commitCrossDay(entry, fromDay, toDay) {
-  if (!canCrossDays(entry)) return;
-
-  const { from, to } = crossDayMove({
-    entry,
-    fromEntries: entriesFor(fromDay),
-    toEntries: entriesFor(toDay),
-    toDayStartMs: startOfDayMs(toDay),
-    startTs: entry.startTs,
-  });
-
-  setEntriesFor(fromDay, from);
-  setEntriesFor(toDay, to);
-  await persistDayNow(fromDay);
-  await persistDayNow(toDay);
-  renderAll();
 }
 
 /**

@@ -1,7 +1,7 @@
 // Pure transforms on entries. No DOM, no IPC — the rules here decide what Jira
 // ends up holding, so they are kept testable.
 
-import { startOfDayMs, uuid } from './util.js';
+import { addDays, dateKey, startOfDayMs, uuid } from './util.js';
 
 /**
  * A day as it should be read: local entries, plus any Jira-side worklog that no
@@ -162,9 +162,18 @@ export const DEFAULT_DROP_MS = 30 * 60_000;
  * Keep a dropped block inside the day it is filed under, without changing how
  * long it is. Shared by every drop so creating and moving cannot disagree about
  * what happens at the edges of the day — see dropEntryFor for the reasoning.
+ *
+ * The day's end is derived, never assumed to be a fixed 86,400,000ms away: the
+ * autumn clock change makes one day 25 hours long, and a block legitimately
+ * dropped in that extra hour was, before this, silently pulled back to an hour
+ * earlier than the live drag preview had shown — the exact class of bug
+ * `timeline-drag.js`'s own end-of-day clamp already avoids with `addDays`.
+ * `dayStartTs` always arrives as `startOfDayMs(someKey)`, so recovering the key
+ * with `dateKey` and stepping it forward a day is exact, not an approximation.
  */
 export function clampDropStart(startTs, dayStartTs, durationMs) {
-  const latestStart = dayStartTs + 86_400_000 - durationMs;
+  const dayEndTs = startOfDayMs(addDays(dateKey(dayStartTs), 1));
+  const latestStart = dayEndTs - durationMs;
   return Math.min(Math.max(startTs, dayStartTs), latestStart);
 }
 

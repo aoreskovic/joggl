@@ -22,6 +22,7 @@ import {
   sameTimes,
 } from '../renderer/js/entry-ops.js';
 import { planFinishDay } from '../renderer/js/finish-day.js';
+import { addDays, startOfDayMs } from '../renderer/js/util.js';
 
 const T = (h, m = 0) => new Date(2026, 6, 28, h, m, 0, 0).getTime();
 
@@ -470,4 +471,29 @@ test('creating and moving clamp by the same rule', () => {
 
   assert.equal(clampDropStart(T(23, 50), DAY_START, DEFAULT_DROP_MS), T(23, 30));
   assert.equal(clampDropStart(T(10), DAY_START, DEFAULT_DROP_MS), T(10), 'mid-day is untouched');
+});
+
+/**
+ * 2026-10-25 is when the clocks go back here, so the real gap between its midnight
+ * and the next day's is 25 hours, not the fixed 86,400,000ms `clampDropStart` used
+ * to assume. A block legitimately dropped in that extra hour — the live drag
+ * preview in timeline-drag.js already clamps against the day's real end — used to
+ * be silently pulled back to an hour earlier than the preview showed, on exactly
+ * this one day a year. Expressed as an offset from the day's own midnight so this
+ * still means something in a timezone with no clock change at all: there the real
+ * end simply coincides with the naive one, and the assertions still hold.
+ */
+test('a block dropped into the 25th hour of a clock-change day keeps the length and the clock time the preview showed', () => {
+  const dayKey = '2026-10-25';
+  const dayStart = startOfDayMs(dayKey);
+  const dayEnd = startOfDayMs(addDays(dayKey, 1)); // the day's real end, not dayStart + 86_400_000
+
+  // A half-hour block whose desired start is thirty minutes before the real end —
+  // past the old, naive 24-hour boundary on a day that is actually 25 hours long.
+  const desiredStart = dayEnd - 30 * 60_000;
+  const moved = movedEntry(entry({ startTs: T(9), endTs: T(9, 30) }), desiredStart, dayStart);
+
+  assert.equal(moved.startTs, desiredStart, 'not pulled back to the naive 24-hour boundary');
+  assert.equal(moved.endTs, dayEnd, "ends exactly at the day's real midnight");
+  assert.equal(moved.endTs - moved.startTs, 30 * 60_000, 'the length is untouched');
 });

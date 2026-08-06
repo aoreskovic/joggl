@@ -12,7 +12,7 @@
 // movement threshold is what lets a single click on a task keep doing what it always
 // did, which is start a timer.
 
-import { crossDayMove } from './cross-day.js';
+import { commitCrossDayMove } from './cross-day-commit.js';
 import {
   clampDropStart,
   DEFAULT_DROP_MS,
@@ -327,18 +327,10 @@ async function onMouseUp() {
     // It could have been deleted, or the day changed, while the drag was running.
     if (!entry) return;
     if (day !== source) {
-      const { from, to } = crossDayMove({
-        entry,
-        fromEntries: entriesFor(source),
-        toEntries: entriesFor(day),
-        toDayStartMs: dayStartTs,
-        startTs: at.ts,
-      });
-      setEntriesFor(source, from);
-      setEntriesFor(day, to);
-      await persistDayNow(source);
-      await persistDayNow(day);
-      renderAll();
+      // Same gesture as a block dragged across the week view's columns, reached from
+      // the entry list instead — see cross-day-commit.js for the write order and
+      // what happens if the second write fails.
+      await commitCrossDayMove(entry, source, day, at.ts);
       return;
     }
     const moved = movedEntry(entry, at.ts, dayStartTs);

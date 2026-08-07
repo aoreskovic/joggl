@@ -46,7 +46,7 @@ export const SHORTCUTS = [
       ['Click', 'Select one entry — marked in every panel it appears in'],
       ['Ctrl + click', 'Add one to the selection, or take it out again'],
       ['Drag on empty grid', 'A rubber band. It catches a block when the box encloses it, not when it merely crosses it'],
-      ['Ctrl + A', 'Select everything on screen — the week, or the day'],
+      ['Ctrl + A', 'Select everything on screen — the week, or the day — except a running timer’s own block, which is not an entry yet'],
       ['Ctrl + C', 'Copy the selection'],
       ['Ctrl + V', 'Paste onto the marked day, keeping every offset — in days as well as on the clock'],
       ['Ctrl + drag', 'Copy a block instead of moving it'],

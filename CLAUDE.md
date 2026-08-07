@@ -242,7 +242,7 @@ three, which is why the rule is enforced in the helper and not left to each call
 | `↑` `↓` `Home` `End` | any list | Move the highlight, wrapping at both ends |
 | `Ctrl+click` | a row or block | Add it to the selection, or take it out |
 | Drag on empty grid | either grid | A rubber band. It catches a block when the box encloses it, not when it crosses it |
-| `Ctrl+A` | anywhere, not while typing | Select everything on screen |
+| `Ctrl+A` | anywhere, not while typing | Select everything on screen, except a running timer's own block — not an entry yet |
 | `Ctrl+C` `Ctrl+V` | anywhere, not while typing | Copy the selection; paste onto the marked day, keeping every offset |
 | `Ctrl+drag` | a block | Copy it rather than move it |
 | `Delete` | anywhere, not while typing | Delete the selection. More than one asks first |
@@ -283,7 +283,8 @@ block or a row did nothing at all.
 **Selection is not focus, and it is a set.** `state.selectedEntryIds` marks entries in
 *both* panels at once, which is the point: with overlap columns it is otherwise unclear
 which block is which row. A plain click selects one, Ctrl+click adds or removes one, a
-band on empty grid takes what it encloses, Ctrl+A takes everything on screen. Focus is
+band on empty grid takes what it encloses, Ctrl+A takes everything on screen but the
+running timer's own block — not an entry yet, so there is nothing there to select. Focus is
 per-panel, invisible in the other one, and moves away the moment you type; the selection
 stays until Escape, a click on empty space, a day change, or the entries being deleted.
 The arrow keys carry it, so keyboard and mouse agree.

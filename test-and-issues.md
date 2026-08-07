@@ -19,9 +19,12 @@ short-dependency rule in `CLAUDE.md`.
 
 That makes this file the other half of the test suite. Keep it current.
 
-**Last full pass: 2026-08-07, 115 checks.** Against the live Jira and against fixtures,
-both **115 passed, 0 failed**. Both report the same total, which is the only thing
-keeping `main/jira/fake.js` honest. Driven by dispatching
+**Last full pass: 2026-08-07, 115 checks.** Against the live Jira: **110 passed, 0 failed,
+5 skipped**, in **2m 7s**. Against fixtures: **115 passed, 0 failed, 0 skipped**, in
+**2m 3s**. Both report the same total, which is the only thing keeping `main/jira/fake.js`
+honest; the five live skips are the checks that need a Jira-side worklog on a
+particular day, which against a real site depends on what happened to be booked that
+week. A skip is not a pass — read the split, not the headline. Driven by dispatching
 real mouse events into the renderer from the main process against a throwaway
 `--user-data-dir`. See *The script* at the end for how, and for what it does not cover.
 
@@ -123,7 +126,7 @@ Not scripted — it needs a machine without Node, or at least a shell without it
 | Click a block, then Ctrl+click another | Both are outlined, in the day view's list as well as on the grid. Ctrl+click one again and it drops out. |
 | Drag a box on empty grid across three blocks, clipping a fourth | The three it encloses are selected; the one it merely crosses is not. No quick-entry popup opens. |
 | Start a drag on a block | It moves the block, as it always did. No band is drawn. |
-| Press Ctrl+A | Everything on screen is selected — every column of the week, or the day's rows and blocks. Escape puts it all down. |
+| Press Ctrl+A | Everything on screen is selected — every column of the week, or the day's rows and blocks — except a running timer's own block, which is not an entry yet and so is not taken. Escape puts it all down. |
 | Select two blocks on one day, Ctrl+C, click another column head, Ctrl+V | Both arrive on that day at the same times on the clock, ● pending, carrying no worklog. The originals are untouched. |
 | Select a block on Monday and one on Wednesday, copy, mark Tuesday, paste | They land on Tuesday and Thursday. The gap between them is kept, not collapsed. |
 | Select a whole week with Ctrl+A, step forward a week, paste onto its Monday | The week is reproduced, day for day. |

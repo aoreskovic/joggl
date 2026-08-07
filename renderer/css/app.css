@@ -1489,10 +1489,14 @@ button {
   z-index: 20;
 }
 
-/* Ctrl+drag: what is being placed is a copy, and the block under the cursor is the
-   original standing in for it. Dashed, so it does not read as the original moving. */
-.sched-entry-block.copying {
+/* Ctrl+drag: the block under the cursor is a copy drawn for the gesture, and the
+   original stays where it is. Dashed and half there, so it reads as something being
+   placed rather than as the original moving; it never takes the mouse, because the
+   gesture is being tracked on the document beneath it. */
+.sched-entry-block.ghost {
   border-style: dashed;
+  opacity: 0.55;
+  pointer-events: none;
 }
 
 /* What a dropped issue would become. Dashed like the live block, but it is not an
@@ -2158,7 +2162,7 @@ body.is-dragging-issue * {
 }
 
 .week-colhead {
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--border-day);
   cursor: pointer;
   display: flex;
   align-items: baseline;
@@ -2211,10 +2215,20 @@ body.is-dragging-issue * {
   transform: translateY(-2px);
 }
 
+/* The day boundary is drawn a step stronger than the hour lines inside it
+   (--border-strong): the hours repeat within a day, the day is the bigger cut, and at
+   equal weight the week reads as one undivided grid. */
 .week-col {
   position: relative;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--border-day);
   min-width: 0;
+}
+
+/* The day a click marked, and so the day a paste lands on. Faint on purpose: the
+   column head already carries the name of it — this only says which column the head
+   belongs to, from anywhere down the grid. */
+.week-col.is-anchor-day {
+  background-color: var(--accent-softer);
 }
 
 /* A Saturday or Sunday, when the tint is switched on in Settings — the day view

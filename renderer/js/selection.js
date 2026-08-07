@@ -68,7 +68,9 @@ export function selectMany(ids) {
  */
 export function selectAllVisible() {
   selectMany(
-    [...document.querySelectorAll('.sched-entry-block:not(.live), .entry-card')]
+    // `.ghost` is the copy a Ctrl+drag is carrying: it is in no day log yet, so
+    // selecting it would put an id in the set that nothing can find.
+    [...document.querySelectorAll('.sched-entry-block:not(.live):not(.ghost), .entry-card')]
       .map((el) => el.dataset.id)
       .filter(Boolean),
   );
@@ -161,7 +163,7 @@ function onBandStart(event) {
     // come from getBoundingClientRect, so neither needs to know how far the grid has
     // been scrolled.
     const rect = normalisedRect(origin, { x: up.clientX, y: up.clientY });
-    const boxes = [...document.querySelectorAll('.sched-entry-block:not(.live)')].map((block) => {
+    const boxes = [...document.querySelectorAll('.sched-entry-block:not(.live):not(.ghost)')].map((block) => {
       const box = block.getBoundingClientRect();
       return { id: block.dataset.id, left: box.left, right: box.right, top: box.top, bottom: box.bottom };
     });

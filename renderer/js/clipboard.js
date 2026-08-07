@@ -1,4 +1,4 @@
-// What Ctrl+C holds, and where Ctrl+V puts it.
+// What Ctrl+C holds, and where a copy of it goes — pasted, or dragged with Ctrl held.
 //
 // Pure — no DOM, no IPC — because the anchoring rule is the whole feature and it is
 // easy to get subtly wrong in a way nobody notices until a pasted week is a day out.
@@ -49,6 +49,48 @@ export function clipboardFrom(items) {
  *
  * @returns {{dayKey: string, entries: object[]}[]} in day order
  */
+/**
+ * Where a Ctrl+drag of a selection lands, one placement per entry.
+ *
+ * The block under the cursor is the anchor: the day it is dropped on and the distance
+ * it travelled on the clock are what the rest of the selection follows. Everything
+ * else keeps its offset from the anchor, in days as well as on the clock — the same
+ * rule Ctrl+V follows, and for the same reason. A selection spanning Tuesday and
+ * Thursday is a shape, and a copy of it is that shape moved, not a heap.
+ *
+ * Times are offsets from each day's own local midnight, never a fixed number of
+ * milliseconds, so a drag across a clock change leaves every block at the hour it
+ * says. Each copy is held inside the day it lands on, exactly as the dragged block
+ * itself is.
+ *
+ * @param {{entry: object, dayKey: string}[]} items
+ * @param {string} anchorDay the day the drag started on
+ * @param {string} targetDay the day the cursor is over
+ * @param {number} clockDelta ms the anchor moved on the clock
+ * @returns {{entry: object, fromDay: string, toDay: string, startTs: number, endTs: number}[]}
+ */
+export function dragCopyPlacement(items, anchorDay, targetDay, clockDelta) {
+  const dayShift = daysBetween(anchorDay, targetDay);
+
+  return (items ?? []).map(({ entry, dayKey }) => {
+    const toDay = addDays(dayKey, dayShift);
+    const dayStart = startOfDayMs(toDay);
+    // addDays, not a constant: the day a copy lands on can be 23 or 25 hours long,
+    // and the clamp below is what decides whether its last block fits.
+    const dayLength = startOfDayMs(addDays(toDay, 1)) - dayStart;
+    const duration = entry.endTs - entry.startTs;
+    const wanted = entry.startTs - startOfDayMs(dayKey) + clockDelta;
+    const offset = Math.max(0, Math.min(wanted, dayLength - duration));
+    return {
+      entry,
+      fromDay: dayKey,
+      toDay,
+      startTs: dayStart + offset,
+      endTs: dayStart + offset + duration,
+    };
+  });
+}
+
 export function pastePlan(clip, targetDay, newId = uuid) {
   if (!clip) return [];
 

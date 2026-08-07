@@ -2,9 +2,10 @@
 
 What to test by hand, how to test it, and what is known to be broken.
 
-Joggl has 371 unit tests (`npm test`) covering the things where a silent failure loses
+Joggl has 377 unit tests (`npm test`) covering the things where a silent failure loses
 time data: the worklog timestamp formatter, merge decisions at the 30-minute boundary,
 Finish Day's partial-failure transitions, the day-log round trip, quarter-hour snapping,
+where a copy lands — pasted, or dragged with Ctrl held —
 what a duplicate, a moved and a repointed entry inherit,
 when a touch counts as an edit, weekend detection, pin labelling, the ADF a worklog
 comment becomes and back again, the search box's remote-lookup loop, arrow-key
@@ -19,12 +20,13 @@ short-dependency rule in `CLAUDE.md`.
 
 That makes this file the other half of the test suite. Keep it current.
 
-**Last full pass: 2026-08-07, 115 checks.** Against the live Jira: **110 passed, 0 failed,
-5 skipped**, in **2m 7s**. Against fixtures: **115 passed, 0 failed, 0 skipped**, in
-**2m 3s**. Both report the same total, which is the only thing keeping `main/jira/fake.js`
-honest; the five live skips are the checks that need a Jira-side worklog on a
+**Last full pass: 2026-08-07, 121 checks.** Against the live Jira: **121 passed, 0 failed,
+0 skipped**, in **2m 14s**. Against fixtures: **121 passed, 0 failed, 0 skipped**, in
+**2m 10s**. Both report the same total, which is the only thing keeping `main/jira/fake.js`
+honest. Live runs can still skip: a handful of checks need a Jira-side worklog on a
 particular day, which against a real site depends on what happened to be booked that
-week. A skip is not a pass — read the split, not the headline. Driven by dispatching
+week — this pass found one everywhere it looked. A skip is not a pass — read the split,
+not the headline. Driven by dispatching
 real mouse events into the renderer from the main process against a throwaway
 `--user-data-dir`. See *The script* at the end for how, and for what it does not cover.
 
@@ -94,10 +96,12 @@ Not scripted — it needs a machine without Node, or at least a shell without it
 | Click **‹** and **›** | A week back and forward. **›** is dimmed on the week holding today. |
 | Press Page Up and Page Down | The same, from the keyboard. `[` and `]` still step a single day, moving the marked column and, at the ends, the week. |
 | Look across the columns | The hours line up: one range for the whole week, widened to cover whatever is logged on any day of it. |
+| Look at the lines between the columns | The line between two days is visibly stronger than the lines between hours — the day is the bigger cut, and at equal weight the week reads as one undivided grid. True in both themes. |
 | Zoom in and out | Both views share the setting — set it here, go to the day view, and it is the same. |
 | Drag a pin onto Wednesday's column | A half-hour block appears on Wednesday, where the preview said — not on the day the day view had selected. |
 | Type in the search box and drag a result onto a column | The same. The result rows are draggable; this is how an issue that is not pinned gets onto a day here. |
-| Click an empty hour in any column | The quick-entry popup opens, and what it creates lands on **that** column's day. |
+| Double-click an empty hour in any column | The quick-entry popup opens, and what it creates lands on **that** column's day. |
+| Click once on an empty hour in another column | That column becomes the marked day — its head is underlined and the column itself is faintly tinted. No popup opens, and the next Ctrl+V lands there. |
 | Scroll the week down, then click a column head | Nothing is created. The heads sit over their own columns once scrolled, and a click on one only marks the day. |
 | Click a block, double-click it, right-click it | Select, work description, the full menu — the same as the day view, because it is the same code. |
 | Drag a block's edges | Resize, snapping to the quarter hour and to its own day's neighbours. |
@@ -133,6 +137,12 @@ Not scripted — it needs a machine without Node, or at least a shell without it
 | Copy a **Manual Jira entry** and paste it | It arrives as an ordinary Joggl entry, ● pending — a copy of a Jira record is Joggl's own new entry. |
 | In the **day view**: select two entries, Ctrl+C, press `[` to step back a day, Ctrl+V | Both arrive on that day at the same times. Both gestures work here too — the paste target is whichever day is shown. |
 | Ctrl+drag a block to another day | A copy lands there; the original stays where it was. |
+| Watch the block while a Ctrl+drag is in progress | The original never moves and no hole opens where it was. What follows the cursor is a dashed, half-transparent ghost — so it reads as a copy being placed from the first pixel, not as a move. |
+| Select a block on Monday and one on Tuesday, then Ctrl+drag the Monday one onto Wednesday | Both are copied, one ghost each while the drag runs: the copies land on Wednesday and Thursday, at the same hours. The pair keeps its shape, the way a paste does. |
+| Ctrl+drag a block that is **not** in the selection | Only that block is copied, and the selection is left exactly as it was. |
+| With one block selected, Ctrl+click a second one | It joins the selection. Nothing is copied and no duplicate appears — a Ctrl+click is a click, not a drag of no distance. |
+| Let go of Ctrl mid-drag, before releasing the mouse | The ghost vanishes and the whole gesture is off: nothing is written on the day it was heading for, and the original is untouched. Releasing the mouse afterwards does nothing. |
+| Select a task, Ctrl+C, then click an empty part of another day, then Ctrl+V | The copy lands on the day you clicked. A single click marks the day and nothing more — no popup opens to swallow the V. |
 | Select two entries and press Delete | It asks, naming how many are unsynced and how many are already synced, and across how many days. Cancel leaves everything. |
 | Do it again with a synced entry in the selection, and choose **Remove here only** | They go from Joggl. Nothing is deleted from Jira, and the day's Jira-side rows are still there. |
 | Do it again and choose **Delete in Jira too** | The worklogs go from Jira as well. Anything that fails **stays here**, carrying the error, with a summary and **Retry failed** — the time is really logged there and hiding the row would lose it. |
@@ -200,9 +210,10 @@ The point of these is that **nothing** should end up offered for a re-sync.
 
 | Do this | Correct result |
 |---|---|
-| Scroll the timeline, then click an empty hour | A quick-entry popup opens **visibly**, focused, titled with that hour and the half hour after it, and sitting fully inside the window. |
+| Scroll the timeline, then double-click an empty hour | A quick-entry popup opens **visibly**, focused, titled with that hour and the half hour after it, and sitting fully inside the window. |
 | Type in it, then press Escape | It closes and nothing is created. |
-| Click an empty hour, then click elsewhere | It closes. A second click on the grid opens it again — a popup that closed itself must not eat the next click. |
+| Double-click an empty hour, then click elsewhere | It closes. A second double click on the grid opens it again — a popup that closed itself must not eat the next click. |
+| Single-click an empty hour | Nothing opens. The selection is put down, and the day stays the one on screen — this is the gesture Ctrl+V needs, and a popup here would eat the V. |
 
 ### Copying a day, and clearing one
 
@@ -336,7 +347,7 @@ invisible. A colleague opening Joggl for the first time has no reason to try eit
 | Do this | Correct result |
 |---|---|
 | Open a day with nothing on it | The panel says what to drag and what to click; the day view says the same on the grid. |
-| Click an hour while that hint is on screen | The quick-entry popup opens as usual. The hint must not swallow the click. |
+| Double-click an hour while that hint is on screen | The quick-entry popup opens as usual. The hint must not swallow the click. |
 | Drop anything on the day | Both hints disappear at once. |
 | Delete the last entry again | Both come back. |
 | Look at a day holding only **Manual Jira entry** rows | No hint. The day is not empty, whatever the local store says. |
@@ -499,7 +510,7 @@ Every table above except the persistence rows is executed by `scripts/ui-check.m
 npm run uicheck
 ```
 
-115 checks, exits non-zero on failure. It needs **no dependency and no DevTools Protocol** —
+121 checks, exits non-zero on failure. It needs **no dependency and no DevTools Protocol** —
 the main process already holds `webContents.executeJavaScript`, which is enough to
 dispatch real `MouseEvent`s, read computed styles and element boxes, and drive the app end
 to end. `main/index.js` loads it only under `--uicheck`, which also redirects `userData` to

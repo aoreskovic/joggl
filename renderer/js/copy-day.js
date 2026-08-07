@@ -25,7 +25,7 @@ import { renderAll } from './render.js';
 import { selectedIds } from './selection.js';
 import { entriesFor, findEntry, loadDays, persistDayNow, readDay, setEntriesFor, state } from './state.js';
 import { toast, toastErr, toastOk } from './toast.js';
-import { addDays, esc, formatDateLabel, msToDur, todayKey } from './util.js';
+import { addDays, esc, formatDateLabel, msToDur, plural, todayKey } from './util.js';
 
 /**
  * Pull the whole lookback window in one go, then answer from it.
@@ -245,8 +245,6 @@ function clearBody(synced, rest, subject = 'This day') {
 
   return body;
 }
-
-const plural = (n) => `${n} ${n === 1 ? 'entry' : 'entries'}`;
 
 // ── Copying a selection, and pasting it ────────────────────────────────────
 

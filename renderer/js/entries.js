@@ -9,6 +9,7 @@ import {
   dirtiedEntry,
   duplicateOf,
   flaggedOverlaps,
+  planDeletion,
   retargetEntry,
   sameComment,
   sameTimes,
@@ -19,7 +20,7 @@ import { DELETE_ICON, PLAY_ICON } from './icons.js';
 import { sortEntries } from './merge.js';
 import { askModal } from './modal.js';
 import { renderAll } from './render.js';
-import { applySelection, clearSelection, select, toggleSelect } from './selection.js';
+import { applySelection, clearSelection, select, selectMany, selectedIds, toggleSelect } from './selection.js';
 import {
   deleteWorklog,
   dropExternalWorklog,
@@ -34,7 +35,7 @@ import {
 } from './state.js';
 import { startTimer, stopTimer } from './timer.js';
 import { toast, toastErr, toastOk, toastWarn } from './toast.js';
-import { esc, hhmmToTs, msToDur, parseDur, snapToQuarter, tsToHHMM, uuid } from './util.js';
+import { esc, formatDateLabel, hhmmToTs, msToDur, parseDur, plural, snapToQuarter, tsToHHMM, uuid } from './util.js';
 
 const STATUS_LABEL = {
   pending: '● pending',
@@ -456,6 +457,179 @@ export async function deleteEntry(id) {
   setEntriesFor(day, entriesFor(day).filter((e) => e.id !== id));
   await persistDayNow(day);
   renderAll();
+}
+
+/**
+ * Delete everything selected.
+ *
+ * One entry falls through to `deleteEntry`, so the single case keeps the wording and
+ * the per-entry Jira offer it already has, and there is one path rather than two that
+ * drift. More than one asks first — with the counts, which is what makes the question
+ * answerable.
+ *
+ * The Jira half is sequential and honest about partial failure, the same shape
+ * `sync.js` uses: an entry whose worklog could not be deleted **stays**, carrying the
+ * error, because it still stands for time that is really logged in Jira. Removing it
+ * locally would leave that time booked with nothing on screen to account for it,
+ * which is the exact failure the single delete's modal exists to prevent.
+ */
+export async function deleteSelection() {
+  // Fixed before the modal, which stays up for as long as the user reads it, and
+  // before the DELETEs, which the day can be stepped underneath.
+  const items = selectedIds().map((id) => findEntry(id)).filter(Boolean);
+  const plan = planDeletion(items);
+
+  if (plan.removable.length === 0) {
+    toastWarn(
+      plan.external.length > 0
+        ? 'Those worklogs were made in Jira — delete them there.'
+        : 'Nothing selected to delete.',
+    );
+    return;
+  }
+  if (plan.removable.length === 1) {
+    await deleteEntry(plan.removable[0].entry.id);
+    return;
+  }
+
+  const answer = await askModal({
+    title: `Delete ${plan.removable.length} entries?`,
+    body: deleteManyBody(plan),
+    buttons: [
+      { label: 'Cancel', value: 'cancel' },
+      // With nothing synced there is no Jira decision to make, so the plain removal
+      // becomes the primary action rather than a second-choice button sitting beside
+      // a missing one.
+      { label: 'Remove here only', value: 'local', primary: plan.synced.length === 0 },
+      ...(plan.synced.length > 0
+        ? [{ label: 'Delete in Jira too', value: 'jira', primary: true }]
+        : []),
+    ],
+    dismissValue: 'cancel',
+  });
+  if (answer === 'cancel') return;
+
+  // The running timer's entry cannot be deleted out from under it.
+  if (plan.removable.some(({ entry }) => state.timer?.entryId === entry.id)) {
+    await stopTimer({ save: false });
+  }
+
+  /** @type {{day: string, entry: object}[]} */
+  const failed = [];
+
+  if (answer === 'jira') {
+    for (const { entry, dayKey } of plan.synced) {
+      try {
+        await deleteWorklog(entry);
+        // Exactly the row that is gone, next to the DELETE that made it false — the
+        // same surgical invalidation `deleteEntry` does, and for the same reason.
+        dropExternalWorklog(dayKey, entry.worklogId);
+      } catch (err) {
+        entry.errorMsg = `Could not delete the worklog — ${err.message}`;
+        failed.push({ day: dayKey, entry });
+      }
+    }
+  }
+
+  // Whatever failed in Jira stays here, so the two records agree.
+  const keep = new Set(failed.map(({ entry }) => entry.id));
+  for (const day of plan.days) {
+    const going = plan.idsFor(day);
+    setEntriesFor(day, entriesFor(day).filter((e) => !going.has(e.id) || keep.has(e.id)));
+    await persistDayNow(day);
+  }
+
+  clearSelection();
+  renderAll();
+
+  if (plan.external.length > 0) {
+    toast(
+      `${plural(plan.external.length)} logged in Jira left alone — they are not Joggl’s to remove.`,
+    );
+  }
+
+  if (failed.length === 0) {
+    toastOk(
+      answer === 'jira'
+        ? `${plural(plan.removable.length)} deleted, and ${plural(plan.synced.length)} removed from Jira.`
+        : `${plural(plan.removable.length)} deleted. Nothing was removed from Jira.`,
+    );
+    return;
+  }
+
+  await showDeleteFailures(failed);
+}
+
+function deleteManyBody(plan) {
+  const body = document.createElement('div');
+  const lines = [];
+  const unsynced = plan.removable.length - plan.synced.length;
+  if (unsynced > 0) lines.push(`${plural(unsynced)} not yet in Jira`);
+  if (plan.synced.length > 0) lines.push(`${plural(plan.synced.length)} already synced`);
+
+  const lede = document.createElement('p');
+  lede.className = 'panel-lede';
+  lede.textContent =
+    `Selected: ${lines.join(' and ')}` +
+    (plan.days.length > 1 ? `, across ${plan.days.length} days.` : '.');
+  body.appendChild(lede);
+
+  const note = document.createElement('p');
+  note.className = 'panel-lede';
+  note.textContent =
+    plan.synced.length > 0
+      ? '“Remove here only” leaves the synced time logged in Jira. “Delete in Jira too” ' +
+        'removes those worklogs as well, one at a time — anything that fails stays here, ' +
+        'so the two never disagree.'
+      : 'None of these has reached Jira, so nothing there is affected.';
+  body.appendChild(note);
+
+  if (plan.external.length > 0) {
+    const skipped = document.createElement('p');
+    skipped.className = 'panel-lede';
+    skipped.textContent =
+      `${plural(plan.external.length)} in the selection ${plan.external.length === 1 ? 'was' : 'were'} ` +
+      'logged in the Jira web UI and will be left alone — they are not Joggl’s to remove.';
+    body.appendChild(skipped);
+  }
+
+  return body;
+}
+
+/** No automatic retry, the same promise Sync makes: the user sees what failed. */
+async function showDeleteFailures(failed) {
+  const body = document.createElement('div');
+  const lede = document.createElement('p');
+  lede.className = 'panel-lede';
+  lede.textContent =
+    `${plural(failed.length)} could not be removed from Jira, so ${failed.length === 1 ? 'it is' : 'they are'} ` +
+    'still here — the time is really logged there, and deleting the row would hide it.';
+
+  const list = document.createElement('ul');
+  list.className = 'fail-list';
+  list.innerHTML = failed
+    .map(
+      ({ day, entry }) =>
+        `<li><strong>${esc(entry.issueKey ?? '')}</strong> — ${esc(entry.title)} ` +
+        `· ${esc(formatDateLabel(day))}<br><small>${esc(entry.errorMsg)}</small></li>`,
+    )
+    .join('');
+
+  body.append(lede, list);
+
+  const answer = await askModal({
+    title: `${failed.length} worklog${failed.length === 1 ? '' : 's'} not deleted`,
+    body,
+    buttons: [
+      { label: 'Close', value: 'close' },
+      { label: 'Retry failed', value: 'retry', primary: true },
+    ],
+    dismissValue: 'close',
+  });
+  if (answer !== 'retry') return;
+
+  selectMany(failed.map(({ entry }) => entry.id));
+  await deleteSelection();
 }
 
 /**

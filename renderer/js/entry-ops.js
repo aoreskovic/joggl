@@ -286,6 +286,38 @@ export function planClearWeek(days, entriesFor) {
   };
 }
 
+/**
+ * What deleting a selection would actually do.
+ *
+ * The sibling of `planClearWeek`, and here for the same reason: the split between
+ * what goes, what has a worklog behind it and what is not Joggl's to touch decides
+ * what the modal says and what it then does, and it is worth testing without a DOM.
+ *
+ * A **Jira-side row is never removed**. It may be selected — copying a day that
+ * includes time booked in the web UI is exactly what *Copy previous day* already does
+ * — but it is not Joggl's record, so a delete steps over it and says how many it left.
+ *
+ * @param {{entry: object, dayKey: string}[]} items
+ */
+export function planDeletion(items) {
+  const all = items ?? [];
+  const external = all.filter(({ entry }) => entry?.external);
+  const removable = all.filter(({ entry }) => entry && !entry.external);
+
+  return {
+    removable,
+    external,
+    synced: removable.filter(({ entry }) => entry.worklogId),
+    // Only the days something is actually coming off: a day holding nothing but
+    // Jira-side rows must not have its day log rewritten for no reason.
+    days: [...new Set(removable.map(({ dayKey }) => dayKey))].sort(),
+    /** The ids coming off `day`. */
+    idsFor(day) {
+      return new Set(removable.filter((i) => i.dayKey === day).map((i) => i.entry.id));
+    },
+  };
+}
+
 /** Ids of entries whose time ranges overlap. Allowed, but usually a mistake. */
 export function overlappingIds(entries) {
   const ids = new Set();

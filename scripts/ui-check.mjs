@@ -2536,6 +2536,90 @@ async function clicks() {
       return d.bandOnBlock === false && d.popup === true;
     },
   );
+
+  await check(
+    'Delete asks before removing more than one, and names what it holds',
+    `await H.resetDay();
+     const at = (hh) => { const d = new Date(); d.setHours(hh, 0, 0, 0); return d.getTime(); };
+     await window.joggl.days.save(H.todayKey(), [
+       { id: 'del-a', issueKey: 'GEN-1', issueId: null, title: 'One', startTs: at(9),
+         endTs: at(10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       { id: 'del-b', issueKey: 'GEN-2', issueId: null, title: 'Two', startTs: at(11),
+         endTs: at(12), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+     ]);
+     await window.__jogglTest.reloadDay();
+     for (const id of ['del-a', 'del-b']) {
+       H.q('.sched-entry-block[data-id="' + id + '"]').dispatchEvent(
+         new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+     }
+     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
+     await H.until(() => !H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the confirmation');
+     const title = H.q('#modal-title').textContent;
+     const buttons = H.all('#modal-buttons button').map(b => b.textContent);
+     const body = H.q('#modal-body').textContent;
+     H.all('#modal-buttons button').find(b => b.textContent === 'Cancel').click();
+     await H.until(() => H.q('#modal-overlay').classList.contains('hidden'), 3000, 'the modal to close');
+     await H.sleep(200);
+     const stillThere = (await window.joggl.days.get(H.todayKey())).entries.length;
+     await H.resetDay();
+     return JSON.stringify({ title, buttons, body, stillThere })`,
+    (v) => {
+      const d = JSON.parse(v);
+      // Nothing synced here, so there is no Jira button to offer — and Cancel must
+      // leave both entries exactly where they were.
+      return /Delete 2 entries/.test(d.title) && d.stillThere === 2 &&
+        d.buttons.includes('Remove here only') &&
+        !d.buttons.includes('Delete in Jira too') &&
+        /None of these has reached Jira/.test(d.body);
+    },
+  );
+
+  await check(
+    '“Remove here only” takes the selection off every day it spans, and touches Jira on none',
+    `H.q('.sidebar-item[data-view="week"]').click();
+     await H.until(() => !H.q('#view-week').hidden, 8000, 'the week view');
+     await H.settle();
+     try {
+       const a = H.colDay(0), b = H.colDay(1);
+       const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+       await window.joggl.days.save(a, [
+         { id: 'dm-a1', issueKey: 'GEN-1', issueId: null, title: 'Going', startTs: on(a, 9),
+           endTs: on(a, 10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+         { id: 'dm-a2', issueKey: 'GEN-1', issueId: null, title: 'Staying', startTs: on(a, 14),
+           endTs: on(a, 15), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       ]);
+       await window.joggl.days.save(b, [
+         { id: 'dm-b1', issueKey: 'GEN-2', issueId: null, title: 'Going too', startTs: on(b, 9),
+           endTs: on(b, 10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       ]);
+       await window.__jogglTest.reloadDay();
+       await H.until(() => !!H.q('.sched-entry-block[data-id="dm-b1"]'), 4000, 'the seeded blocks');
+       const before = window.__jogglTest.jiraReads;
+       for (const id of ['dm-a1', 'dm-b1']) {
+         H.q('.sched-entry-block[data-id="' + id + '"]').dispatchEvent(
+           new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+       }
+       document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
+       await H.until(() => !H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the confirmation');
+       H.all('#modal-buttons button').find(t => t.textContent === 'Remove here only').click();
+       await H.until(() => H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the modal to close');
+       await H.sleep(500);
+       const leftA = (await window.joggl.days.get(a)).entries.map(e => e.id);
+       const leftB = (await window.joggl.days.get(b)).entries.map(e => e.id);
+       const selected = H.all('.sched-entry-block.is-selected').length;
+       await H.clearDays([a, b]);
+       return JSON.stringify({ leftA, leftB, selected, before, after: window.__jogglTest.jiraReads });
+     } finally {
+       H.q('.sidebar-item[data-view="day"]').click();
+       await H.until(() => !H.q('#view-day').hidden, 8000, 'the day view');
+     }`,
+    (v) => {
+      const d = JSON.parse(v);
+      return JSON.stringify(d.leftA) === JSON.stringify(['dm-a2']) &&
+        JSON.stringify(d.leftB) === JSON.stringify([]) &&
+        d.selected === 0;
+    },
+  );
 }
 
 async function syncButton() {

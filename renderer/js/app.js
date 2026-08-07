@@ -7,6 +7,7 @@ import { pickDate } from './date-picker.js';
 import { wireDayViewDrag } from './drag-drop.js';
 import {
   deleteEntry,
+  deleteSelection,
   duplicateEntry,
   editEntryComment,
   editEntryTask,
@@ -811,6 +812,10 @@ function wireGlobal() {
     } else if (event.key === ']') {
       event.preventDefault();
       if (!$('next-day').disabled) $('next-day').click();
+    } else if (event.key === 'Delete') {
+      // A bare key, so it is already suppressed while typing and behind a modal.
+      event.preventDefault();
+      deleteSelection();
     }
   });
 

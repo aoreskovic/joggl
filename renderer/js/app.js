@@ -2,7 +2,7 @@
 // connects the DOM to it.
 
 import { hideContextMenu, setContextActions } from './context-menu.js';
-import { clearDay, copyPreviousDay } from './copy-day.js';
+import { clearDay, copyPreviousDay, copySelection, pasteClipboard } from './copy-day.js';
 import { pickDate } from './date-picker.js';
 import { wireDayViewDrag } from './drag-drop.js';
 import {
@@ -20,7 +20,7 @@ import { PLAY_ICON, STOP_ICON, ZOOM_ICON } from './icons.js';
 import { createRowNav } from './keynav.js';
 import { isPinned, renderPins, togglePin } from './pins.js';
 import { registerRenderer, renderAll } from './render.js';
-import { clearSelection, wireRubberBand } from './selection.js';
+import { clearSelection, selectAllVisible, wireRubberBand } from './selection.js';
 import { activeView, hasView, notifyDayChange, registerView, setActiveView, wireShell } from './shell.js';
 import {
   appVersion,
@@ -768,6 +768,28 @@ function wireGlobal() {
       event.preventDefault();
       resumeOrToggleTimer();
       return;
+    }
+
+    // Ctrl+A, Ctrl+C and Ctrl+V mean something inside a text field, and there it has
+    // to win — unlike Ctrl+L, which is deliberately reachable from the search box
+    // itself. So these three are suppressed while typing.
+    if ((event.ctrlKey || event.metaKey) && !typing) {
+      const key = event.key.toLowerCase();
+      if (key === 'a') {
+        event.preventDefault();
+        selectAllVisible();
+        return;
+      }
+      if (key === 'c') {
+        event.preventDefault();
+        copySelection();
+        return;
+      }
+      if (key === 'v') {
+        event.preventDefault();
+        pasteClipboard();
+        return;
+      }
     }
 
     // Bare keys only when not typing, or they would land in the text.

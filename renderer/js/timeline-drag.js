@@ -12,13 +12,14 @@
 
 import { commitCrossDayMove } from './cross-day-commit.js';
 import { markDirty } from './entries.js';
-import { sameTimes } from './entry-ops.js';
+import { duplicateOf, sameTimes } from './entry-ops.js';
+import { sortEntries } from './merge.js';
 import { renderAll } from './render.js';
-import { persistDayNow, state, visibleEntries, visibleEntriesFor } from './state.js';
+import { entriesFor, persistDayNow, setEntriesFor, state, visibleEntries, visibleEntriesFor } from './state.js';
 import { grid, offsetPxOf } from './timeline-geometry.js';
 import { columnAt, columnFor } from './timeline-columns.js';
 import { toastWarn } from './toast.js';
-import { addDays, msToDur, QUARTER, snapToQuarter, startOfDayMs, tsToHHMM } from './util.js';
+import { addDays, msToDur, QUARTER, snapToQuarter, startOfDayMs, tsToHHMM, uuid } from './util.js';
 
 // Nothing shorter than one grid step, so a block can never be dragged into a
 // sliver that is impossible to grab again.
@@ -104,8 +105,23 @@ export function onMoveBlock(event, entry, dayKey) {
   event.stopPropagation();
   if (locked(entry)) return;
 
-  const origStart = entry.startTs;
-  const duration = entry.endTs - origStart;
+  /**
+   * Ctrl turns the move into a copy.
+   *
+   * The gesture then runs on a duplicate that is in no day log at all, so the
+   * original is never touched and the drop is an insert rather than a move. The
+   * element under the cursor is still the original's — there is nothing else to
+   * drag — so it wears `copying` and springs back when the commit re-renders, which
+   * is the honest picture: what is being placed is a copy of it.
+   *
+   * The copy carries no worklogId, exactly as Ctrl+C/Ctrl+V and *Duplicate* produce,
+   * so the next Sync logs it as new work rather than rewriting the original's.
+   */
+  const copying = event.ctrlKey || event.metaKey;
+  const subject = copying ? duplicateOf(entry, uuid()) : entry;
+
+  const origStart = subject.startTs;
+  const duration = subject.endTs - origStart;
   const startY = event.clientY;
   // What the entry says on the clock, as an offset from its own day's midnight. A
   // move to another column keeps that offset and adds the drag; a fixed number of
@@ -113,6 +129,7 @@ export function onMoveBlock(event, entry, dayKey) {
   const offset = origStart - startOfDayMs(dayKey);
   const block = document.querySelector(`.sched-entry-block[data-id="${CSS.escape(entry.id)}"]`);
   block?.classList.add('dragging', 'moving');
+  if (copying) block?.classList.add('copying');
   let targetDay = dayKey;
   let moved = false;
 
@@ -154,27 +171,37 @@ export function onMoveBlock(event, entry, dayKey) {
     // changed the start *or the day* is exactly what a plain click is.
     if (start !== origStart || targetDay !== dayKey) moved = true;
 
-    entry.startTs = start;
-    entry.endTs = end;
-    liveUpdate(block, entry, targetDay);
+    subject.startTs = start;
+    subject.endTs = end;
+    liveUpdate(block, subject, targetDay);
   };
 
   const onMouseUp = async () => {
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseup', onMouseUp);
-    block?.classList.remove('dragging', 'moving');
+    block?.classList.remove('dragging', 'moving', 'copying');
     if (moved) suppressClickUntil = Date.now() + CLICK_TAIL_MS;
+
+    if (copying) {
+      // Committed even when it never moved: a copy dropped where it started is a
+      // duplicate, which is a thing this app already offers and means to.
+      suppressClickUntil = Date.now() + CLICK_TAIL_MS;
+      setEntriesFor(targetDay, sortEntries([...entriesFor(targetDay), subject]));
+      await persistDayNow(targetDay);
+      renderAll();
+      return;
+    }
 
     if (targetDay !== dayKey) {
       // Two day logs, written one after the other — see cross-day-commit.js for the
       // write order and what happens if the second write fails. Both day names are
       // fixed here, before the first await, and neither is `state.selectedDate`: in
       // the week view the day on screen is usually neither of them.
-      await commitCrossDayMove(entry, dayKey, targetDay, entry.startTs);
+      await commitCrossDayMove(subject, dayKey, targetDay, subject.startTs);
       return;
     }
     await commitDrag(
-      entry,
+      subject,
       dayKey,
       { startTs: origStart, endTs: origStart + duration },
       { touched: moved },

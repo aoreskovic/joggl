@@ -1,4 +1,4 @@
-// Copy previous day, and clear day.
+// Copy previous day, clear day, and copying/pasting a selection.
 //
 // Filling in a day that looks like the last one worked meant dragging every issue
 // across by hand; emptying one meant deleting entries a row at a time.
@@ -9,12 +9,21 @@
 // and skipping it would copy the wrong day without saying so. `state.external` now
 // holds a day at a time across the whole lookback window rather than just the day on
 // screen, which is what lets one range read answer the entire search below.
+//
+// Ctrl+C/Ctrl+V, at the bottom, is a different kind of copy: a specific selection
+// rather than "yesterday", landing on the marked day rather than the one on screen.
+// The anchoring rule that makes a multi-day selection paste sensibly lives in
+// `clipboard.js`, pure and tested on its own — this file only reads the selection,
+// hands it to that module, and writes what comes back.
 
+import { clipboardFrom, pastePlan } from './clipboard.js';
 import { findLastDayWithEntries, MAX_LOOKBACK_DAYS } from './day-search.js';
 import { copiedToDay, planClearWeek } from './entry-ops.js';
+import { sortEntries } from './merge.js';
 import { askModal } from './modal.js';
 import { renderAll } from './render.js';
-import { entriesFor, loadDays, persistDayNow, setEntriesFor, state } from './state.js';
+import { selectedIds } from './selection.js';
+import { entriesFor, findEntry, loadDays, persistDayNow, setEntriesFor, state } from './state.js';
 import { toast, toastErr, toastOk } from './toast.js';
 import { addDays, esc, formatDateLabel, msToDur } from './util.js';
 
@@ -238,3 +247,64 @@ function clearBody(synced, rest, subject = 'This day') {
 }
 
 const plural = (n) => `${n} ${n === 1 ? 'entry' : 'entries'}`;
+
+// ── Copying a selection, and pasting it ────────────────────────────────────
+
+/**
+ * What Ctrl+C is holding. Renderer-local and not persisted, exactly like the
+ * selection: it says what you are in the middle of doing, and that does not survive
+ * closing the window.
+ */
+let clipboard = null;
+
+export function copySelection() {
+  const items = selectedIds()
+    .map((id) => findEntry(id))
+    .filter(Boolean);
+  const clip = clipboardFrom(items);
+
+  if (!clip) {
+    toast('Nothing to copy — select some entries first.');
+    return;
+  }
+  clipboard = clip;
+  toastOk(`${plural(clip.items.length)} copied. Ctrl+V pastes onto the marked day.`);
+}
+
+/**
+ * Paste onto the marked day.
+ *
+ * The target is `state.selectedDate` — the week's anchor, which is what clicking a
+ * column head sets and what the day view is showing. There is one answer in this app
+ * to "which day is this about" and this is it.
+ *
+ * Every day's result is written to memory before any write to disk is attempted, for
+ * the reason `clearWeek` gives: whatever happens next, the screen ends up showing
+ * what memory holds, and a `persistDayNow` that throws partway through risks only
+ * that one day's paste not surviving a restart.
+ */
+export async function pasteClipboard(target = state.selectedDate) {
+  if (!clipboard) {
+    toast('Nothing copied yet — select some entries and press Ctrl+C.');
+    return;
+  }
+
+  const plan = pastePlan(clipboard, target);
+  for (const { dayKey, entries } of plan) {
+    setEntriesFor(dayKey, sortEntries([...entriesFor(dayKey), ...entries]));
+  }
+
+  const count = plan.reduce((sum, p) => sum + p.entries.length, 0);
+  try {
+    for (const { dayKey } of plan) await persistDayNow(dayKey);
+    toastOk(
+      `${plural(count)} pasted onto ${formatDateLabel(target)}` +
+        (plan.length > 1 ? ` and ${plan.length - 1} more day${plan.length === 2 ? '' : 's'}` : '') +
+        '. They arrive unsynced — nothing reaches Jira until you press Sync.',
+    );
+  } catch (err) {
+    toastErr(`Could not save the paste — ${err.message}`);
+  } finally {
+    renderAll();
+  }
+}

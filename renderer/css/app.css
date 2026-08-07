@@ -1489,6 +1489,12 @@ button {
   z-index: 20;
 }
 
+/* Ctrl+drag: what is being placed is a copy, and the block under the cursor is the
+   original standing in for it. Dashed, so it does not read as the original moving. */
+.sched-entry-block.copying {
+  border-style: dashed;
+}
+
 /* What a dropped issue would become. Dashed like the live block, but it is not an
    entry and must never intercept the mouse that is placing it. */
 .sched-drop-preview {

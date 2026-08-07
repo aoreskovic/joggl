@@ -1295,6 +1295,135 @@ async function weekView() {
         d.anchorAfter === d.anchorBefore;
     },
   );
+
+  // Selecting a column head as the paste target is a day *change* — async, same as
+  // every other one — so pressing Ctrl+V straight after the click can land on
+  // whichever day was marked before it, not the one just clicked. Waiting for
+  // `.week-colhead.is-selected` to actually name the target closes that race; the
+  // days written are local-only, so what these three assert never depends on
+  // whatever a live Jira account happens to have booked on the same columns.
+  // `dayVar` is the *name* of the in-page variable holding the target day key (e.g.
+  // "to"), not the key itself — the generated line concatenates it at runtime, the
+  // same way the rest of these checks build a selector from a day key they only
+  // learn once the page script runs.
+  const markAnchor = (dayVar) => `
+    H.q('.week-colhead[data-day="' + ${dayVar} + '"]').click();
+    await H.until(() => H.q('.week-colhead.is-selected')?.dataset.day === ${dayVar},
+      4000, 'the target day to become the anchor');
+    await H.settle();`;
+
+  await check(
+    'week: copy a day’s blocks and paste them onto another, at the same times',
+    inWeek(`const from = H.colDay(0), to = H.colDay(2);
+            const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+            await window.joggl.days.save(from, [
+              { id: 'cp-1', issueKey: 'GEN-1', issueId: null, title: 'Nine', startTs: on(from, 9),
+                endTs: on(from, 10), status: 'synced', worklogId: '60504', comment: 'kept', errorMsg: null },
+              { id: 'cp-2', issueKey: 'GEN-2', issueId: null, title: 'Two', startTs: on(from, 14),
+                endTs: on(from, 15), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+            ]);
+            await window.joggl.days.save(to, []);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('.sched-entry-block[data-id="cp-2"]'), 4000, 'the seeded blocks');
+            for (const id of ['cp-1', 'cp-2']) {
+              H.q('.sched-entry-block[data-id="' + id + '"]').dispatchEvent(
+                new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+            }
+            const press = (key) => document.body.dispatchEvent(new KeyboardEvent('keydown', {
+              key, ctrlKey: true, bubbles: true, cancelable: true }));
+            press('c');
+            // The paste lands on the marked day, so mark the target column first.
+            ${markAnchor('to')}
+            press('v');
+            await H.sleep(500);
+            const landed = (await window.joggl.days.get(to)).entries
+              .map(e => ({ h: new Date(e.startTs).getHours(), status: e.status,
+                           worklogId: e.worklogId, comment: e.comment }));
+            const source = (await window.joggl.days.get(from)).entries.length;
+            await H.clearDays([from, to]);
+            await H.goToday();
+            return JSON.stringify({ landed, source });`),
+    (v) => {
+      const d = JSON.parse(v);
+      // Both copies at the same hours, both unsynced and carrying no worklog — the
+      // synced one included, or the next Sync would rewrite the original's worklog.
+      return d.source === 2 && d.landed.length === 2 &&
+        d.landed.map((e) => e.h).join() === '9,14' &&
+        d.landed.every((e) => e.worklogId === null && e.status === 'pending') &&
+        d.landed[0].comment === 'kept';
+    },
+  );
+
+  await check(
+    'week: a two-day selection pasted keeps the gap between the days',
+    inWeek(`const a = H.colDay(0), b = H.colDay(2), target = H.colDay(1);
+            const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+            const seed = (day, id) => ({ id, issueKey: 'GEN-1', issueId: null, title: id,
+              startTs: on(day, 10), endTs: on(day, 11), status: 'pending', worklogId: null,
+              comment: null, errorMsg: null });
+            await window.joggl.days.save(a, [seed(a, 'gap-a')]);
+            await window.joggl.days.save(b, [seed(b, 'gap-b')]);
+            await window.joggl.days.save(target, []);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('.sched-entry-block[data-id="gap-b"]'), 4000, 'the seeded blocks');
+            for (const id of ['gap-a', 'gap-b']) {
+              H.q('.sched-entry-block[data-id="' + id + '"]').dispatchEvent(
+                new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+            }
+            const press = (key) => document.body.dispatchEvent(new KeyboardEvent('keydown', {
+              key, ctrlKey: true, bubbles: true, cancelable: true }));
+            press('c');
+            ${markAnchor('target')}
+            press('v');
+            await H.sleep(600);
+            // The earliest day anchors onto the target, so the second lands two days
+            // later — which is the column after the one after the target.
+            const onTarget = (await window.joggl.days.get(target)).entries.length;
+            const twoLater = H.colDay(3);
+            const onTwoLater = (await window.joggl.days.get(twoLater)).entries.length;
+            await H.clearDays([a, b, target, twoLater]);
+            await H.goToday();
+            return JSON.stringify({ onTarget, onTwoLater });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.onTarget === 1 && d.onTwoLater === 1;
+    },
+  );
+
+  await check(
+    'week: Ctrl+drag copies a block instead of moving it',
+    inWeek(`const from = H.colDay(0), to = H.colDay(3);
+            const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+            await window.joggl.days.save(from, [
+              { id: 'ctrl-drag', issueKey: 'GEN-1', issueId: null, title: 'Copy me',
+                startTs: on(from, 10), endTs: on(from, 11), status: 'pending', worklogId: null,
+                comment: null, errorMsg: null },
+            ]);
+            await window.joggl.days.save(to, []);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('.sched-entry-block[data-id="ctrl-drag"]'), 4000, 'the seeded block');
+            const block = H.q('.sched-entry-block[data-id="ctrl-drag"]');
+            const box = block.getBoundingClientRect();
+            const target = H.all('.week-col')[3].getBoundingClientRect();
+            const sx = Math.round(box.left + 10), sy = Math.round(box.top + 8);
+            const tx = Math.round(target.left + target.width / 2);
+            block.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true,
+              button: 0, buttons: 1, clientX: sx, clientY: sy, ctrlKey: true }));
+            for (let i = 1; i <= 5; i++) {
+              H.mouse(document, 'mousemove', Math.round(sx + (tx - sx) * i / 5), sy, 1);
+            }
+            H.mouse(document, 'mouseup', tx, sy, 0);
+            await H.sleep(500);
+            const left = (await window.joggl.days.get(from)).entries.map(e => e.id);
+            const arrived = (await window.joggl.days.get(to)).entries.map(e => ({ id: e.id, worklogId: e.worklogId }));
+            await H.clearDays([from, to]);
+            return JSON.stringify({ left, arrived });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return JSON.stringify(d.left) === JSON.stringify(['ctrl-drag']) &&
+        d.arrived.length === 1 && d.arrived[0].id !== 'ctrl-drag' && d.arrived[0].worklogId === null;
+    },
+  );
 }
 
 async function quickEntry() {

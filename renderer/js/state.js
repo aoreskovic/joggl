@@ -6,6 +6,7 @@ import {
   eachDay,
   externalToEntries,
   installDayAccessors,
+  locateEntry,
   missingDays,
   withoutWorklog,
 } from './day-range.js';
@@ -40,11 +41,12 @@ export const state = {
   externalState: 'idle', // idle | loading | loaded | error
   externalError: null,
   /**
-   * The entry a click marked, drawn in both panels at once. Not persisted: it says
-   * what is being looked at, which does not survive closing the window, and not the
-   * same thing as focus, which is per-panel and moves away the moment you type.
+   * The entries a click, a Ctrl+click or a rubber band marked, drawn in every panel
+   * at once. Not persisted: it says what is being looked at, which does not survive
+   * closing the window, and it is not the same thing as focus, which is per-panel and
+   * moves away the moment you type.
    */
-  selectedEntryId: null,
+  selectedEntryIds: new Set(),
   /** null when idle. mergeChoice is decided at start and applied at stop. */
   timer: null,
   /** Issues loaded from the configured task sources. */
@@ -180,6 +182,17 @@ export function entriesFor(dayKey) {
  */
 export function visibleEntriesFor(dayKey) {
   return copyableEntries(state.days.get(dayKey) ?? [], state.external.get(dayKey) ?? []);
+}
+
+/**
+ * The entry with this id and the day holding it, across every day loaded.
+ *
+ * The bound form of `locateEntry`. Every entry action goes through it, so an action
+ * reached from a week column writes to that column's day and not to whichever day
+ * happens to be marked.
+ */
+export function findEntry(id) {
+  return locateEntry(id, state.days, state.external);
 }
 
 /** Replace one day's entries, whether or not it is the day on screen. */

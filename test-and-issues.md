@@ -2,7 +2,7 @@
 
 What to test by hand, how to test it, and what is known to be broken.
 
-Joggl has 283 unit tests (`npm test`) covering the things where a silent failure loses
+Joggl has 371 unit tests (`npm test`) covering the things where a silent failure loses
 time data: the worklog timestamp formatter, merge decisions at the 30-minute boundary,
 Finish Day's partial-failure transitions, the day-log round trip, quarter-hour snapping,
 what a duplicate, a moved and a repointed entry inherit,
@@ -19,9 +19,9 @@ short-dependency rule in `CLAUDE.md`.
 
 That makes this file the other half of the test suite. Keep it current.
 
-**Last full pass: 2026-08-05, 85 checks.** Against the live Jira: **80 passed, 0 failed,
-5 skipped**, in **1m 58s**. Against fixtures: **85 passed, 0 failed, 0 skipped**, in
-**1m 55s**. Both report the same total, which is the only thing keeping `main/jira/fake.js`
+**Last full pass: 2026-08-07, 115 checks.** Against the live Jira: **110 passed, 0 failed,
+5 skipped**, in **2m 7s**. Against fixtures: **115 passed, 0 failed, 0 skipped**, in
+**2m 3s**. Both report the same total, which is the only thing keeping `main/jira/fake.js`
 honest; the five live skips are the checks that need a Jira-side worklog on a
 particular day, which against a real site depends on what happened to be booked that
 week. A skip is not a pass — read the split, not the headline. Driven by dispatching
@@ -34,7 +34,7 @@ real mouse events into the renderer from the main process against a throwaway
 
 ```
 npm start           # the app
-npm test            # 283 tests, must be 0 failures
+npm test            # 371 tests, must be 0 failures
 npm run uicheck     # the checklist below as a script, against the live Jira (~2m)
 npm run uicheck:fast # the same, against fixtures — no network, no credentials (~2m)
 ```
@@ -117,6 +117,27 @@ Not scripted — it needs a machine without Node, or at least a shell without it
 | Watch a running timer in the week view | Its block grows in today's column, takes part in that column's overlap layout, and both the day total and the week total count it. |
 | Press F1 | The shortcut table has an **In the week view** group. |
 | Switch to the week view and back, twice | The search box and pins move with it each time. There is never a second copy of either, and Ctrl+L still reaches the box. |
+| Right-click a block in a column that is **not** the marked day | Every item works — Work description, Duplicate, Split, Edit task, Delete. They read and write that column's day, not the marked one. |
+
+### Selecting and copying
+
+| Do this | Correct result |
+|---|---|
+| Click a block, then Ctrl+click another | Both are outlined, in the day view's list as well as on the grid. Ctrl+click one again and it drops out. |
+| Drag a box on empty grid across three blocks, clipping a fourth | The three it encloses are selected; the one it merely crosses is not. No quick-entry popup opens. |
+| Start a drag on a block | It moves the block, as it always did. No band is drawn. |
+| Press Ctrl+A | Everything on screen is selected — every column of the week, or the day's rows and blocks — except a running timer's own block, which is not an entry yet and so is not taken. Escape puts it all down. |
+| Select two blocks on one day, Ctrl+C, click another column head, Ctrl+V | Both arrive on that day at the same times on the clock, ● pending, carrying no worklog. The originals are untouched. |
+| Select a block on Monday and one on Wednesday, copy, mark Tuesday, paste | They land on Tuesday and Thursday. The gap between them is kept, not collapsed. |
+| Select a whole week with Ctrl+A, step forward a week, paste onto its Monday | The week is reproduced, day for day. |
+| Copy a **Manual Jira entry** and paste it | It arrives as an ordinary Joggl entry, ● pending — a copy of a Jira record is Joggl's own new entry. |
+| In the **day view**: select two entries, Ctrl+C, press `[` to step back a day, Ctrl+V | Both arrive on that day at the same times. Both gestures work here too — the paste target is whichever day is shown. |
+| Ctrl+drag a block to another day | A copy lands there; the original stays where it was. |
+| Select two entries and press Delete | It asks, naming how many are unsynced and how many are already synced, and across how many days. Cancel leaves everything. |
+| Do it again with a synced entry in the selection, and choose **Remove here only** | They go from Joggl. Nothing is deleted from Jira, and the day's Jira-side rows are still there. |
+| Do it again and choose **Delete in Jira too** | The worklogs go from Jira as well. Anything that fails **stays here**, carrying the error, with a summary and **Retry failed** — the time is really logged there and hiding the row would lose it. |
+| Include a **Manual Jira entry** in a selection you delete | It is left alone, and a message says how many were skipped. |
+| Delete the entry a timer is running on | The timer stops first, as it does for a single delete. |
 
 ### Editing which task a block belongs to
 
@@ -378,6 +399,16 @@ on Jira.
 
 Nothing open.
 
+Fixed on 2026-08-06:
+
+- **In the week view, the right-click menu did nothing on any column but the marked
+  one.** `currentEntry(id)` looked the entry up in `visibleEntries()` — the selected
+  day — and every action then wrote to `state.selectedDate`. In the day view those are
+  the same day and always were, which is why this shipped: the menu opened, the dialog
+  never did, and nothing was logged. Entries are now located across every day loaded
+  (`locateEntry` in `renderer/js/day-range.js`, `findEntry` in `state.js`) and each
+  action writes the day it found.
+
 Fixed on 2026-08-05:
 
 - **An inline edit could be lost by stepping a day and stepping back.** The day log is
@@ -468,7 +499,7 @@ Every table above except the persistence rows is executed by `scripts/ui-check.m
 npm run uicheck
 ```
 
-85 checks, exits non-zero on failure. It needs **no dependency and no DevTools Protocol** —
+115 checks, exits non-zero on failure. It needs **no dependency and no DevTools Protocol** —
 the main process already holds `webContents.executeJavaScript`, which is enough to
 dispatch real `MouseEvent`s, read computed styles and element boxes, and drive the app end
 to end. `main/index.js` loads it only under `--uicheck`, which also redirects `userData` to

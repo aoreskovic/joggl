@@ -175,6 +175,11 @@ export function formatDateLabel(key) {
   return `${days[d.getDay()]}, ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
 }
 
+/** `1 entry` / `3 entries`. Here rather than twice over, now that two modules count. */
+export function plural(n) {
+  return `${n} ${n === 1 ? 'entry' : 'entries'}`;
+}
+
 export function tsToHHMM(ts) {
   const d = new Date(ts);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;

@@ -452,6 +452,35 @@
         </div>
 
         <div class="settings-section">
+          <div class="settings-section-title">Selecting several at once</div>
+          <ul class="help-list">
+            <li>
+              <strong>Ctrl+click</strong> adds an entry to the selection, and
+              <strong>dragging on empty grid</strong> draws a box round several. The box
+              has to <em>enclose</em> a block to catch it — a band drawn down a column
+              would otherwise sweep up everything it crossed. <strong>Ctrl+A</strong>
+              takes everything on screen except a running timer’s own block — it is not
+              an entry yet, so there is nothing there to select — and
+              <strong>Escape</strong> puts it all down.
+            </li>
+            <li>
+              <strong>Ctrl+C</strong> copies the selection and <strong>Ctrl+V</strong>
+              pastes it onto the marked day, keeping every offset: Tuesday and Thursday
+              pasted onto a Wednesday arrive on Wednesday and Friday, at the same times
+              on the clock. <strong>Ctrl+drag</strong> copies a single block where you
+              can already see the target. Copies always arrive unsynced, so nothing
+              reaches Jira until you press Sync.
+            </li>
+            <li>
+              <strong>Delete</strong> removes the selection. More than one asks first
+              and says how many are already in Jira — you can leave those worklogs alone
+              or remove them too. Time logged in the Jira web UI is never deleted: it is
+              not Joggl’s to remove.
+            </li>
+          </ul>
+        </div>
+
+        <div class="settings-section">
           <div class="settings-section-title">Keyboard</div>
           <p class="form-hint">
             Single keys work unless you are typing in a box or a dialog is open.

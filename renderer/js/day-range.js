@@ -89,3 +89,28 @@ export function installDayAccessors(target, { days, external }) {
     set: (value) => external.set(target.selectedDate, value ?? []),
   });
 }
+
+/**
+ * The entry with this id, and the day it is filed under.
+ *
+ * Every entry action used to look its entry up in the *selected day* and write back
+ * to `state.selectedDate`. In the day view those are the same day and always were.
+ * In the week view they are usually not: a block in any column but the marked one
+ * was found by nothing, so Work description, Delete, Duplicate, Split and Edit task
+ * all returned silently — the menu opened and the item did nothing.
+ *
+ * Local entries first, then the Jira-side rows. A synced local entry and the worklog
+ * it created are the same half hour seen twice, and it is the local one that may be
+ * edited; the Jira-side row is searched at all only so the refusals that name it
+ * ("this worklog was made in Jira — change it there") still have something to refuse.
+ */
+export function locateEntry(id, days, external) {
+  if (id === null || id === undefined) return null;
+  for (const source of [days, external]) {
+    for (const [dayKey, entries] of source ?? []) {
+      const entry = (entries ?? []).find((e) => e.id === id);
+      if (entry) return { entry, dayKey };
+    }
+  }
+  return null;
+}

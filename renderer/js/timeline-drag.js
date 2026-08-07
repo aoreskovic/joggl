@@ -12,13 +12,14 @@
 
 import { commitCrossDayMove } from './cross-day-commit.js';
 import { markDirty } from './entries.js';
-import { sameTimes } from './entry-ops.js';
+import { duplicateOf, sameTimes } from './entry-ops.js';
+import { sortEntries } from './merge.js';
 import { renderAll } from './render.js';
-import { persistDayNow, state, visibleEntries, visibleEntriesFor } from './state.js';
+import { entriesFor, persistDayNow, setEntriesFor, state, visibleEntries, visibleEntriesFor } from './state.js';
 import { grid, offsetPxOf } from './timeline-geometry.js';
 import { columnAt, columnFor } from './timeline-columns.js';
 import { toastWarn } from './toast.js';
-import { addDays, msToDur, QUARTER, snapToQuarter, startOfDayMs, tsToHHMM } from './util.js';
+import { addDays, msToDur, QUARTER, snapToQuarter, startOfDayMs, tsToHHMM, uuid } from './util.js';
 
 // Nothing shorter than one grid step, so a block can never be dragged into a
 // sliver that is impossible to grab again.
@@ -102,10 +103,32 @@ const CLICK_TAIL_MS = 200;
 export function onMoveBlock(event, entry, dayKey) {
   event.preventDefault();
   event.stopPropagation();
-  if (locked(entry)) return;
 
-  const origStart = entry.startTs;
-  const duration = entry.endTs - origStart;
+  /**
+   * Ctrl turns the move into a copy.
+   *
+   * Decided before the lock check, not after. `locked` exists to stop a *move*: an
+   * external block is Jira's own record, and dragging it would misrepresent
+   * something Joggl never created as having changed time. A copy never touches that
+   * record — the gesture runs on a duplicate that is in no day log at all, so the
+   * original is never mutated and the drop is an insert — so there is nothing left
+   * for `locked` to protect, and refusing it anyway would only make drag disagree
+   * with Ctrl+C/Ctrl+V, which already lets `copySelection` take an external row
+   * through `findEntry` (it searches `state.external` too) and hand back an
+   * ordinary Joggl entry. The element under the cursor is still the original's —
+   * there is nothing else to drag — so it wears `copying` and springs back when the
+   * commit re-renders, which is the honest picture: what is being placed is a copy
+   * of it.
+   *
+   * The copy carries no worklogId, exactly as Ctrl+C/Ctrl+V and *Duplicate* produce,
+   * so the next Sync logs it as new work rather than rewriting the original's.
+   */
+  const copying = event.ctrlKey || event.metaKey;
+  if (!copying && locked(entry)) return;
+  const subject = copying ? duplicateOf(entry, uuid()) : entry;
+
+  const origStart = subject.startTs;
+  const duration = subject.endTs - origStart;
   const startY = event.clientY;
   // What the entry says on the clock, as an offset from its own day's midnight. A
   // move to another column keeps that offset and adds the drag; a fixed number of
@@ -113,6 +136,7 @@ export function onMoveBlock(event, entry, dayKey) {
   const offset = origStart - startOfDayMs(dayKey);
   const block = document.querySelector(`.sched-entry-block[data-id="${CSS.escape(entry.id)}"]`);
   block?.classList.add('dragging', 'moving');
+  if (copying) block?.classList.add('copying');
   let targetDay = dayKey;
   let moved = false;
 
@@ -154,27 +178,37 @@ export function onMoveBlock(event, entry, dayKey) {
     // changed the start *or the day* is exactly what a plain click is.
     if (start !== origStart || targetDay !== dayKey) moved = true;
 
-    entry.startTs = start;
-    entry.endTs = end;
-    liveUpdate(block, entry, targetDay);
+    subject.startTs = start;
+    subject.endTs = end;
+    liveUpdate(block, subject, targetDay);
   };
 
   const onMouseUp = async () => {
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseup', onMouseUp);
-    block?.classList.remove('dragging', 'moving');
+    block?.classList.remove('dragging', 'moving', 'copying');
     if (moved) suppressClickUntil = Date.now() + CLICK_TAIL_MS;
+
+    if (copying) {
+      // Committed even when it never moved: a copy dropped where it started is a
+      // duplicate, which is a thing this app already offers and means to.
+      suppressClickUntil = Date.now() + CLICK_TAIL_MS;
+      setEntriesFor(targetDay, sortEntries([...entriesFor(targetDay), subject]));
+      await persistDayNow(targetDay);
+      renderAll();
+      return;
+    }
 
     if (targetDay !== dayKey) {
       // Two day logs, written one after the other — see cross-day-commit.js for the
       // write order and what happens if the second write fails. Both day names are
       // fixed here, before the first await, and neither is `state.selectedDate`: in
       // the week view the day on screen is usually neither of them.
-      await commitCrossDayMove(entry, dayKey, targetDay, entry.startTs);
+      await commitCrossDayMove(subject, dayKey, targetDay, subject.startTs);
       return;
     }
     await commitDrag(
-      entry,
+      subject,
       dayKey,
       { startTs: origStart, endTs: origStart + duration },
       { touched: moved },

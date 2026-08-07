@@ -5,12 +5,13 @@
 // settled by use, not by design — treat behaviour changes as regressions unless
 // they are deliberate.
 
+import { nextBlockId } from './block-nav.js';
 import { editorForTarget } from './click-actions.js';
 import { showContextMenu } from './context-menu.js';
 import { editEntryComment } from './entries.js';
 import { createRowNav, wireRovingList } from './keynav.js';
 import { renderAll } from './render.js';
-import { applySelection, clearSelection, select } from './selection.js';
+import { applySelection, clearSelection, isBandSuppressed, select, toggleSelect } from './selection.js';
 import { activeView } from './shell.js';
 import {
   entriesFor,
@@ -42,6 +43,23 @@ import {
   uuid,
 } from './util.js';
 
+/**
+ * The rows of a grid as `block-nav` wants them: which column, and how far into it.
+ *
+ * Exported because the week view's roving list needs exactly the same reading of
+ * exactly the same elements — the two grids differ in how many columns they draw and
+ * in nothing else.
+ */
+export function blockNavResolver(rows, from, key) {
+  const blocks = rows.map((el) => ({
+    id: el.dataset.id,
+    day: el.dataset.day,
+    offsetMs: Number(el.dataset.start) - startOfDayMs(el.dataset.day),
+  }));
+  const id = nextBlockId(blocks, from?.dataset.id, key);
+  return id ? rows.find((el) => el.dataset.id === id) ?? null : null;
+}
+
 // One tab stop for the whole grid, arrow keys between blocks. Lazy because the
 // grid exists before this module runs but renderTimeline may be called first.
 let rovingBlocks = null;
@@ -50,6 +68,7 @@ function roving() {
     container: () => document.getElementById('schedule-grid'),
     rowSelector: '.sched-entry-block:not(.live)',
     onMove: (block) => select(block.dataset.id),
+    resolve: blockNavResolver,
   });
   return rovingBlocks;
 }
@@ -259,6 +278,11 @@ function buildBlock(entry, dayKey, slot) {
   if (entry.status === 'error') block.classList.add('st-error');
   if (entry.external) block.classList.add('external');
   block.dataset.id = entry.id;
+  // Which column this is, and when it starts. Read by the arrow keys (block-nav.js)
+  // and by the UI checks, neither of which can otherwise tell one column from
+  // another once the blocks are on the page.
+  block.dataset.day = dayKey;
+  block.dataset.start = String(entry.startTs);
   // Focusable for the same reason the entry rows are: the Menu key fires
   // contextmenu on whatever has focus. The tab stop is roved, not one per block.
   block.tabIndex = -1;
@@ -291,7 +315,8 @@ function buildBlock(entry, dayKey, slot) {
     if (event.target.closest('.sched-handle')) return;
     // A move that actually moved is not a click, however it ends up on screen.
     if (isClickSuppressed()) return;
-    select(entry.id);
+    if (event.ctrlKey || event.metaKey) toggleSelect(entry.id);
+    else select(entry.id);
     // onMoveBlock calls preventDefault on mousedown, which suppresses the focus a
     // click would otherwise give, so the roving tab stop has to be set by hand.
     block.focus();
@@ -336,6 +361,10 @@ function onQuickEntryOutside(event) {
 }
 
 export function onGridClick(event) {
+  // A band that just finished produces a click on the grid it was drawn over, and
+  // this function clears the selection and opens the quick-entry popup. Without
+  // standing aside, every band would select and then instantly deselect.
+  if (isBandSuppressed()) return;
   if (event.target.closest('.sched-entry-block') || event.target.closest('.sched-handle')) return;
   // The week's column heads are sticky, so once the grid is scrolled they sit *over*
   // the top of their own column: a click on one is inside the column's rect, and

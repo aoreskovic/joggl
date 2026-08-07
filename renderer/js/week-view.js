@@ -18,7 +18,7 @@ import { applySelection, select } from './selection.js';
 import { activeView, registerView } from './shell.js';
 import { isSyncRunning } from './sync.js';
 import { pxPerMin, refreshRange, saveUi, state, visibleEntriesFor } from './state.js';
-import { onGridClick, paintDayColumn } from './timeline.js';
+import { blockNavResolver, onGridClick, paintDayColumn } from './timeline.js';
 import { setColumns } from './timeline-columns.js';
 import { computeRange, grid, gridHeightPx, offsetPxOf, setGrid } from './timeline-geometry.js';
 import { isWeekend, msToDur, pad, startOfDay, todayKey } from './util.js';
@@ -46,6 +46,7 @@ function roving() {
     container: () => $('week-scroll'),
     rowSelector: '.sched-entry-block:not(.live)',
     onMove: (block) => select(block.dataset.id),
+    resolve: blockNavResolver,
   });
   return rovingBlocks;
 }

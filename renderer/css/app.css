@@ -1489,6 +1489,12 @@ button {
   z-index: 20;
 }
 
+/* Ctrl+drag: what is being placed is a copy, and the block under the cursor is the
+   original standing in for it. Dashed, so it does not read as the original moving. */
+.sched-entry-block.copying {
+  border-style: dashed;
+}
+
 /* What a dropped issue would become. Dashed like the live block, but it is not an
    entry and must never intercept the mouse that is placing it. */
 .sched-drop-preview {
@@ -2229,5 +2235,16 @@ body.is-dragging-issue * {
   line-height: 1.5;
   color: var(--text-faint);
   /* Never swallow the click it is describing. */
+  pointer-events: none;
+}
+
+/* The rubber band. Fixed, because it is drawn in viewport coordinates and must not
+   scroll with the grid under it mid-gesture; pointer-events off, or it would take the
+   mouseup that ends it. */
+.rubber-band {
+  position: fixed;
+  z-index: 60;
+  border: 1px solid var(--accent);
+  background: var(--accent-softer);
   pointer-events: none;
 }

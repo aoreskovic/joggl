@@ -296,10 +296,14 @@ window.H = {
   colDay(index) {
     return H.all('.week-colhead')[index]?.dataset.day ?? null;
   },
+  /** The selected day's key, parsed off the header label ("Thu, 30.07.2026"). */
+  selectedDayKey() {
+    const m = H.q('#current-date-label').textContent.match(/(\\d{2})\\.(\\d{2})\\.(\\d{4})/);
+    return m ? m[3] + '-' + m[2] + '-' + m[1] : null;
+  },
   /** The day header, read as a key. The label is "Thu, 30.07.2026". */
   onToday() {
-    const m = H.q('#current-date-label').textContent.match(/(\\d{2})\\.(\\d{2})\\.(\\d{4})/);
-    return m ? m[3] + '-' + m[2] + '-' + m[1] === H.todayKey() : false;
+    return H.selectedDayKey() === H.todayKey();
   },
   firstTask() { return H.q('.task-item'); },
   /**
@@ -1228,6 +1232,307 @@ async function weekView() {
         d.externalBefore > 0 && d.externalAfter === d.externalBefore;
     },
   );
+
+  // The day the week is anchored on is the *selected* one, and it is the only day
+  // the old lookup could see. So both of these deliberately pick a column that is
+  // not it — that is the whole bug.
+  const seedOffAnchor = (id, extra = '') => `
+    const heads = H.all('.week-colhead');
+    const i = heads.findIndex(h => !h.classList.contains('is-selected'));
+    const day = H.colDay(i);
+    const at = (hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+    await window.joggl.days.save(day, [
+      { id: '${id}', issueKey: 'GEN-1', issueId: null, title: 'Off the anchor',
+        startTs: at(9), endTs: at(10), status: 'pending', worklogId: null,
+        comment: null, errorMsg: null },
+      ${extra}
+    ]);
+    await window.__jogglTest.reloadDay();
+    await H.until(() => !!H.q('.sched-entry-block[data-id="${id}"]'), 4000, 'the seeded block');`;
+
+  await check(
+    'week: an action on a column that is not the marked day still reaches its entry',
+    inWeek(`${seedOffAnchor('x-off-1')}
+            const block = H.q('.sched-entry-block[data-id="x-off-1"]');
+            const onAnchor = block.dataset.day === H.q('.week-colhead.is-selected').dataset.day;
+            block.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+            await H.until(() => !H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the description dialog');
+            H.q('#modal-body .comment-field').value = 'written from another column';
+            H.all('#modal-buttons button').find(b => b.textContent === 'Save').click();
+            await H.until(() => H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the dialog to close');
+            await H.sleep(250);
+            const saved = (await window.joggl.days.get(day)).entries[0].comment;
+            await H.clearDays([day]);
+            return JSON.stringify({ onAnchor, saved });`),
+    (v) => {
+      const d = JSON.parse(v);
+      // If the seeded day *were* the anchor the check would prove nothing at all.
+      return d.onAnchor === false && d.saved === 'written from another column';
+    },
+  );
+
+  await check(
+    'week: deleting from a column that is not the marked day empties that day, not another',
+    inWeek(`${seedOffAnchor(
+      'x-off-2',
+      `{ id: 'x-off-keep', issueKey: 'GEN-2', issueId: null, title: 'Stays',
+         startTs: at(14), endTs: at(15), status: 'pending', worklogId: null,
+         comment: null, errorMsg: null },`,
+    )}
+            const anchorBefore = (await window.joggl.days.get(H.q('.week-colhead.is-selected').dataset.day)).entries.length;
+            const block = H.q('.sched-entry-block[data-id="x-off-2"]');
+            block.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 }));
+            await H.until(() => !H.q('#ctx-menu').classList.contains('hidden'), 4000, 'the menu');
+            H.all('#ctx-menu .ctx-item').find(i => i.textContent.includes('Delete')).click();
+            await H.sleep(400);
+            const left = (await window.joggl.days.get(day)).entries.map(e => e.id);
+            const anchorAfter = (await window.joggl.days.get(H.q('.week-colhead.is-selected').dataset.day)).entries.length;
+            await H.clearDays([day]);
+            return JSON.stringify({ left, anchorBefore, anchorAfter });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return JSON.stringify(d.left) === JSON.stringify(['x-off-keep']) &&
+        d.anchorAfter === d.anchorBefore;
+    },
+  );
+
+  // Selecting a column head as the paste target is a day *change* — async, same as
+  // every other one — so pressing Ctrl+V straight after the click can land on
+  // whichever day was marked before it, not the one just clicked. Waiting for
+  // `.week-colhead.is-selected` to actually name the target closes that race; the
+  // days written are local-only, so what these three assert never depends on
+  // whatever a live Jira account happens to have booked on the same columns.
+  // `dayVar` is the *name* of the in-page variable holding the target day key (e.g.
+  // "to"), not the key itself — the generated line concatenates it at runtime, the
+  // same way the rest of these checks build a selector from a day key they only
+  // learn once the page script runs.
+  const markAnchor = (dayVar) => `
+    H.q('.week-colhead[data-day="' + ${dayVar} + '"]').click();
+    await H.until(() => H.q('.week-colhead.is-selected')?.dataset.day === ${dayVar},
+      4000, 'the target day to become the anchor');
+    await H.settle();`;
+
+  await check(
+    'week: copy a day’s blocks and paste them onto another, at the same times',
+    inWeek(`const from = H.colDay(0), to = H.colDay(2);
+            const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+            await window.joggl.days.save(from, [
+              { id: 'cp-1', issueKey: 'GEN-1', issueId: null, title: 'Nine', startTs: on(from, 9),
+                endTs: on(from, 10), status: 'synced', worklogId: '60504', comment: 'kept', errorMsg: null },
+              { id: 'cp-2', issueKey: 'GEN-2', issueId: null, title: 'Two', startTs: on(from, 14),
+                endTs: on(from, 15), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+            ]);
+            await window.joggl.days.save(to, []);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('.sched-entry-block[data-id="cp-2"]'), 4000, 'the seeded blocks');
+            for (const id of ['cp-1', 'cp-2']) {
+              H.q('.sched-entry-block[data-id="' + id + '"]').dispatchEvent(
+                new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+            }
+            const press = (key) => document.body.dispatchEvent(new KeyboardEvent('keydown', {
+              key, ctrlKey: true, bubbles: true, cancelable: true }));
+            press('c');
+            // The paste lands on the marked day, so mark the target column first.
+            ${markAnchor('to')}
+            press('v');
+            await H.sleep(500);
+            const landed = (await window.joggl.days.get(to)).entries
+              .map(e => ({ h: new Date(e.startTs).getHours(), status: e.status,
+                           worklogId: e.worklogId, comment: e.comment }));
+            const source = (await window.joggl.days.get(from)).entries.length;
+            await H.clearDays([from, to]);
+            await H.goToday();
+            return JSON.stringify({ landed, source });`),
+    (v) => {
+      const d = JSON.parse(v);
+      // Both copies at the same hours, both unsynced and carrying no worklog — the
+      // synced one included, or the next Sync would rewrite the original's worklog.
+      return d.source === 2 && d.landed.length === 2 &&
+        d.landed.map((e) => e.h).join() === '9,14' &&
+        d.landed.every((e) => e.worklogId === null && e.status === 'pending') &&
+        d.landed[0].comment === 'kept';
+    },
+  );
+
+  await check(
+    'week: a two-day selection pasted keeps the gap between the days',
+    inWeek(`const a = H.colDay(0), b = H.colDay(2), target = H.colDay(1);
+            const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+            const seed = (day, id) => ({ id, issueKey: 'GEN-1', issueId: null, title: id,
+              startTs: on(day, 10), endTs: on(day, 11), status: 'pending', worklogId: null,
+              comment: null, errorMsg: null });
+            await window.joggl.days.save(a, [seed(a, 'gap-a')]);
+            await window.joggl.days.save(b, [seed(b, 'gap-b')]);
+            await window.joggl.days.save(target, []);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('.sched-entry-block[data-id="gap-b"]'), 4000, 'the seeded blocks');
+            for (const id of ['gap-a', 'gap-b']) {
+              H.q('.sched-entry-block[data-id="' + id + '"]').dispatchEvent(
+                new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+            }
+            const press = (key) => document.body.dispatchEvent(new KeyboardEvent('keydown', {
+              key, ctrlKey: true, bubbles: true, cancelable: true }));
+            press('c');
+            ${markAnchor('target')}
+            press('v');
+            await H.sleep(600);
+            // The earliest day anchors onto the target, so the second lands two days
+            // later — which is the column after the one after the target.
+            const onTarget = (await window.joggl.days.get(target)).entries.length;
+            const twoLater = H.colDay(3);
+            const onTwoLater = (await window.joggl.days.get(twoLater)).entries.length;
+            await H.clearDays([a, b, target, twoLater]);
+            await H.goToday();
+            return JSON.stringify({ onTarget, onTwoLater });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.onTarget === 1 && d.onTwoLater === 1;
+    },
+  );
+
+  await check(
+    'week: Ctrl+drag copies a block instead of moving it',
+    inWeek(`const from = H.colDay(0), to = H.colDay(3);
+            const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+            await window.joggl.days.save(from, [
+              { id: 'ctrl-drag', issueKey: 'GEN-1', issueId: null, title: 'Copy me',
+                startTs: on(from, 10), endTs: on(from, 11), status: 'pending', worklogId: null,
+                comment: null, errorMsg: null },
+            ]);
+            await window.joggl.days.save(to, []);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('.sched-entry-block[data-id="ctrl-drag"]'), 4000, 'the seeded block');
+            const block = H.q('.sched-entry-block[data-id="ctrl-drag"]');
+            const box = block.getBoundingClientRect();
+            const target = H.all('.week-col')[3].getBoundingClientRect();
+            const sx = Math.round(box.left + 10), sy = Math.round(box.top + 8);
+            const tx = Math.round(target.left + target.width / 2);
+            block.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true,
+              button: 0, buttons: 1, clientX: sx, clientY: sy, ctrlKey: true }));
+            for (let i = 1; i <= 5; i++) {
+              H.mouse(document, 'mousemove', Math.round(sx + (tx - sx) * i / 5), sy, 1);
+            }
+            H.mouse(document, 'mouseup', tx, sy, 0);
+            await H.sleep(500);
+            const left = (await window.joggl.days.get(from)).entries.map(e => e.id);
+            const arrived = (await window.joggl.days.get(to)).entries.map(e => ({ id: e.id, worklogId: e.worklogId }));
+            await H.clearDays([from, to]);
+            return JSON.stringify({ left, arrived });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return JSON.stringify(d.left) === JSON.stringify(['ctrl-drag']) &&
+        d.arrived.length === 1 && d.arrived[0].id !== 'ctrl-drag' && d.arrived[0].worklogId === null;
+    },
+  );
+
+  await check(
+    'week: pasting onto a day never loaded this session merges with what is already there',
+    inWeek(`const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+            // Plain string math on YYYY-MM-DD: no DST edge here, just enough distance
+            // to land outside the displayed week. Native Date avoided on purpose —
+            // this runs inside the page, not through renderer/js/util.js.
+            const addDays = (key, n) => {
+              const d = new Date(key + 'T00:00:00');
+              d.setDate(d.getDate() + n);
+              const p = (x) => String(x).padStart(2, '0');
+              return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+            };
+            // anchor and second are both on screen, four columns apart — the most a
+            // 5-day week allows. Pasting anchored on "second" lands second's own copy
+            // four days past it, which is Tuesday of *next* week: a day the app can
+            // never have loaded, since the next-week arrow is disabled from "this
+            // week" onward and nothing else reaches forward in time.
+            const anchor = H.colDay(0), second = H.colDay(4), target = second;
+            const farDay = addDays(second, 4);
+            await window.joggl.days.save(anchor, [
+              { id: 'ld-a', issueKey: 'GEN-1', issueId: null, title: 'A', startTs: on(anchor, 9),
+                endTs: on(anchor, 10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+            ]);
+            await window.joggl.days.save(second, [
+              { id: 'ld-b', issueKey: 'GEN-1', issueId: null, title: 'B', startTs: on(second, 9),
+                endTs: on(second, 10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+            ]);
+            // Written straight to disk and never read into this session — no
+            // reloadDay call for farDay, and it is outside the week the initial
+            // mount loaded. This is the entry that must survive the paste.
+            await window.joggl.days.save(farDay, [
+              { id: 'already-there', issueKey: 'GEN-2', issueId: null, title: 'Pre-existing',
+                startTs: on(farDay, 8), endTs: on(farDay, 9), status: 'pending', worklogId: null,
+                comment: null, errorMsg: null },
+            ]);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('.sched-entry-block[data-id="ld-b"]'), 4000, 'the seeded blocks');
+            for (const id of ['ld-a', 'ld-b']) {
+              H.q('.sched-entry-block[data-id="' + id + '"]').dispatchEvent(
+                new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+            }
+            const press = (key) => document.body.dispatchEvent(new KeyboardEvent('keydown', {
+              key, ctrlKey: true, bubbles: true, cancelable: true }));
+            press('c');
+            H.q('.week-colhead[data-day="' + target + '"]').click();
+            await H.until(() => H.q('.week-colhead.is-selected')?.dataset.day === target,
+              4000, 'the target day to become the anchor');
+            await H.settle();
+            // Cleared rather than diffed by count: an older toast can hit its own
+            // auto-dismiss timer in the middle of this check and vanish on its own,
+            // which shifts a slice-by-index read onto the wrong element entirely.
+            H.all('.toast').forEach(t => t.remove());
+            press('v');
+            await H.sleep(600);
+            const toastText = H.all('.toast').map(t => t.textContent).join(' | ');
+            const onFarDay = (await window.joggl.days.get(farDay)).entries.map(e => e.id);
+            const onTarget = (await window.joggl.days.get(target)).entries.map(e => e.id);
+            await H.clearDays([anchor, second, farDay]);
+            await H.goToday();
+            return JSON.stringify({ onFarDay, onTarget, toastText });`),
+    (v) => {
+      const d = JSON.parse(v);
+      // The pre-existing row on the never-loaded day survived, alongside the copy
+      // that landed there — not overwritten by it. And since that day is always
+      // later than today, the toast says so rather than staying silent about it.
+      return d.onFarDay.includes('already-there') && d.onFarDay.length === 2 &&
+        d.onTarget.includes('ld-b') && d.onTarget.length === 2 &&
+        /dated after today/i.test(d.toastText);
+    },
+  );
+
+  await check(
+    'week: Ctrl+drag copies a Jira-side block instead of refusing it',
+    inWeek(`const ext = H.q('.week-col .sched-entry-block.external');
+            if (!ext) return JSON.stringify({ skip: true });
+            const originalId = ext.dataset.id, fromDay = ext.dataset.day;
+            const heads = H.all('.week-colhead');
+            const fromIdx = heads.findIndex(h => h.dataset.day === fromDay);
+            const toIdx = fromIdx === 0 ? 1 : 0;
+            const to = heads[toIdx].dataset.day;
+            await window.joggl.days.save(to, []);
+            const box = ext.getBoundingClientRect();
+            const targetBox = H.all('.week-col')[toIdx].getBoundingClientRect();
+            const sx = Math.round(box.left + 10), sy = Math.round(box.top + 8);
+            const tx = Math.round(targetBox.left + targetBox.width / 2);
+            ext.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true,
+              button: 0, buttons: 1, clientX: sx, clientY: sy, ctrlKey: true }));
+            for (let i = 1; i <= 5; i++) {
+              H.mouse(document, 'mousemove', Math.round(sx + (tx - sx) * i / 5), sy, 1);
+            }
+            H.mouse(document, 'mouseup', tx, sy, 0);
+            await H.sleep(500);
+            // The plain-drag refusal ("made in Jira — change it there") must not fire
+            // for a copy: nothing on the original is touched, so there is nothing for
+            // it to protect.
+            const warned = H.all('.toast').some(t => /made in Jira/i.test(t.textContent));
+            const arrived = (await window.joggl.days.get(to)).entries.map(e => ({
+              id: e.id, worklogId: e.worklogId, status: e.status }));
+            await H.clearDays([to]);
+            return JSON.stringify({ warned, arrived, originalId });`),
+    (v) => {
+      const d = JSON.parse(v);
+      if (d.skip) return 'skipped';
+      return d.warned === false && d.arrived.length === 1 &&
+        d.arrived[0].id !== d.originalId && d.arrived[0].worklogId === null &&
+        d.arrived[0].status === 'pending';
+    },
+  );
 }
 
 async function quickEntry() {
@@ -1650,6 +1955,121 @@ async function keyboard() {
      return String(inside)`,
     eq('true'),
   );
+
+  await check(
+    'the day grid’s arrows walk its blocks in time order, not the order they were drawn',
+    `const day = await H.findEmptyDay();
+     if (!day) return JSON.stringify({ skip: true });
+     // findEmptyDay confirmed this day has no rows of either kind — local or
+     // Jira-side. That matters more here than in most of its other callers: today
+     // would not do, and not only because of the fake client's fixture rows at
+     // 09:30/13:00 (main/jira/fake.js). A live account is used daily and can hold a
+     // worklog at any hour of any day, and a single one landing between the two
+     // seeded below would make ArrowDown answer with it instead — correctly, but
+     // not what this check is asking about, and silently different between the
+     // fast run and the live one, which is exactly the property that must not
+     // happen (see the fake's own doc comment on why the two runs must agree).
+     const dayKey = H.selectedDayKey();
+     const at = (hh) => { const d = new Date(dayKey + 'T00:00:00'); d.setHours(hh, 0, 0, 0); return d.getTime(); };
+     // Deliberately out of order in the day log, so DOM order and time order differ.
+     await window.joggl.days.save(dayKey, [
+       { id: 'nav-late', issueKey: 'GEN-1', issueId: null, title: 'Late', startTs: at(15),
+         endTs: at(16), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       { id: 'nav-early', issueKey: 'GEN-2', issueId: null, title: 'Early', startTs: at(9),
+         endTs: at(10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+     ]);
+     await window.__jogglTest.reloadDay();
+     const press = (el, key) => el.dispatchEvent(new KeyboardEvent('keydown', {
+       key, bubbles: true, cancelable: true }));
+     const early = H.q('.sched-entry-block[data-id="nav-early"]');
+     early.focus();
+     press(early, 'ArrowDown');
+     const down = document.activeElement?.dataset.id ?? null;
+     press(document.activeElement, 'ArrowUp');
+     const up = document.activeElement?.dataset.id ?? null;
+     press(document.activeElement, 'ArrowUp');
+     const held = document.activeElement?.dataset.id ?? null;
+     // dayKey is not today, so H.resetDay()'s own cleanup — which only ever clears
+     // H.todayKey() — leaves nav-early/nav-late sitting on dayKey for the rest of
+     // the run. Worse than a stray fixture: findEmptyDay caches the day it found on
+     // its first call and every later call in the run trusts that cache instead of
+     // re-checking, so a dayKey left dirty here is handed straight to the copy and
+     // empty-state checks as "confirmed empty" when it no longer is.
+     await H.clearDays([dayKey]);
+     await H.resetDay();
+     return JSON.stringify({ down, up, held })`,
+    (v) => {
+      const d = JSON.parse(v);
+      if (d.skip) return 'skipped';
+      // Held at the top rather than wrapping — the same clamp every roving list has.
+      // A revert to DOM order fails this: the log was written [late, early], so
+      // early is DOM-last, and old-style ArrowDown clamped at the end of the list
+      // stays put — down would equal 'nav-early', never 'nav-late'.
+      return d.down === 'nav-late' && d.up === 'nav-early' && d.held === 'nav-early';
+    },
+  );
+
+  await check(
+    'in the week view ← and → cross columns while ↑ and ↓ stay in one',
+    `H.q('.sidebar-item[data-view="week"]').click();
+     await H.until(() => !H.q('#view-week').hidden, 8000, 'the week view');
+     await H.settle();
+     try {
+       const a = H.colDay(0), b = H.colDay(1);
+       const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+       // a and b are ordinary weekday columns of the week containing today, and on a
+       // live account either can already hold real worklogs — this seeds two more
+       // into a and one into b without knowing or caring what else is there. That is
+       // enough to make both columns non-empty, whatever they held before: Up/Down
+       // never leaves the column it started in, so a can never run empty under
+       // ArrowDown, and Right stops at the first non-empty column it finds, so a
+       // non-empty b can never be skipped over. What is asserted below therefore
+       // holds regardless of any other row in either column — see the expectation.
+       await window.joggl.days.save(a, [
+         { id: 'wk-a9', issueKey: 'GEN-1', issueId: null, title: 'A nine', startTs: on(a, 9),
+           endTs: on(a, 10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+         { id: 'wk-a15', issueKey: 'GEN-1', issueId: null, title: 'A three', startTs: on(a, 15),
+           endTs: on(a, 16), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       ]);
+       await window.joggl.days.save(b, [
+         { id: 'wk-b14', issueKey: 'GEN-2', issueId: null, title: 'B two', startTs: on(b, 14),
+           endTs: on(b, 15), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       ]);
+       await window.__jogglTest.reloadDay();
+       await H.until(() => !!H.q('.sched-entry-block[data-id="wk-b14"]'), 4000, 'the seeded blocks');
+       const press = (el, key) => el.dispatchEvent(new KeyboardEvent('keydown', {
+         key, bubbles: true, cancelable: true }));
+       const start = H.q('.sched-entry-block[data-id="wk-a9"]');
+       start.focus();
+       press(start, 'ArrowDown');
+       const afterDown = document.activeElement;
+       const downDay = afterDown?.dataset.day ?? null;
+       press(afterDown, 'ArrowRight');
+       const afterRight = document.activeElement;
+       const rightDay = afterRight?.dataset.day ?? null;
+       press(afterRight, 'ArrowLeft');
+       const afterLeft = document.activeElement;
+       const leftDay = afterLeft?.dataset.day ?? null;
+       await H.clearDays([a, b]);
+       return JSON.stringify({ a, b, downDay, rightDay, leftDay });
+     } finally {
+       H.q('.sidebar-item[data-view="day"]').click();
+       await H.until(() => !H.q('#view-day').hidden, 8000, 'the day view');
+     }`,
+    (v) => {
+      const d = JSON.parse(v);
+      // Asserted on which *column* each key landed in, never on which specific
+      // block — a live account can hold anything else in a or b, and this must
+      // still hold. Down must not leave the column it started in (whatever else is
+      // in a, above or below wk-a9, block-nav's Up/Down never crosses a day); Right
+      // must land in b specifically, the very next column, because a non-empty b is
+      // never a column Right steps over; Left must return to a for the same reason
+      // run backwards. Before this task neither arrow key was bound at all, so a
+      // revert leaves focus exactly on wk-a9's own column throughout — rightDay
+      // would equal a, not b, and the check fails, which is the bar it has to clear.
+      return d.downDay === d.a && d.rightDay === d.b && d.leftDay === d.a;
+    },
+  );
 }
 
 async function dateJump() {
@@ -1968,6 +2388,241 @@ async function clicks() {
         d.after > '00:15:00' && d.created === 0;
     },
   );
+
+  await check(
+    'Ctrl+click adds a second entry to the selection, and takes it back out',
+    `await H.resetDay();
+     const at = (hh) => { const d = new Date(); d.setHours(hh, 0, 0, 0); return d.getTime(); };
+     await window.joggl.days.save(H.todayKey(), [
+       { id: 'sel-a', issueKey: 'GEN-1', issueId: null, title: 'First', startTs: at(9),
+         endTs: at(10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       { id: 'sel-b', issueKey: 'GEN-2', issueId: null, title: 'Second', startTs: at(11),
+         endTs: at(12), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+     ]);
+     await window.__jogglTest.reloadDay();
+     const click = (id, ctrl) => {
+       const el = H.q('.sched-entry-block[data-id="' + id + '"]');
+       el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: ctrl }));
+     };
+     click('sel-a', false);
+     const one = H.all('.sched-entry-block.is-selected').length;
+     click('sel-b', true);
+     const two = H.all('.sched-entry-block.is-selected').length;
+     click('sel-b', true);
+     const back = H.all('.sched-entry-block.is-selected').length;
+     click('sel-b', false);
+     const plain = H.all('.sched-entry-block.is-selected').map(e => e.dataset.id);
+     await H.resetDay();
+     return JSON.stringify({ one, two, back, plain })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.one === 1 && d.two === 2 && d.back === 1 &&
+        JSON.stringify(d.plain) === JSON.stringify(['sel-b']);
+    },
+  );
+
+  await check(
+    'the selection marks the row and the block together, and Escape puts it all down',
+    `await H.resetDay();
+     const at = (hh) => { const d = new Date(); d.setHours(hh, 0, 0, 0); return d.getTime(); };
+     await window.joggl.days.save(H.todayKey(), [
+       { id: 'sel-c', issueKey: 'GEN-1', issueId: null, title: 'Both', startTs: at(9),
+         endTs: at(10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       { id: 'sel-d', issueKey: 'GEN-2', issueId: null, title: 'Both too', startTs: at(11),
+         endTs: at(12), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+     ]);
+     await window.__jogglTest.reloadDay();
+     for (const id of ['sel-c', 'sel-d']) {
+       H.q('.sched-entry-block[data-id="' + id + '"]').dispatchEvent(
+         new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+     }
+     const blocks = H.all('.sched-entry-block.is-selected').length;
+     const cards = H.all('.entry-card.is-selected').length;
+     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+     await H.sleep(150);
+     const after = H.all('.is-selected').length;
+     await H.resetDay();
+     return JSON.stringify({ blocks, cards, after })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.blocks === 2 && d.cards === 2 && d.after === 0;
+    },
+  );
+
+  await check(
+    'a rubber band selects what it encloses, and not what it merely crosses',
+    `await H.resetDay();
+     const at = (hh, mm) => { const d = new Date(); d.setHours(hh, mm || 0, 0, 0); return d.getTime(); };
+     await window.joggl.days.save(H.todayKey(), [
+       { id: 'band-in', issueKey: 'GEN-1', issueId: null, title: 'Enclosed', startTs: at(10),
+         endTs: at(10, 30), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       { id: 'band-cross', issueKey: 'GEN-2', issueId: null, title: 'Crossed', startTs: at(11),
+         endTs: at(15), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+     ]);
+     await window.__jogglTest.reloadDay();
+     await H.showHour('10:00');
+     const inBox = H.q('.sched-entry-block[data-id="band-in"]').getBoundingClientRect();
+     const crossBox = H.q('.sched-entry-block[data-id="band-cross"]').getBoundingClientRect();
+     // From above the first block to halfway down the second: the first is contained,
+     // the second only crossed. Wide enough on both sides to contain the full width.
+     const x1 = Math.round(Math.min(inBox.left, crossBox.left) - 6);
+     const x2 = Math.round(Math.max(inBox.right, crossBox.right) + 6);
+     const y1 = Math.round(inBox.top - 6);
+     const y2 = Math.round(crossBox.top + crossBox.height / 2);
+     H.mouse(H.q('#schedule-grid'), 'mousedown', x1, y1, 1);
+     for (let i = 1; i <= 5; i++) {
+       H.mouse(document, 'mousemove', Math.round(x1 + (x2 - x1) * i / 5), Math.round(y1 + (y2 - y1) * i / 5), 1);
+     }
+     H.mouse(document, 'mouseup', x2, y2, 0);
+     const pickedByBand = H.all('.sched-entry-block.is-selected').map(e => e.dataset.id);
+     // A synthetic mousedown/mouseup pair does not itself produce a native 'click' —
+     // the browser fires that as a separate event, and onGridClick is bound to
+     // 'click'. Without dispatching this one by hand, the handler this check exists
+     // to guard against — the one that clears the selection and opens the popup —
+     // would never run at all, and the check would pass whether or not
+     // isBandSuppressed() actually suppresses anything.
+     H.q('#schedule-grid').dispatchEvent(new MouseEvent('click', {
+       bubbles: true, cancelable: true, clientX: x2, clientY: y2 }));
+     await H.sleep(200);
+     // Read again after the click: the point of the suppression is that the
+     // selection the band just made survives it.
+     const pickedAfterClick = H.all('.sched-entry-block.is-selected').map(e => e.dataset.id);
+     const popup = !!H.q('.sched-quick-entry');
+     await H.resetDay();
+     return JSON.stringify({ pickedByBand, pickedAfterClick, popup })`,
+    (v) => {
+      const d = JSON.parse(v);
+      // Three distinct fields so a failure says which half broke, rather than one
+      // boolean masking all of them: did the band itself select the wrong thing
+      // (pickedByBand), did the click the band produces wipe a correct selection
+      // (pickedAfterClick), or did that click also open the popup (popup)?
+      const bandCorrect = JSON.stringify(d.pickedByBand) === JSON.stringify(['band-in']);
+      const survivedClick = JSON.stringify(d.pickedAfterClick) === JSON.stringify(['band-in']);
+      return bandCorrect && survivedClick && d.popup === false;
+    },
+  );
+
+  await check(
+    'a press on a block is a move, not a band, and a press that never moves is still a click',
+    `await H.resetDay();
+     const at = (hh) => { const d = new Date(); d.setHours(hh, 0, 0, 0); return d.getTime(); };
+     await window.joggl.days.save(H.todayKey(), [
+       { id: 'band-block', issueKey: 'GEN-1', issueId: null, title: 'A block', startTs: at(10),
+         endTs: at(11), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+     ]);
+     await window.__jogglTest.reloadDay();
+     await H.showHour('10:00');
+     const box = H.q('.sched-entry-block[data-id="band-block"]').getBoundingClientRect();
+     H.mouse(H.q('.sched-entry-block[data-id="band-block"]'), 'mousedown',
+             Math.round(box.left + 20), Math.round(box.top + 8), 1);
+     H.mouse(document, 'mousemove', Math.round(box.left + 60), Math.round(box.top + 40), 1);
+     const bandOnBlock = !!H.q('.rubber-band');
+     H.mouse(document, 'mouseup', Math.round(box.left + 60), Math.round(box.top + 40), 0);
+     await H.sleep(250);
+
+     // And a plain click on empty grid still opens the popup, unchanged.
+     const y = await H.showHour('14:00');
+     H.mouse(H.q('#schedule-grid'), 'mousedown', H.gridX(), y, 1);
+     H.mouse(document, 'mouseup', H.gridX(), y, 0);
+     H.q('#schedule-grid').dispatchEvent(new MouseEvent('click', {
+       bubbles: true, cancelable: true, clientX: H.gridX(), clientY: y }));
+     await H.sleep(300);
+     const popup = !!H.q('.sched-quick-entry');
+     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+     await H.resetDay();
+     return JSON.stringify({ bandOnBlock, popup })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.bandOnBlock === false && d.popup === true;
+    },
+  );
+
+  await check(
+    'Delete asks before removing more than one, and names what it holds',
+    `await H.resetDay();
+     const at = (hh) => { const d = new Date(); d.setHours(hh, 0, 0, 0); return d.getTime(); };
+     await window.joggl.days.save(H.todayKey(), [
+       { id: 'del-a', issueKey: 'GEN-1', issueId: null, title: 'One', startTs: at(9),
+         endTs: at(10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       { id: 'del-b', issueKey: 'GEN-2', issueId: null, title: 'Two', startTs: at(11),
+         endTs: at(12), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+     ]);
+     await window.__jogglTest.reloadDay();
+     for (const id of ['del-a', 'del-b']) {
+       H.q('.sched-entry-block[data-id="' + id + '"]').dispatchEvent(
+         new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+     }
+     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
+     await H.until(() => !H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the confirmation');
+     const title = H.q('#modal-title').textContent;
+     const buttons = H.all('#modal-buttons button').map(b => b.textContent);
+     const body = H.q('#modal-body').textContent;
+     H.all('#modal-buttons button').find(b => b.textContent === 'Cancel').click();
+     await H.until(() => H.q('#modal-overlay').classList.contains('hidden'), 3000, 'the modal to close');
+     await H.sleep(200);
+     const stillThere = (await window.joggl.days.get(H.todayKey())).entries.length;
+     await H.resetDay();
+     return JSON.stringify({ title, buttons, body, stillThere })`,
+    (v) => {
+      const d = JSON.parse(v);
+      // Nothing synced here, so there is no Jira button to offer — and Cancel must
+      // leave both entries exactly where they were.
+      return /Delete 2 entries/.test(d.title) && d.stillThere === 2 &&
+        d.buttons.includes('Remove here only') &&
+        !d.buttons.includes('Delete in Jira too') &&
+        /None of these has reached Jira/.test(d.body);
+    },
+  );
+
+  await check(
+    '“Remove here only” takes the selection off every day it spans, and touches Jira on none',
+    `H.q('.sidebar-item[data-view="week"]').click();
+     await H.until(() => !H.q('#view-week').hidden, 8000, 'the week view');
+     await H.settle();
+     try {
+       const a = H.colDay(0), b = H.colDay(1);
+       const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+       await window.joggl.days.save(a, [
+         { id: 'dm-a1', issueKey: 'GEN-1', issueId: null, title: 'Going', startTs: on(a, 9),
+           endTs: on(a, 10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+         { id: 'dm-a2', issueKey: 'GEN-1', issueId: null, title: 'Staying', startTs: on(a, 14),
+           endTs: on(a, 15), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       ]);
+       await window.joggl.days.save(b, [
+         { id: 'dm-b1', issueKey: 'GEN-2', issueId: null, title: 'Going too', startTs: on(b, 9),
+           endTs: on(b, 10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+       ]);
+       await window.__jogglTest.reloadDay();
+       await H.until(() => !!H.q('.sched-entry-block[data-id="dm-b1"]'), 4000, 'the seeded blocks');
+       const before = window.__jogglTest.jiraReads;
+       for (const id of ['dm-a1', 'dm-b1']) {
+         H.q('.sched-entry-block[data-id="' + id + '"]').dispatchEvent(
+           new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+       }
+       document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
+       await H.until(() => !H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the confirmation');
+       H.all('#modal-buttons button').find(t => t.textContent === 'Remove here only').click();
+       await H.until(() => H.q('#modal-overlay').classList.contains('hidden'), 4000, 'the modal to close');
+       await H.sleep(500);
+       const leftA = (await window.joggl.days.get(a)).entries.map(e => e.id);
+       const leftB = (await window.joggl.days.get(b)).entries.map(e => e.id);
+       const selected = H.all('.sched-entry-block.is-selected').length;
+       await H.clearDays([a, b]);
+       return JSON.stringify({ leftA, leftB, selected, before, after: window.__jogglTest.jiraReads });
+     } finally {
+       H.q('.sidebar-item[data-view="day"]').click();
+       await H.until(() => !H.q('#view-day').hidden, 8000, 'the day view');
+     }`,
+    (v) => {
+      const d = JSON.parse(v);
+      // `before === after` is the "touches Jira on none" half of this check's title —
+      // a local-only removal must not move the read counter at all.
+      return JSON.stringify(d.leftA) === JSON.stringify(['dm-a2']) &&
+        JSON.stringify(d.leftB) === JSON.stringify([]) &&
+        d.selected === 0 &&
+        d.after === d.before;
+    },
+  );
 }
 
 async function syncButton() {
@@ -2077,10 +2732,10 @@ async function help() {
       const d = JSON.parse(v);
       // Every binding the app actually has must appear, or the help is a lie. Exact
       // counts, not a floor: a floor still passes if an entire group is deleted, as
-      // long as what's left clears the bar — see SHORTCUTS in help.js for the 7
-      // groups / 24 rows this counts.
+      // long as what's left clears the bar — see SHORTCUTS in help.js for the 8
+      // groups / 33 rows this counts.
       const wanted = ['Ctrl + L', 'Ctrl + Enter', 'F1', 'T', '[ or ]', 'Page Up / Page Down'];
-      return d.groups.length === 7 && d.rows === 24 &&
+      return d.groups.length === 8 && d.rows === 33 &&
         wanted.every((k) => d.keys.includes(k)) &&
         /Manual Jira entry/.test(d.text) && /Work description/.test(d.text);
     },
@@ -2097,6 +2752,22 @@ async function help() {
     (v) => {
       const d = JSON.parse(v);
       return d.hasGroup && d.hasToggle;
+    },
+  );
+
+  await check(
+    'help: selecting and copying has its own bindings',
+    `H.q('#help-btn').click(); await H.sleep(200);
+     const groups = H.all('#help-shortcuts .help-keys-group th').map(t => t.textContent);
+     const keys = H.all('#help-shortcuts kbd').map(k => k.textContent);
+     const text = H.q('#help-overlay').textContent;
+     H.q('#close-help').click(); await H.sleep(150);
+     return JSON.stringify({ hasGroup: groups.includes('Selecting and copying'),
+                             hasKeys: ['Ctrl + A', 'Ctrl + C', 'Ctrl + V', 'Delete'].every(k => keys.includes(k)),
+                             saysEnclose: /encloses it/.test(text) })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.hasGroup && d.hasKeys && d.saysEnclose;
     },
   );
 }

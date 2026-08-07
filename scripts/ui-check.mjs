@@ -1424,6 +1424,115 @@ async function weekView() {
         d.arrived.length === 1 && d.arrived[0].id !== 'ctrl-drag' && d.arrived[0].worklogId === null;
     },
   );
+
+  await check(
+    'week: pasting onto a day never loaded this session merges with what is already there',
+    inWeek(`const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+            // Plain string math on YYYY-MM-DD: no DST edge here, just enough distance
+            // to land outside the displayed week. Native Date avoided on purpose —
+            // this runs inside the page, not through renderer/js/util.js.
+            const addDays = (key, n) => {
+              const d = new Date(key + 'T00:00:00');
+              d.setDate(d.getDate() + n);
+              const p = (x) => String(x).padStart(2, '0');
+              return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+            };
+            // anchor and second are both on screen, four columns apart — the most a
+            // 5-day week allows. Pasting anchored on "second" lands second's own copy
+            // four days past it, which is Tuesday of *next* week: a day the app can
+            // never have loaded, since the next-week arrow is disabled from "this
+            // week" onward and nothing else reaches forward in time.
+            const anchor = H.colDay(0), second = H.colDay(4), target = second;
+            const farDay = addDays(second, 4);
+            await window.joggl.days.save(anchor, [
+              { id: 'ld-a', issueKey: 'GEN-1', issueId: null, title: 'A', startTs: on(anchor, 9),
+                endTs: on(anchor, 10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+            ]);
+            await window.joggl.days.save(second, [
+              { id: 'ld-b', issueKey: 'GEN-1', issueId: null, title: 'B', startTs: on(second, 9),
+                endTs: on(second, 10), status: 'pending', worklogId: null, comment: null, errorMsg: null },
+            ]);
+            // Written straight to disk and never read into this session — no
+            // reloadDay call for farDay, and it is outside the week the initial
+            // mount loaded. This is the entry that must survive the paste.
+            await window.joggl.days.save(farDay, [
+              { id: 'already-there', issueKey: 'GEN-2', issueId: null, title: 'Pre-existing',
+                startTs: on(farDay, 8), endTs: on(farDay, 9), status: 'pending', worklogId: null,
+                comment: null, errorMsg: null },
+            ]);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('.sched-entry-block[data-id="ld-b"]'), 4000, 'the seeded blocks');
+            for (const id of ['ld-a', 'ld-b']) {
+              H.q('.sched-entry-block[data-id="' + id + '"]').dispatchEvent(
+                new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+            }
+            const press = (key) => document.body.dispatchEvent(new KeyboardEvent('keydown', {
+              key, ctrlKey: true, bubbles: true, cancelable: true }));
+            press('c');
+            H.q('.week-colhead[data-day="' + target + '"]').click();
+            await H.until(() => H.q('.week-colhead.is-selected')?.dataset.day === target,
+              4000, 'the target day to become the anchor');
+            await H.settle();
+            // Cleared rather than diffed by count: an older toast can hit its own
+            // auto-dismiss timer in the middle of this check and vanish on its own,
+            // which shifts a slice-by-index read onto the wrong element entirely.
+            H.all('.toast').forEach(t => t.remove());
+            press('v');
+            await H.sleep(600);
+            const toastText = H.all('.toast').map(t => t.textContent).join(' | ');
+            const onFarDay = (await window.joggl.days.get(farDay)).entries.map(e => e.id);
+            const onTarget = (await window.joggl.days.get(target)).entries.map(e => e.id);
+            await H.clearDays([anchor, second, farDay]);
+            await H.goToday();
+            return JSON.stringify({ onFarDay, onTarget, toastText });`),
+    (v) => {
+      const d = JSON.parse(v);
+      // The pre-existing row on the never-loaded day survived, alongside the copy
+      // that landed there — not overwritten by it. And since that day is always
+      // later than today, the toast says so rather than staying silent about it.
+      return d.onFarDay.includes('already-there') && d.onFarDay.length === 2 &&
+        d.onTarget.includes('ld-b') && d.onTarget.length === 2 &&
+        /dated after today/i.test(d.toastText);
+    },
+  );
+
+  await check(
+    'week: Ctrl+drag copies a Jira-side block instead of refusing it',
+    inWeek(`const ext = H.q('.week-col .sched-entry-block.external');
+            if (!ext) return JSON.stringify({ skip: true });
+            const originalId = ext.dataset.id, fromDay = ext.dataset.day;
+            const heads = H.all('.week-colhead');
+            const fromIdx = heads.findIndex(h => h.dataset.day === fromDay);
+            const toIdx = fromIdx === 0 ? 1 : 0;
+            const to = heads[toIdx].dataset.day;
+            await window.joggl.days.save(to, []);
+            const box = ext.getBoundingClientRect();
+            const targetBox = H.all('.week-col')[toIdx].getBoundingClientRect();
+            const sx = Math.round(box.left + 10), sy = Math.round(box.top + 8);
+            const tx = Math.round(targetBox.left + targetBox.width / 2);
+            ext.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true,
+              button: 0, buttons: 1, clientX: sx, clientY: sy, ctrlKey: true }));
+            for (let i = 1; i <= 5; i++) {
+              H.mouse(document, 'mousemove', Math.round(sx + (tx - sx) * i / 5), sy, 1);
+            }
+            H.mouse(document, 'mouseup', tx, sy, 0);
+            await H.sleep(500);
+            // The plain-drag refusal ("made in Jira — change it there") must not fire
+            // for a copy: nothing on the original is touched, so there is nothing for
+            // it to protect.
+            const warned = H.all('.toast').some(t => /made in Jira/i.test(t.textContent));
+            const arrived = (await window.joggl.days.get(to)).entries.map(e => ({
+              id: e.id, worklogId: e.worklogId, status: e.status }));
+            await H.clearDays([to]);
+            return JSON.stringify({ warned, arrived, originalId });`),
+    (v) => {
+      const d = JSON.parse(v);
+      if (d.skip) return 'skipped';
+      return d.warned === false && d.arrived.length === 1 &&
+        d.arrived[0].id !== d.originalId && d.arrived[0].worklogId === null &&
+        d.arrived[0].status === 'pending';
+    },
+  );
 }
 
 async function quickEntry() {

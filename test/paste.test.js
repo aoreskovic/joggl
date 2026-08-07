@@ -85,6 +85,30 @@ test('a whole week pasted onto a Monday reproduces the week', () => {
 });
 
 /**
+ * No target ever lands before the day pasted onto — a day-key comparison holds the
+ * same order as calendar order, since YYYY-MM-DD sorts lexicographically exactly like
+ * it sorts chronologically. This is the property `pasteClipboard` in copy-day.js
+ * leans on to know a target beyond the first can only ever be a day *forward* of one
+ * already on screen, never one already loaded for some other reason — which is what
+ * makes "load it before merging" the whole fix rather than a partial one.
+ */
+test('no target lands earlier than the day pasted onto', () => {
+  const clip = clipboardFrom([
+    item('mon', '2026-08-03', 9),
+    item('wed', '2026-08-05', 9),
+    item('fri', '2026-08-07', 9),
+  ]);
+  const plan = pastePlan(clip, '2026-08-10', ids());
+  assert.ok(plan.every((p) => p.dayKey >= '2026-08-10'));
+
+  // Pasting a day onto itself is the degenerate case: the earliest (and only) item
+  // anchors with a zero offset, so the single target is exactly the day pasted onto,
+  // never earlier.
+  const single = clipboardFrom([item('a', '2026-08-03', 9)]);
+  assert.deepEqual(pastePlan(single, '2026-08-03', ids()).map((p) => p.dayKey), ['2026-08-03']);
+});
+
+/**
  * duplicateOf's promise, reached through copiedToDay: carrying the original's
  * worklogId across would make the next Sync rewrite that one worklog with the copy's
  * times, overwriting the original's record and never giving the copy one of its own.

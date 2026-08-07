@@ -103,21 +103,28 @@ const CLICK_TAIL_MS = 200;
 export function onMoveBlock(event, entry, dayKey) {
   event.preventDefault();
   event.stopPropagation();
-  if (locked(entry)) return;
 
   /**
    * Ctrl turns the move into a copy.
    *
-   * The gesture then runs on a duplicate that is in no day log at all, so the
-   * original is never touched and the drop is an insert rather than a move. The
-   * element under the cursor is still the original's — there is nothing else to
-   * drag — so it wears `copying` and springs back when the commit re-renders, which
-   * is the honest picture: what is being placed is a copy of it.
+   * Decided before the lock check, not after. `locked` exists to stop a *move*: an
+   * external block is Jira's own record, and dragging it would misrepresent
+   * something Joggl never created as having changed time. A copy never touches that
+   * record — the gesture runs on a duplicate that is in no day log at all, so the
+   * original is never mutated and the drop is an insert — so there is nothing left
+   * for `locked` to protect, and refusing it anyway would only make drag disagree
+   * with Ctrl+C/Ctrl+V, which already lets `copySelection` take an external row
+   * through `findEntry` (it searches `state.external` too) and hand back an
+   * ordinary Joggl entry. The element under the cursor is still the original's —
+   * there is nothing else to drag — so it wears `copying` and springs back when the
+   * commit re-renders, which is the honest picture: what is being placed is a copy
+   * of it.
    *
    * The copy carries no worklogId, exactly as Ctrl+C/Ctrl+V and *Duplicate* produce,
    * so the next Sync logs it as new work rather than rewriting the original's.
    */
   const copying = event.ctrlKey || event.metaKey;
+  if (!copying && locked(entry)) return;
   const subject = copying ? duplicateOf(entry, uuid()) : entry;
 
   const origStart = subject.startTs;

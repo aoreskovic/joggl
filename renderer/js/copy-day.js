@@ -23,9 +23,9 @@ import { sortEntries } from './merge.js';
 import { askModal } from './modal.js';
 import { renderAll } from './render.js';
 import { selectedIds } from './selection.js';
-import { entriesFor, findEntry, loadDays, persistDayNow, setEntriesFor, state } from './state.js';
+import { entriesFor, findEntry, loadDays, persistDayNow, readDay, setEntriesFor, state } from './state.js';
 import { toast, toastErr, toastOk } from './toast.js';
-import { addDays, esc, formatDateLabel, msToDur } from './util.js';
+import { addDays, esc, formatDateLabel, msToDur, todayKey } from './util.js';
 
 /**
  * Pull the whole lookback window in one go, then answer from it.
@@ -278,10 +278,26 @@ export function copySelection() {
  * column head sets and what the day view is showing. There is one answer in this app
  * to "which day is this about" and this is it.
  *
- * Every day's result is written to memory before any write to disk is attempted, for
- * the reason `clearWeek` gives: whatever happens next, the screen ends up showing
- * what memory holds, and a `persistDayNow` that throws partway through risks only
- * that one day's paste not surviving a restart.
+ * Every target beyond the first lands later than `target`: `pastePlan` anchors the
+ * clipboard's earliest day onto it and keeps every other day's offset, and that
+ * offset is never negative by construction. That day is not necessarily one the app
+ * has ever read this session — the week view only loads the week around
+ * `state.selectedDate`, so a two-day selection pasted near the end of a visible week
+ * routinely puts its second day in the week after, one nothing has fetched. `entriesFor`
+ * answers `[]` for a day never loaded — the same shape as a day that is genuinely
+ * empty on disk — and `persistDayNow` writes the whole file from whatever is in
+ * memory. Merging into that stand-in and saving would silently overwrite the real
+ * contents of a day nobody looked at with only the pasted entries, unrecoverably. So
+ * every target is loaded first, before anything is merged into it — `clearWeek`'s
+ * "write memory before disk" reasoning, reused just below, does not by itself make
+ * this safe, because that promise only holds once memory already agrees with disk,
+ * which for a day never visited it does not.
+ *
+ * Once every target is known to reflect disk, every day's result is written to
+ * memory before any write back to disk is attempted, for the reason `clearWeek`
+ * gives: whatever happens next, the screen ends up showing what memory holds, and a
+ * `persistDayNow` that throws partway through risks only that one day's paste not
+ * surviving a restart.
  */
 export async function pasteClipboard(target = state.selectedDate) {
   if (!clipboard) {
@@ -290,16 +306,32 @@ export async function pasteClipboard(target = state.selectedDate) {
   }
 
   const plan = pastePlan(clipboard, target);
+
+  for (const { dayKey } of plan) {
+    if (!state.days.has(dayKey)) {
+      const day = await readDay(dayKey);
+      setEntriesFor(dayKey, day.entries);
+    }
+  }
+
   for (const { dayKey, entries } of plan) {
     setEntriesFor(dayKey, sortEntries([...entriesFor(dayKey), ...entries]));
   }
 
   const count = plan.reduce((sum, p) => sum + p.entries.length, 0);
+  // The calendar only looks backwards, so a day after today cannot be reached by
+  // navigation until it arrives — an entry landed there is real but invisible until
+  // then. Legitimate here (leave, a meeting already in the diary), so it is allowed
+  // and said, never silent.
+  const futureCount = plan
+    .filter((p) => p.dayKey > todayKey())
+    .reduce((sum, p) => sum + p.entries.length, 0);
   try {
     for (const { dayKey } of plan) await persistDayNow(dayKey);
     toastOk(
       `${plural(count)} pasted onto ${formatDateLabel(target)}` +
         (plan.length > 1 ? ` and ${plan.length - 1} more day${plan.length === 2 ? '' : 's'}` : '') +
+        (futureCount > 0 ? `, ${plural(futureCount)} dated after today` : '') +
         '. They arrive unsynced — nothing reaches Jira until you press Sync.',
     );
   } catch (err) {

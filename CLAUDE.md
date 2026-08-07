@@ -102,9 +102,10 @@ been exercised end to end, not just written.
 | Finish Day | Confirmed against real Jira — worklog `60504` on `EHW-70` |
 | Jira-side worklogs | Time logged in the Jira web UI is read back and counted |
 | Logging | `logs/joggl.log`, credential-redacted |
-| Tests | 334 passing, `npm test`; 99 UI checks, `npm run uicheck` (or `:fast`) |
+| Tests | 371 passing, `npm test`; 115 UI checks, `npm run uicheck` (or `:fast`) |
 | Shell | Collapsible sidebar with a view registry; week and month tabs present but disabled |
 | Week view | Five or seven day columns sharing one hour range; everything a day column can do, plus dragging between days, a per-column menu, and one Sync for the week |
+| Selecting | Several entries at once — Ctrl+click, a rubber band, Ctrl+A — then copy, paste onto another day keeping every offset, or delete together |
 | Drag to day view | An issue dragged from the task list becomes a 30-minute pending entry |
 | Keyboard | Every list arrow-navigable, every menu and dialog reachable — see below |
 | Help | A panel above Settings: what the app is for, and every shortcut, built from one list |
@@ -182,10 +183,11 @@ a reason.
 
 ### Next, roughly in order
 
-1. **Month view** — phase 4 of the sidebar work. A calendar grid with hours logged per
-   day, and the day view beside it showing whichever day was clicked. Everything it
-   needs is now in: the range data layer, the shared timeline geometry, the column map
-   and the view registry with its `onDayChange` hook.
+1. **Month view** — the last phase of the sidebar work. A calendar grid with hours logged
+   per day, and the day view beside it showing whichever day was clicked. Everything it
+   needs is now in: the range data layer, the shared timeline geometry, the column map,
+   the view registry with its `onDayChange` hook, and the selection model — a month is
+   where "select a week and paste it onto the next one" is most useful.
 2. **Tray icon states** — the icon should show at a glance whether a timer is running.
    Right now the only signal is opening the window.
 3. **A global start/stop shortcut** — Ctrl+Enter starts and stops from inside the
@@ -238,6 +240,13 @@ three, which is why the rule is enforced in the helper and not left to each call
 | `PageUp` `PageDown` | anywhere, not while typing | A week back or forward. Forward past today lands on today |
 | `PageUp` `PageDown` | inside the calendar | A month, since `↑` `↓` already move a week and nothing else there changes the month |
 | `↑` `↓` `Home` `End` | any list | Move the highlight, wrapping at both ends |
+| `Ctrl+click` | a row or block | Add it to the selection, or take it out |
+| Drag on empty grid | either grid | A rubber band. It catches a block when the box encloses it, not when it crosses it |
+| `Ctrl+A` | anywhere, not while typing | Select everything on screen |
+| `Ctrl+C` `Ctrl+V` | anywhere, not while typing | Copy the selection; paste onto the marked day, keeping every offset |
+| `Ctrl+drag` | a block | Copy it rather than move it |
+| `Delete` | anywhere, not while typing | Delete the selection. More than one asks first |
+| `←` `→` | either grid | Move between columns; `↑` `↓` move within one, in time order |
 | `Enter` | any list | Run the highlighted row, or fall back to that list's own Enter |
 | `Enter`, `Shift+F10`, Menu key | a focused row | Open its context menu. Shift+F10 needs no code — the browser dispatches `contextmenu` on the focused element, so `anchorFor` only has to notice the event carries no coordinates and anchor to the row instead |
 | `F1` | anywhere | Open and close Help |
@@ -271,11 +280,13 @@ block or a row did nothing at all.
 | Time fields, ▶, 🗑 | Their own | Their own — a double click selects the text |
 | A **Manual Jira entry** | Select it | The refusal it already gives |
 
-**Selection is not focus.** `state.selectedEntryId` marks one entry in *both* panels at
-once, which is the point: with overlap columns it is otherwise unclear which block is
-which row. Focus is per-panel, invisible in the other one, and moves away the moment
-you type; the selection stays until Escape, a click on empty space, a day change, or
-the entry being deleted. The arrow keys carry it, so keyboard and mouse agree.
+**Selection is not focus, and it is a set.** `state.selectedEntryIds` marks entries in
+*both* panels at once, which is the point: with overlap columns it is otherwise unclear
+which block is which row. A plain click selects one, Ctrl+click adds or removes one, a
+band on empty grid takes what it encloses, Ctrl+A takes everything on screen. Focus is
+per-panel, invisible in the other one, and moves away the moment you type; the selection
+stays until Escape, a click on empty space, a day change, or the entries being deleted.
+The arrow keys carry it, so keyboard and mouse agree.
 
 Three things shape the implementation, and each of them was a bug first:
 
@@ -344,6 +355,44 @@ has not changed, only when the work started, so the entry returns to `pending` a
 next Sync rewrites the worklog with `PUT`. That is the same rule a move within a day
 already followed. Retargeting still refuses, because that one changes the issue, and a
 worklog id is only valid on the issue it was created against.
+
+---
+
+## Selecting, copying, deleting
+
+**Enclosure, not intersection.** A block spans the whole width of its column, so a band
+drawn down a column crosses every block it passes; catching what it merely touched would
+mean a short drag selected the day. The band also refuses to start on a block — a press
+there is already a move gesture, and the two would fight over one mousedown — and the
+click a finished band produces is suppressed, or the grid's own click would clear the
+selection a frame after the band made it.
+
+**One rule covers every paste.** The earliest day in the selection is anchored onto the
+target day and every offset is kept, in days as well as on the clock. So one day's blocks
+pasted onto another arrive at the same times; Tuesday and Thursday pasted onto Wednesday
+arrive on Wednesday and Friday; a whole week pasted onto a Monday reproduces the week. The
+target is `state.selectedDate` — there is one answer in this app to "which day is this
+about". Times are rebased through `copiedToDay`, as an offset from local midnight, and the
+day arithmetic is `Math.round`, never a floor: one of the days in between can be 25 hours
+long.
+
+**A copy carries no worklog.** `duplicateOf` is the one rule, whether the copy came from
+Ctrl+V, Ctrl+drag, *Duplicate* or *Copy previous day* — carrying the original's id across
+would make the next Sync rewrite that one worklog with the copy's times, overwriting the
+original's record and never giving the copy one of its own. A copy of a Jira-side row
+becomes an ordinary entry of Joggl's own.
+
+**A failed Jira delete leaves the entry here.** The batch delete offers to remove the
+worklogs too, one at a time, and an entry whose DELETE failed **stays**, carrying the
+error, with a summary and **Retry failed**. It still stands for time that is really logged
+in Jira, and removing the row would hide it — the exact failure the single delete's modal
+exists to prevent. A Jira-side row is never deleted at all: it may be selected and copied,
+but it is not Joggl's record.
+
+**An entry action finds the day the entry is on.** `findEntry` searches every day loaded,
+because a gesture in the week view is routinely about a day that is not the marked one —
+and until 0.18.1 every action looked its entry up in the selected day and silently did
+nothing anywhere else.
 
 ---
 

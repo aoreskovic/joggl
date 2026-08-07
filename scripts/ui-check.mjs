@@ -2732,10 +2732,10 @@ async function help() {
       const d = JSON.parse(v);
       // Every binding the app actually has must appear, or the help is a lie. Exact
       // counts, not a floor: a floor still passes if an entire group is deleted, as
-      // long as what's left clears the bar — see SHORTCUTS in help.js for the 7
-      // groups / 24 rows this counts.
+      // long as what's left clears the bar — see SHORTCUTS in help.js for the 8
+      // groups / 33 rows this counts.
       const wanted = ['Ctrl + L', 'Ctrl + Enter', 'F1', 'T', '[ or ]', 'Page Up / Page Down'];
-      return d.groups.length === 7 && d.rows === 24 &&
+      return d.groups.length === 8 && d.rows === 33 &&
         wanted.every((k) => d.keys.includes(k)) &&
         /Manual Jira entry/.test(d.text) && /Work description/.test(d.text);
     },
@@ -2752,6 +2752,22 @@ async function help() {
     (v) => {
       const d = JSON.parse(v);
       return d.hasGroup && d.hasToggle;
+    },
+  );
+
+  await check(
+    'help: selecting and copying has its own bindings',
+    `H.q('#help-btn').click(); await H.sleep(200);
+     const groups = H.all('#help-shortcuts .help-keys-group th').map(t => t.textContent);
+     const keys = H.all('#help-shortcuts kbd').map(k => k.textContent);
+     const text = H.q('#help-overlay').textContent;
+     H.q('#close-help').click(); await H.sleep(150);
+     return JSON.stringify({ hasGroup: groups.includes('Selecting and copying'),
+                             hasKeys: ['Ctrl + A', 'Ctrl + C', 'Ctrl + V', 'Delete'].every(k => keys.includes(k)),
+                             saysEnclose: /encloses it/.test(text) })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return d.hasGroup && d.hasKeys && d.saysEnclose;
     },
   );
 }

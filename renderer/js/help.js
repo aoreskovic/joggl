@@ -41,6 +41,20 @@ export const SHORTCUTS = [
     ],
   },
   {
+    group: 'Selecting and copying',
+    keys: [
+      ['Click', 'Select one entry — marked in every panel it appears in'],
+      ['Ctrl + click', 'Add one to the selection, or take it out again'],
+      ['Drag on empty grid', 'A rubber band. It catches a block when the box encloses it, not when it merely crosses it'],
+      ['Ctrl + A', 'Select everything on screen — the week, or the day'],
+      ['Ctrl + C', 'Copy the selection'],
+      ['Ctrl + V', 'Paste onto the marked day, keeping every offset — in days as well as on the clock'],
+      ['Ctrl + drag', 'Copy a block instead of moving it'],
+      ['Delete', 'Delete the selection. More than one asks first, and says what is already in Jira'],
+      ['← →', 'Move between columns; ↑ ↓ move within one'],
+    ],
+  },
+  {
     group: 'In any list',
     keys: [
       ['↑ ↓', 'Move the highlight, wrapping at both ends'],

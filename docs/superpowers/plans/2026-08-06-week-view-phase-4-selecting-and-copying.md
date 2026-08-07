@@ -2237,7 +2237,7 @@ export function planDeletion(items) {
 - [ ] **Step 4: Run it and watch it pass**
 
 Run: `npm test`
-Expected: PASS — 370 (365 + 5).
+Expected: PASS — 371 (366 + 5).
 
 - [ ] **Step 5: Write the batch delete**
 
@@ -2567,10 +2567,10 @@ In `scripts/ui-check.mjs`, append to `clicks()`. **Neither presses "Delete in Ji
 - [ ] **Step 8: Verify**
 
 Run: `npm test`
-Expected: PASS — 370.
+Expected: PASS — 371.
 
 Run: `npm run uicheck:fast`
-Expected: PASS — 112 of 112.
+Expected: PASS — 114 of 114.
 
 - [ ] **Step 9: Commit**
 
@@ -2706,12 +2706,12 @@ In `test-and-issues.md`, add a section after **Week view**:
 and correct the two stale numbers in the file's header, which have been wrong since 0.17.0 — `283` tests and `85` checks in the opening paragraphs and in *Running it*, and the *Last full pass* line:
 
 ```markdown
-**Last full pass: 2026-08-06, 113 checks.** Against the live Jira and against fixtures,
-both **113 passed, 0 failed**. Both report the same total, which is the only thing
+**Last full pass: 2026-08-07, 115 checks.** Against the live Jira and against fixtures,
+both **115 passed, 0 failed**. Both report the same total, which is the only thing
 keeping `main/jira/fake.js` honest.
 ```
 
-Replace the counts in *Running it* and in *The script* with `npm test # 370 tests` and `113 checks`. Read the numbers off the runs in step 6 rather than trusting these.
+Replace the counts in *Running it* and in *The script* with `npm test # 371 tests` and `115 checks`. Read the numbers off the runs in step 6 rather than trusting these.
 
 - [ ] **Step 5: Update CLAUDE.md**
 
@@ -2726,7 +2726,7 @@ Four edits.
 **b.** In the same table, update the counts to what the runs report:
 
 ```markdown
-| Tests | 370 passing, `npm test`; 113 UI checks, `npm run uicheck` (or `:fast`) |
+| Tests | 371 passing, `npm test`; 115 UI checks, `npm run uicheck` (or `:fast`) |
 ```
 
 **c.** In *Clicking*, extend the opening so it is not left saying there is one selection:
@@ -2813,10 +2813,10 @@ Expected: `0.18.1` → `0.19.0`. A change bumps the minor; this is the one commi
 - [ ] **Step 7: Verify everything**
 
 Run: `npm test`
-Expected: PASS — 370.
+Expected: PASS — 371.
 
 Run: `npm run uicheck:fast`
-Expected: PASS — 113 of 113. **Record the number it reports** and make sure `CLAUDE.md` and `test-and-issues.md` say that number and not a stale one.
+Expected: PASS — 115 of 115. **Record the number it reports** and make sure `CLAUDE.md` and `test-and-issues.md` say that number and not a stale one.
 
 Run: `npm run uicheck`
 Expected: the same number, passing. This is the merge gate — the live and fixture runs reporting the same counts is the only thing keeping `main/jira/fake.js` honest. If it fails at startup with *401 from Jira — your email or API token is wrong or expired*, that is the development token, not this branch: report it and stop rather than merging on the fast run alone.

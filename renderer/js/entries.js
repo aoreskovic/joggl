@@ -482,7 +482,9 @@ export async function deleteSelection() {
   if (plan.removable.length === 0) {
     toastWarn(
       plan.external.length > 0
-        ? 'Those worklogs were made in Jira — delete them there.'
+        ? plan.external.length === 1
+          ? 'This worklog was made in Jira — delete it there.'
+          : 'Those worklogs were made in Jira — delete them there.'
         : 'Nothing selected to delete.',
     );
     return;

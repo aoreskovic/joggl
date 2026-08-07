@@ -2615,9 +2615,12 @@ async function clicks() {
      }`,
     (v) => {
       const d = JSON.parse(v);
+      // `before === after` is the "touches Jira on none" half of this check's title —
+      // a local-only removal must not move the read counter at all.
       return JSON.stringify(d.leftA) === JSON.stringify(['dm-a2']) &&
         JSON.stringify(d.leftB) === JSON.stringify([]) &&
-        d.selected === 0;
+        d.selected === 0 &&
+        d.after === d.before;
     },
   );
 }

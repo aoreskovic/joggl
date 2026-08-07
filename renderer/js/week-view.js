@@ -18,7 +18,7 @@ import { applySelection, select } from './selection.js';
 import { activeView, registerView } from './shell.js';
 import { isSyncRunning } from './sync.js';
 import { pxPerMin, refreshRange, saveUi, state, visibleEntriesFor } from './state.js';
-import { blockNavResolver, onGridClick, paintDayColumn } from './timeline.js';
+import { blockNavResolver, onGridClick, onGridDblClick, paintDayColumn } from './timeline.js';
 import { setColumns } from './timeline-columns.js';
 import { computeRange, grid, gridHeightPx, offsetPxOf, setGrid } from './timeline-geometry.js';
 import { isWeekend, msToDur, pad, startOfDay, todayKey } from './util.js';
@@ -44,7 +44,7 @@ let rovingBlocks = null;
 function roving() {
   rovingBlocks ??= wireRovingList({
     container: () => $('week-scroll'),
-    rowSelector: '.sched-entry-block:not(.live)',
+    rowSelector: '.sched-entry-block:not(.live):not(.ghost)',
     onMove: (block) => select(block.dataset.id),
     resolve: blockNavResolver,
   });
@@ -152,6 +152,11 @@ export function renderWeek() {
   let drawn = 0;
   for (const [i, day] of days.entries()) {
     if (tint && isWeekend(day)) columns[i].classList.add('is-weekend');
+    // The anchor day, marked down the whole column and not only in its head — the
+    // head is off the top of the screen as soon as the grid is scrolled, and this is
+    // the day a paste lands on. A class of its own, not `is-selected`: that one means
+    // "this entry is selected" everywhere it is queried.
+    if (day === anchor) columns[i].classList.add('is-anchor-day');
     drawn += paintDayColumn(columns[i], day, { showLabels: false, emptyHint: false });
   }
 
@@ -293,7 +298,9 @@ export function wireWeekControls({ onZoom, onSync }) {
   $('week-zoom-in').addEventListener('click', () => onZoom(1));
   $('week-zoom-out').addEventListener('click', () => onZoom(-1));
 
-  // Clicking an empty hour, in whichever column it was: onGridClick asks columnAt,
-  // so it writes to the day the click landed in and not the day that is selected.
+  // Clicking an empty hour marks that column's day; double-clicking it opens the
+  // quick entry there. Both ask columnAt, so they answer for the day the pointer was
+  // over and not for the day that happens to be selected.
   $('week-scroll').addEventListener('click', onGridClick);
+  $('week-scroll').addEventListener('dblclick', onGridDblClick);
 }

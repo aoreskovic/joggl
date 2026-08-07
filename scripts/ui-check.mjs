@@ -1021,10 +1021,10 @@ async function weekView() {
   );
 
   await check(
-    'week: clicking an empty hour opens the popup for that column’s day',
+    'week: double-clicking an empty hour opens the popup for that column’s day',
     inWeek(`const col = H.all('.week-col')[2], day = H.colDay(2);
             const box = col.getBoundingClientRect();
-            H.mouse(col, 'click', Math.round(box.left + box.width / 2), Math.round(box.top + 160));
+            H.mouse(col, 'dblclick', Math.round(box.left + box.width / 2), Math.round(box.top + 160));
             await H.until(() => !!H.q('.sched-quick-entry'), 4000, 'the quick-entry popup');
             const input = H.q('.sched-quick-entry input');
             input.value = 'week popup entry';
@@ -1426,6 +1426,205 @@ async function weekView() {
   );
 
   await check(
+    'week: Ctrl+drag leaves the original where it is and carries a ghost, and letting Ctrl go calls it off',
+    inWeek(`const from = H.colDay(0), to = H.colDay(3);
+            const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+            await window.joggl.days.save(from, [
+              { id: 'ghost-me', issueKey: 'GEN-1', issueId: null, title: 'Ghost me',
+                startTs: on(from, 10), endTs: on(from, 11), status: 'pending', worklogId: null,
+                comment: null, errorMsg: null },
+            ]);
+            await window.joggl.days.save(to, []);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('.sched-entry-block[data-id="ghost-me"]'), 4000, 'the seeded block');
+            const block = H.q('.sched-entry-block[data-id="ghost-me"]');
+            const box = block.getBoundingClientRect();
+            const target = H.all('.week-col')[3].getBoundingClientRect();
+            const sx = Math.round(box.left + 10), sy = Math.round(box.top + 8);
+            const tx = Math.round(target.left + target.width / 2);
+            block.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true,
+              button: 0, buttons: 1, clientX: sx, clientY: sy, ctrlKey: true }));
+            for (let i = 1; i <= 3; i++) {
+              H.mouse(document, 'mousemove', Math.round(sx + (tx - sx) * i / 3), sy, 1);
+            }
+            // Mid-gesture: the original is still in its own place and untouched, and
+            // what follows the cursor is a ghost of it. Read off the DOM while the
+            // mouse is still down — after the drop there is nothing left to see.
+            const original = H.q('.sched-entry-block[data-id="ghost-me"]:not(.ghost)');
+            const ghost = H.q('.sched-entry-block.ghost');
+            const midDrag = {
+              originalStillThere: !!original,
+              originalUntouched: original ? !original.classList.contains('dragging') : false,
+              originalWhere: original ? Math.round(original.getBoundingClientRect().left) : -1,
+              ghosts: H.all('.sched-entry-block.ghost').length,
+              ghostOpacity: ghost ? parseFloat(getComputedStyle(ghost).opacity) : 1,
+              ghostElsewhere: ghost ? Math.round(ghost.getBoundingClientRect().left) : -1,
+            };
+            // Ctrl is what made this a copy: letting it go withdraws the instruction.
+            document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Control', bubbles: true }));
+            await H.sleep(150);
+            const ghostAfterCancel = H.all('.sched-entry-block.ghost').length;
+            H.mouse(document, 'mouseup', tx, sy, 0);
+            await H.sleep(500);
+            const arrived = (await window.joggl.days.get(to)).entries.length;
+            const home = (await window.joggl.days.get(from)).entries
+              .map(e => ({ id: e.id, h: new Date(e.startTs).getHours() }));
+            await H.clearDays([from, to]);
+            return JSON.stringify({ midDrag, ghostAfterCancel, arrived, home });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.midDrag.originalStillThere && d.midDrag.originalUntouched &&
+        d.midDrag.ghosts === 1 && d.midDrag.ghostOpacity < 1 &&
+        d.midDrag.ghostElsewhere > d.midDrag.originalWhere &&
+        // Cancelled means cancelled: no ghost left over, nothing written on the day
+        // it was heading for, and the original still at its own hour.
+        d.ghostAfterCancel === 0 && d.arrived === 0 &&
+        d.home.length === 1 && d.home[0].id === 'ghost-me' && d.home[0].h === 10;
+    },
+  );
+
+  await check(
+    'week: Ctrl+drag carries the whole selection, keeping the shape it was in',
+    inWeek(`const a = H.colDay(0), b = H.colDay(1), toA = H.colDay(2), toB = H.colDay(3);
+            const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+            const seed = (id, day, hh) => ({ id, issueKey: 'GEN-1', issueId: null, title: 'Copy ' + id,
+              startTs: on(day, hh), endTs: on(day, hh + 1), status: 'pending', worklogId: null,
+              comment: null, errorMsg: null });
+            await window.joggl.days.save(a, [seed('sel-a', a, 9)]);
+            await window.joggl.days.save(b, [seed('sel-b', b, 11)]);
+            await window.joggl.days.save(toA, []);
+            await window.joggl.days.save(toB, []);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('.sched-entry-block[data-id="sel-b"]'), 4000, 'the seeded blocks');
+            // The real gesture both times: a Ctrl+click is a mousedown and a mouseup
+            // with Ctrl held, and the drag sees both before the click ever fires.
+            for (const id of ['sel-a', 'sel-b']) {
+              const el = H.q('.sched-entry-block[data-id="' + id + '"]');
+              const box = el.getBoundingClientRect();
+              const x = Math.round(box.left + 10), y = Math.round(box.top + 8);
+              el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true,
+                button: 0, buttons: 1, clientX: x, clientY: y, ctrlKey: true }));
+              H.mouse(document, 'mouseup', x, y, 0);
+              el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true,
+                clientX: x, clientY: y, ctrlKey: true }));
+              await H.sleep(150);
+            }
+            const selected = H.all('.sched-entry-block.is-selected').length;
+            const block = H.q('.sched-entry-block[data-id="sel-a"]');
+            const box = block.getBoundingClientRect();
+            const target = H.all('.week-col')[2].getBoundingClientRect();
+            const sx = Math.round(box.left + 10), sy = Math.round(box.top + 8);
+            const tx = Math.round(target.left + target.width / 2);
+            block.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true,
+              button: 0, buttons: 1, clientX: sx, clientY: sy, ctrlKey: true }));
+            for (let i = 1; i <= 5; i++) {
+              H.mouse(document, 'mousemove', Math.round(sx + (tx - sx) * i / 5), sy, 1);
+            }
+            // One ghost per selected block, read while the mouse is still down.
+            const ghosts = H.all('.sched-entry-block.ghost').length;
+            H.mouse(document, 'mouseup', tx, sy, 0);
+            await H.sleep(700);
+            const home = (await window.joggl.days.get(a)).entries.map(e => e.id)
+              .concat((await window.joggl.days.get(b)).entries.map(e => e.id));
+            const landedA = (await window.joggl.days.get(toA)).entries
+              .map(e => ({ h: new Date(e.startTs).getHours(), id: e.id, w: e.worklogId }));
+            const landedB = (await window.joggl.days.get(toB)).entries
+              .map(e => new Date(e.startTs).getHours());
+            await H.clearDays([a, b, toA, toB]);
+            return JSON.stringify({ selected, ghosts, home, landedA, landedB });`),
+    (v) => {
+      const d = JSON.parse(v);
+      return d.selected === 2 && d.ghosts === 2 &&
+        // Both originals stay where they were — a copy takes nothing away.
+        JSON.stringify(d.home) === JSON.stringify(['sel-a', 'sel-b']) &&
+        // The dragged block lands on the column under the cursor; the other keeps its
+        // day's offset from it, so a Monday/Tuesday pair arrives as a Wednesday/Thursday
+        // pair, at the same hours and carrying no worklog.
+        d.landedA.length === 1 && d.landedA[0].h === 9 && d.landedA[0].id !== 'sel-a' &&
+        d.landedA[0].w === null &&
+        JSON.stringify(d.landedB) === JSON.stringify([11]);
+    },
+  );
+
+  await check(
+    'week: a click on an empty column marks that day, opens nothing, and is where a paste lands',
+    inWeek(`const from = H.colDay(0), to = H.colDay(3);
+            const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
+            await window.joggl.days.save(from, [
+              { id: 'mark-src', issueKey: 'GEN-1', issueId: null, title: 'Paste me',
+                startTs: on(from, 9), endTs: on(from, 10), status: 'pending', worklogId: null,
+                comment: null, errorMsg: null },
+            ]);
+            await window.joggl.days.save(to, []);
+            await window.__jogglTest.reloadDay();
+            await H.until(() => !!H.q('.sched-entry-block[data-id="mark-src"]'), 4000, 'the seeded block');
+            const press = (key) => document.body.dispatchEvent(new KeyboardEvent('keydown', {
+              key, ctrlKey: true, bubbles: true, cancelable: true }));
+            H.click(H.q('.sched-entry-block[data-id="mark-src"]'));
+            await H.sleep(200);
+            press('c');
+
+            // An empty spot in the target column: a live site may have Jira-side rows
+            // anywhere, so probe down the column rather than trusting one y.
+            const colBox = H.all('.week-col')[3].getBoundingClientRect();
+            const x = Math.round(colBox.left + colBox.width / 2);
+            let y = null;
+            for (let probe = Math.round(colBox.top + 40); probe < colBox.bottom - 10; probe += 20) {
+              const el = document.elementFromPoint(x, probe);
+              if (el && !el.closest('.sched-entry-block') && !el.closest('.week-colhead')) { y = probe; break; }
+            }
+            if (y === null) return JSON.stringify({ skip: true });
+            H.q('#week-scroll').dispatchEvent(new MouseEvent('click', {
+              bubbles: true, cancelable: true, clientX: x, clientY: y }));
+            await H.until(() => H.q('.week-colhead.is-selected')?.dataset.day === to,
+              4000, 'the clicked day to become the anchor');
+            await H.settle();
+            const popup = !!H.q('.sched-quick-entry');
+            const marked = H.q('.week-col.is-anchor-day') ===
+              H.all('.week-col')[H.all('.week-colhead').findIndex(h => h.dataset.day === to)];
+
+            press('v');
+            await H.sleep(600);
+            const landed = (await window.joggl.days.get(to)).entries
+              .map(e => ({ h: new Date(e.startTs).getHours(), id: e.id }));
+            await H.clearDays([from, to]);
+            await H.goToday();
+            return JSON.stringify({ popup, marked, landed });`),
+    (v) => {
+      const d = JSON.parse(v);
+      if (d.skip) return 'skipped';
+      // The click said "this day" and nothing else — no popup to eat the Ctrl+V that
+      // follows, which is the whole reason the popup moved to the double click.
+      return d.popup === false && d.marked === true &&
+        d.landed.length === 1 && d.landed[0].h === 9 && d.landed[0].id !== 'mark-src';
+    },
+  );
+
+  await check(
+    'week: the line between two days is stronger than the lines between hours',
+    inWeek(`const col = H.all('.week-col')[1];
+            const hour = col.querySelector('.sched-hour');
+            return JSON.stringify({
+              day: getComputedStyle(col).borderLeftColor,
+              hour: hour ? getComputedStyle(hour).borderTopColor : 'NONE',
+              bg: getComputedStyle(H.q('#week-scroll')).backgroundColor,
+            });`),
+    (v) => {
+      const d = JSON.parse(v);
+      if (d.hour === 'NONE') return `no hour line to compare against`;
+      // Contrast against the grid's own background, not raw darkness: in the dark
+      // theme the stronger line is the lighter one, and a check that only ever
+      // compared luminance downwards would pass in one theme and fail in the other.
+      const lum = (css) => {
+        const [r, g, b] = css.match(/[\d.]+/g).map(Number);
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const bg = lum(d.bg);
+      return d.day !== d.hour && Math.abs(lum(d.day) - bg) > Math.abs(lum(d.hour) - bg);
+    },
+  );
+
+  await check(
     'week: pasting onto a day never loaded this session merges with what is already there',
     inWeek(`const on = (day, hh) => new Date(day + 'T' + String(hh).padStart(2, '0') + ':00:00').getTime();
             // Plain string math on YYYY-MM-DD: no DST edge here, just enough distance
@@ -1537,10 +1736,10 @@ async function weekView() {
 
 async function quickEntry() {
   await check(
-    'clicking the grid opens a visible, focused quick entry at the clicked hour',
+    'double-clicking the grid opens a visible, focused quick entry at the clicked hour',
     `await H.resetDay();
      const y = await H.showHour('13:00');
-     H.q('#schedule-grid').dispatchEvent(new MouseEvent('click', {
+     H.q('#schedule-grid').dispatchEvent(new MouseEvent('dblclick', {
        bubbles: true, cancelable: true, clientX: H.gridX(), clientY: y }));
      await H.sleep(500);
      const el = H.q('.sched-quick-entry');
@@ -2450,6 +2649,38 @@ async function clicks() {
   );
 
   await check(
+    'Ctrl+click adds a block to the selection instead of copying it',
+    `${twoEntries}
+     await H.showHour('09:00');
+     H.click(H.q('.sched-entry-block[data-id="one"]'));
+     await H.sleep(250);
+     // The whole gesture, not a bare click: Ctrl+mousedown starts a copy drag, and a
+     // copy committed on a drag that never moved would eat the click that adds to the
+     // selection — and leave a duplicate behind where the block already was.
+     const block = H.q('.sched-entry-block[data-id="two"]');
+     const box = block.getBoundingClientRect();
+     const x = Math.round(box.left + 10), y = Math.round(box.top + 8);
+     block.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true,
+       button: 0, buttons: 1, clientX: x, clientY: y, ctrlKey: true }));
+     H.mouse(document, 'mouseup', x, y, 0);
+     block.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true,
+       clientX: x, clientY: y, ctrlKey: true }));
+     await H.sleep(400);
+     const selected = ${marked};
+     const ghosts = H.all('.sched-entry-block.ghost').length;
+     const onDay = (await window.joggl.days.get(H.todayKey())).entries.map(e => e.id).sort();
+     await H.resetDay();
+     return JSON.stringify({ selected, ghosts, onDay })`,
+    (v) => {
+      const d = JSON.parse(v);
+      return JSON.stringify(d.selected) ===
+          JSON.stringify(['block:one', 'block:two', 'row:one', 'row:two']) &&
+        d.ghosts === 0 &&
+        JSON.stringify(d.onDay) === JSON.stringify(['one', 'two']);
+    },
+  );
+
+  await check(
     'a rubber band selects what it encloses, and not what it merely crosses',
     `await H.resetDay();
      const at = (hh, mm) => { const d = new Date(); d.setHours(hh, mm || 0, 0, 0); return d.getTime(); };
@@ -2474,7 +2705,11 @@ async function clicks() {
        H.mouse(document, 'mousemove', Math.round(x1 + (x2 - x1) * i / 5), Math.round(y1 + (y2 - y1) * i / 5), 1);
      }
      H.mouse(document, 'mouseup', x2, y2, 0);
-     const pickedByBand = H.all('.sched-entry-block.is-selected').map(e => e.dataset.id);
+     // Jira-side rows take part in the band like anything else, and against a live
+     // site one of them can sit inside the box we drew — correct behaviour, but it
+     // says nothing about enclosure versus crossing, which is what this measures.
+     const ours = () => H.all('.sched-entry-block.is-selected:not(.external)').map(e => e.dataset.id);
+     const pickedByBand = ours();
      // A synthetic mousedown/mouseup pair does not itself produce a native 'click' —
      // the browser fires that as a separate event, and onGridClick is bound to
      // 'click'. Without dispatching this one by hand, the handler this check exists
@@ -2486,7 +2721,7 @@ async function clicks() {
      await H.sleep(200);
      // Read again after the click: the point of the suppression is that the
      // selection the band just made survives it.
-     const pickedAfterClick = H.all('.sched-entry-block.is-selected').map(e => e.dataset.id);
+     const pickedAfterClick = ours();
      const popup = !!H.q('.sched-quick-entry');
      await H.resetDay();
      return JSON.stringify({ pickedByBand, pickedAfterClick, popup })`,
@@ -2520,20 +2755,60 @@ async function clicks() {
      H.mouse(document, 'mouseup', Math.round(box.left + 60), Math.round(box.top + 40), 0);
      await H.sleep(250);
 
-     // And a plain click on empty grid still opens the popup, unchanged.
+     // And a press on empty grid that never moved is still a plain click: it marks
+     // the day and opens nothing, and the double click that follows opens the popup.
      const y = await H.showHour('14:00');
      H.mouse(H.q('#schedule-grid'), 'mousedown', H.gridX(), y, 1);
      H.mouse(document, 'mouseup', H.gridX(), y, 0);
      H.q('#schedule-grid').dispatchEvent(new MouseEvent('click', {
        bubbles: true, cancelable: true, clientX: H.gridX(), clientY: y }));
      await H.sleep(300);
+     const popupOnClick = !!H.q('.sched-quick-entry');
+     H.q('#schedule-grid').dispatchEvent(new MouseEvent('dblclick', {
+       bubbles: true, cancelable: true, clientX: H.gridX(), clientY: y }));
+     await H.sleep(300);
      const popup = !!H.q('.sched-quick-entry');
      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
      await H.resetDay();
-     return JSON.stringify({ bandOnBlock, popup })`,
+     return JSON.stringify({ bandOnBlock, popupOnClick, popup })`,
     (v) => {
       const d = JSON.parse(v);
-      return d.bandOnBlock === false && d.popup === true;
+      return d.bandOnBlock === false && d.popupOnClick === false && d.popup === true;
+    },
+  );
+
+  await check(
+    'day view: a click on empty grid leaves Ctrl+V free to paste',
+    `${twoEntries}
+     const press = (key) => document.body.dispatchEvent(new KeyboardEvent('keydown', {
+       key, ctrlKey: true, bubbles: true, cancelable: true }));
+     H.click(H.q('.sched-entry-block[data-id="one"]'));
+     await H.sleep(250);
+     press('c');
+     // The gesture that used to open a text box over the grid, which then swallowed
+     // the Ctrl+V that followed and typed a "v" into itself.
+     const y = await H.showHour('16:00');
+     H.q('#schedule-grid').dispatchEvent(new MouseEvent('click', {
+       bubbles: true, cancelable: true, clientX: H.gridX(), clientY: y }));
+     await H.sleep(300);
+     const popup = !!H.q('.sched-quick-entry');
+     const focus = document.activeElement?.tagName ?? 'NONE';
+     press('v');
+     await H.sleep(600);
+     const entries = (await window.joggl.days.get(H.todayKey())).entries
+       .map(e => ({ id: e.id, h: new Date(e.startTs).getHours(),
+                    m: new Date(e.startTs).getMinutes() }));
+     await H.resetDay();
+     return JSON.stringify({ popup, focus, entries })`,
+    (v) => {
+      const d = JSON.parse(v);
+      // Three seeded-plus-pasted entries: the two seeded ones and one copy of 'one',
+      // landing back at its own time on the clock — the day it pastes onto is the day
+      // on screen, which the click confirmed rather than changed.
+      const copies = d.entries.filter((e) => e.id !== 'one' && e.id !== 'two');
+      return d.popup === false && d.focus !== 'INPUT' &&
+        d.entries.length === 3 && copies.length === 1 &&
+        copies[0].h === 9 && copies[0].m === 0;
     },
   );
 
@@ -2733,9 +3008,9 @@ async function help() {
       // Every binding the app actually has must appear, or the help is a lie. Exact
       // counts, not a floor: a floor still passes if an entire group is deleted, as
       // long as what's left clears the bar — see SHORTCUTS in help.js for the 8
-      // groups / 33 rows this counts.
+      // groups / 35 rows this counts.
       const wanted = ['Ctrl + L', 'Ctrl + Enter', 'F1', 'T', '[ or ]', 'Page Up / Page Down'];
-      return d.groups.length === 8 && d.rows === 33 &&
+      return d.groups.length === 8 && d.rows === 35 &&
         wanted.every((k) => d.keys.includes(k)) &&
         /Manual Jira entry/.test(d.text) && /Work description/.test(d.text);
     },
@@ -3045,10 +3320,10 @@ async function emptyStates() {
      const grid = H.q('.sched-empty-hint')?.textContent ?? null;
      const swallows = grid === null ? null
        : getComputedStyle(H.q('.sched-empty-hint')).pointerEvents;
-     // With the hint on screen, a click on the grid must still open the popup —
-     // pointer-events: none is what makes that true.
+     // With the hint on screen, a double click on the grid must still open the popup
+     // — pointer-events: none is what makes that true.
      const y = await H.showHour('13:00');
-     H.q('#schedule-grid').dispatchEvent(new MouseEvent('click', {
+     H.q('#schedule-grid').dispatchEvent(new MouseEvent('dblclick', {
        bubbles: true, cancelable: true, clientX: H.gridX(), clientY: y }));
      await H.sleep(500);
      const popup = H.q('.sched-quick-entry-time')?.textContent ?? 'NONE';
@@ -3059,8 +3334,11 @@ async function emptyStates() {
     (v) => {
       const d = JSON.parse(v);
       if (d.skip) return 'skipped';
-      return /drag an issue/i.test(d.panel) && /click an hour/i.test(d.panel) &&
-        d.grid && /click an hour/i.test(d.grid) && d.swallows === 'none' &&
+      // The gesture the hint names has to be the gesture that works: it says
+      // double-click, so a check that accepted "click an hour" would let the two
+      // drift apart again.
+      return /drag an issue/i.test(d.panel) && /double-click an hour/i.test(d.panel) &&
+        d.grid && /double-click an hour/i.test(d.grid) && d.swallows === 'none' &&
         d.popup === '13:00 – 13:30';
     },
   );

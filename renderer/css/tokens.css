@@ -14,6 +14,10 @@
 
   --border: #dfe3e8;
   --border-strong: #c3cad3;
+  /* The line between two days. A step stronger than --border-strong, which draws the
+     hour lines: the hours repeat inside a day, the day boundary is the bigger cut, and
+     drawn at the same weight the eye reads the week as one continuous grid. */
+  --border-day: #9aa3ae;
 
   --accent: #4f46e5;
   --accent-contrast: #ffffff;
@@ -71,6 +75,7 @@
 
     --border: #2b3038;
     --border-strong: #3c434e;
+    --border-day: #5c6573;
 
     --accent: #a5b4fc;
     --accent-contrast: #14161a;
@@ -114,6 +119,7 @@
   --text-faint: #98a1ac;
   --border: #dfe3e8;
   --border-strong: #c3cad3;
+  --border-day: #9aa3ae;
   --accent: #4f46e5;
   --accent-contrast: #ffffff;
   --accent-soft: rgba(79, 70, 229, 0.12);
@@ -147,6 +153,7 @@
   --text-faint: #6b7482;
   --border: #2b3038;
   --border-strong: #3c434e;
+  --border-day: #5c6573;
   --accent: #a5b4fc;
   --accent-contrast: #14161a;
   --accent-soft: rgba(165, 180, 252, 0.16);

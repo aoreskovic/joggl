@@ -183,7 +183,7 @@
         <div class="week-body">
           <div class="week-scroll" id="week-scroll"></div>
           <div class="week-empty-hint" id="week-empty-hint" hidden>
-            Nothing on this week yet — click an hour to add time, or drag an issue onto a day.
+            Nothing on this week yet — double-click an hour to add time, or drag an issue onto a day.
           </div>
         </div>
       </div>
@@ -360,7 +360,9 @@
               worked, or a meeting that is still in the diary.
             </li>
             <li>
-              <strong>Click an empty hour</strong> on the day view and name the task there.
+              <strong>Double-click an empty hour</strong> on the day view and name the task
+              there. A single click only marks the day — which is what a paste needs, and
+              why the popup is not on it.
             </li>
             <li>
               <strong>Drag the edges</strong> of a block to change its start or end, or drag
@@ -438,9 +440,10 @@
               never gets synced.
             </li>
             <li>
-              Every column does what the day view does: click an empty hour, drag and
+              Every column does what the day view does: double-click an empty hour, drag and
               resize blocks, right-click for the menu. <strong>Drag a block sideways</strong>
-              to move it to another day.
+              to move it to another day. A single click on a column marks that day, which is
+              where the next paste lands.
             </li>
             <li>
               <strong>Sync week</strong> sends every pending entry across the columns
@@ -467,9 +470,13 @@
               <strong>Ctrl+C</strong> copies the selection and <strong>Ctrl+V</strong>
               pastes it onto the marked day, keeping every offset: Tuesday and Thursday
               pasted onto a Wednesday arrive on Wednesday and Friday, at the same times
-              on the clock. <strong>Ctrl+drag</strong> copies a single block where you
-              can already see the target. Copies always arrive unsynced, so nothing
-              reaches Jira until you press Sync.
+              on the clock. The marked day is the one you last clicked — a single click on
+              empty grid says which day, and nothing else. <strong>Ctrl+drag</strong> copies
+              where you can already see the target — the whole selection if the block you
+              grab is part of it, keeping the same shape. The originals stay where they
+              are and a dashed ghost of each follows the cursor, and letting Ctrl go
+              before you drop calls the whole thing off. Copies always arrive unsynced,
+              so nothing reaches Jira until you press Sync.
             </li>
             <li>
               <strong>Delete</strong> removes the selection. More than one asks first

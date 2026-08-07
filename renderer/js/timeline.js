@@ -66,7 +66,7 @@ let rovingBlocks = null;
 function roving() {
   rovingBlocks ??= wireRovingList({
     container: () => document.getElementById('schedule-grid'),
-    rowSelector: '.sched-entry-block:not(.live)',
+    rowSelector: '.sched-entry-block:not(.live):not(.ghost)',
     onMove: (block) => select(block.dataset.id),
     resolve: blockNavResolver,
   });
@@ -220,7 +220,7 @@ export function paintDayColumn(host, dayKey, { showLabels = true, emptyHint = tr
   if (emptyHint && entries.length === 0 && !live) {
     const hint = document.createElement('div');
     hint.className = 'sched-empty-hint';
-    hint.textContent = 'Click an hour to add time, or drag an issue here';
+    hint.textContent = 'Double-click an hour to add time, or drag an issue here';
     host.appendChild(hint);
   }
 
@@ -360,21 +360,60 @@ function onQuickEntryOutside(event) {
   if (quickEntryEl && !quickEntryEl.contains(event.target)) hideQuickEntry();
 }
 
+/**
+ * Whose call it is to change the day. Injected at boot, the same way the week view
+ * takes it, because a day change is a Jira read and a repaint — not something this
+ * module owns.
+ */
+let selectDay = null;
+export function registerGridDaySelect(fn) {
+  selectDay = fn;
+}
+
+/**
+ * A click on empty grid: put the selection down, and mark the day it landed in.
+ *
+ * It used to open the quick-entry popup outright, which made the popup unavoidable:
+ * there was no way to say "this day" with the mouse without a text box opening and
+ * swallowing the next keystroke — so Ctrl+C, click on another day, Ctrl+V typed a "v"
+ * into the popup instead of pasting. Marking the day is what a click on empty space
+ * means everywhere else in the app, and it is the answer Ctrl+V needs; the popup is
+ * on the double click, where the other editors already are.
+ */
 export function onGridClick(event) {
-  // A band that just finished produces a click on the grid it was drawn over, and
-  // this function clears the selection and opens the quick-entry popup. Without
-  // standing aside, every band would select and then instantly deselect.
-  if (isBandSuppressed()) return;
-  if (event.target.closest('.sched-entry-block') || event.target.closest('.sched-handle')) return;
-  // The week's column heads are sticky, so once the grid is scrolled they sit *over*
-  // the top of their own column: a click on one is inside the column's rect, and
-  // without this it would open the quick-entry popup at whatever hour is hidden
-  // beneath the head.
-  if (event.target.closest('.week-colhead')) return;
+  if (!ourGridGesture(event)) return;
 
   // Clicking away from every block is how you put the selection down here, the same
   // as the empty space below the entry rows.
   clearSelection();
+
+  // `columnAt` rather than the pointer's column: the click marks the day it landed
+  // in, which in the week view is usually not the day that is already selected.
+  const at = columnAt(event.clientX, event.clientY);
+  if (at === null) return;
+  if (at.dateKey !== state.selectedDate) selectDay?.(at.dateKey);
+}
+
+/**
+ * Everything both grid gestures have to stand aside for.
+ *
+ * A band that just finished produces a click on the grid it was drawn over, and this
+ * would clear the selection the band had just made. A block and a resize handle have
+ * their own gestures. The week's column heads are sticky, so once the grid is
+ * scrolled they sit *over* the top of their own column: a press on one is inside the
+ * column's rect, and without this the popup would open at whatever hour is hidden
+ * beneath the head.
+ */
+function ourGridGesture(event) {
+  if (isBandSuppressed()) return false;
+  if (event.target.closest('.sched-entry-block') || event.target.closest('.sched-handle')) return false;
+  if (event.target.closest('.week-colhead')) return false;
+  return true;
+}
+
+/** A double click on empty grid: the quick-entry popup, at the hour clicked. */
+export function onGridDblClick(event) {
+  if (!ourGridGesture(event)) return;
 
   // `columnAt` rather than `gridTimeAt`: the popup writes to a day log, so it needs
   // the day the click landed in, not the day that happens to be selected when the

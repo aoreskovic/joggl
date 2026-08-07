@@ -58,6 +58,8 @@ import { createIssueLookup, loadIssues, renderTaskList, searchIssues } from './t
 import {
   hideQuickEntry,
   onGridClick,
+  onGridDblClick,
+  registerGridDaySelect,
   renderTimeline,
   scrollToNow,
   updateNowMarkers,
@@ -115,6 +117,9 @@ async function boot() {
     },
   });
   registerWeekView({ selectDate });
+  // A click on empty grid marks the day it landed in, which in the week view is a day
+  // change like any other — the same function the arrows and the calendar call.
+  registerGridDaySelect(selectDate);
   // Restored now that there is more than one view to restore. Month is still not
   // registered, and a stored preference naming it would leave a blank app.
   setActiveView(hasView(state.ui.activeView) ? state.ui.activeView : 'day');
@@ -579,6 +584,9 @@ function wireDayView() {
   $('zoom-out').addEventListener('click', () => changeZoom(-1));
 
   $('schedule-grid').addEventListener('click', onGridClick);
+  // The popup is on the double click, beside the other editors: a single click has to
+  // stay free to say "this day" without a text box opening over it.
+  $('schedule-grid').addEventListener('dblclick', onGridDblClick);
 
   const handle = $('sched-resize-handle');
   const panel = $('right-panel');

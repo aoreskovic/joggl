@@ -79,7 +79,7 @@ export function renderEntryList() {
       // moment there is room to say so.
       children.push(note('Nothing logged yet', 'empty-title'));
       children.push(
-        note('Drag an issue onto the day view, or click an hour there.', 'empty-hint'),
+        note('Drag an issue onto the day view, or double-click an hour there.', 'empty-hint'),
       );
       // The third way in, offered where it is most useful and least findable: the
       // header button is a few words in small type, and this is the moment someone
